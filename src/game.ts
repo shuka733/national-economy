@@ -3,8 +3,8 @@
 // ============================================================
 import type { Game, Ctx } from 'boardgame.io';
 import { INVALID_MOVE } from 'boardgame.io/core';
-import type { GameState, PlayerState, Workplace, Card, BuildingVPDetail, ScoreBreakdown } from './types';
-import { CARD_DEFS, getCardDef, CONSUMABLE_DEF_ID } from './cards';
+import type { GameState, PlayerState, Workplace, Card, BuildingVPDetail, ScoreBreakdown, GameVersion } from './types';
+import { getCardDef, getDeckDefs, CONSUMABLE_DEF_ID } from './cards';
 
 // ============================================================
 // ユーティリティ
@@ -19,9 +19,10 @@ function pushLog(G: GameState, text: string) {
 }
 
 /** デッキ構築 */
-function buildDeck(): Card[] {
+function buildDeck(version: GameVersion): Card[] {
     const cards: Card[] = [];
-    for (const def of CARD_DEFS) {
+    const defs = getDeckDefs(version);
+    for (const def of defs) {
         for (let i = 0; i < def.copies; i++) cards.push({ uid: uid(), defId: def.id });
     }
     // シャッフル (Fisher-Yates)
@@ -92,13 +93,65 @@ function findNextPlayer(G: GameState, ctx: Ctx): string | null {
     return null;
 }
 
+/** 建設コスト計算（変動コスト対応） */
+export function getConstructionCost(p: PlayerState, defId: string, costReduction: number): number {
+    const def = getCardDef(defId);
+    let base = def.cost;
+
+    // Glory: 変動コスト
+    if (def.variableCostType === 'vp_token' && def.variableCostParam !== undefined) {
+        if (p.vpTokens >= def.variableCostParam) {
+            // 変動値の定義が「VPトークンN枚以上でコスト-X」
+            // ここでは簡易的に、Gloryのルールに従いハードコード気味に処理するか、
+            // variableCostParamを「閾値」とし、減少量は都度定義するか？
+            // 蒸気工場(2): VP2 -> -1
+            // 精錬所(5): VP3 -> -2
+            // 温室(6): VP4 -> -2
+            // 機関車(7): VP5 -> -3
+            // 汎用化が難しいのでID分岐またはパラメータ工夫が必要。
+            // 今回は一旦ID分岐またはswitchで実装する
+            if (def.id === 'gl_steam_factory') base -= 1;
+            else if (def.id === 'gl_refinery') base -= 2;
+            else if (def.id === 'gl_greenhouse') base -= 2;
+            else if (def.id === 'gl_locomotive_factory') base -= 3;
+        }
+    }
+
+    return Math.max(0, base - costReduction);
+}
+
 /** 建設可能か（コスト削減込み） */
-function canBuildAnything(p: PlayerState, costReduction: number): boolean {
+function canBuildAnything(p: PlayerState, costReduction: number, isModernism: boolean = false): boolean {
     for (const card of p.hand) {
         if (isConsumable(card)) continue;
-        const def = getCardDef(card.defId);
-        const cost = Math.max(0, def.cost - costReduction);
-        if (p.hand.length - 1 >= cost) return true;
+        const cost = getConstructionCost(p, card.defId, costReduction);
+
+        if (isModernism) {
+            // モダニズム: 消費財は2枚分、その他は1枚分
+            let totalValue = 0;
+            for (const h of p.hand) {
+                if (h.uid === card.uid) continue; // 建設対象は除外
+                totalValue += isConsumable(h) ? 2 : 1;
+            }
+            if (totalValue >= cost) return true;
+        } else {
+            if (p.hand.length - 1 >= cost) return true;
+        }
+    }
+    return false;
+}
+
+/** モダニズム建設が可能か（消費財2枚分カウント） */
+function canBuildModernism(p: PlayerState): boolean {
+    for (const card of p.hand) {
+        if (isConsumable(card)) continue;
+        const cost = getConstructionCost(p, card.defId, 0);
+        let totalValue = 0;
+        for (const h of p.hand) {
+            if (h.uid === card.uid) continue;
+            totalValue += isConsumable(h) ? 2 : 1;
+        }
+        if (totalValue >= cost) return true;
     }
     return false;
 }
@@ -137,6 +190,16 @@ function canPlaceOnBuildingWP(G: GameState, p: PlayerState, defId: string): bool
         case 'pioneer': return canBuildFarmFree(p);
         case 'general_contractor': return canBuildAnything(p, 0);
         case 'dual_construction': return canDualConstruct(p);
+
+        // Glory
+        case 'gl_steam_factory': return p.hand.length >= 2;
+        case 'gl_locomotive_factory': return p.hand.length >= 3;
+        case 'gl_theater': return p.hand.length >= 2;
+        case 'gl_colonist': return canBuildAnything(p, 0);
+        case 'gl_skyscraper': return canBuildAnything(p, 0);
+        case 'gl_modernism_construction': return canBuildModernism(p);
+        case 'gl_teleporter': return canBuildAnything(p, 99);
+
         default: return true;
     }
 }
@@ -144,16 +207,22 @@ function canPlaceOnBuildingWP(G: GameState, p: PlayerState, defId: string): bool
 // ============================================================
 // 初期 & ラウンド職場
 // ============================================================
-function createInitialWorkplaces(numPlayers: number): Workplace[] {
+function createInitialWorkplaces(numPlayers: number, version: GameVersion): Workplace[] {
     const wps: Workplace[] = [
         { id: 'quarry', name: '採石場', effectText: 'カード1枚引く＋スタートプレイヤー', multipleAllowed: false, workers: [], specialEffect: 'start_player_draw', addedAtRound: 0, fromBuilding: false },
         { id: 'mine', name: '鉱山', effectText: 'カード1枚引く（複数配置可）', multipleAllowed: true, workers: [], specialEffect: 'draw1', addedAtRound: 0, fromBuilding: false },
         { id: 'school', name: '学校', effectText: '労働者+1（次ラウンドから）', multipleAllowed: false, workers: [], specialEffect: 'hire_worker', addedAtRound: 0, fromBuilding: false },
         { id: 'carpenter', name: '大工', effectText: '建物を1つ建設', multipleAllowed: false, workers: [], specialEffect: 'build', addedAtRound: 0, fromBuilding: false },
     ];
+
+    // Glory: 遺跡
+    if (version === 'glory') {
+        wps.push({ id: 'ruins', name: '遺跡', effectText: '消費財1枚＋VPトークン1枚を得る', multipleAllowed: false, workers: [], specialEffect: 'ruins', addedAtRound: 0, fromBuilding: false });
+    }
+
     const carpCount = numPlayers <= 2 ? 1 : numPlayers <= 3 ? 2 : 3;
     for (let i = 1; i < carpCount; i++) {
-        wps.push({ ...wps[3], id: `carpenter_${i + 1}`, workers: [] });
+        wps.push({ ...wps[3], id: `carpenter_${i + 1} `, workers: [] });
     }
     return wps;
 }
@@ -184,7 +253,7 @@ function parseSellEffect(se: string): { count: number; amount: number } | null {
 // ============================================================
 // VP計算
 // ============================================================
-function calculateScores(G: GameState): { playerIndex: number; score: number; breakdown: ScoreBreakdown }[] {
+export function calculateScores(G: GameState): { playerIndex: number; score: number; breakdown: ScoreBreakdown }[] {
     const results: { playerIndex: number; score: number; breakdown: ScoreBreakdown }[] = [];
     for (const pid of Object.keys(G.players)) {
         const p = G.players[pid];
@@ -237,6 +306,81 @@ function calculateScores(G: GameState): { playerIndex: number; score: number; br
         const exemptedDebts = hasLawOffice ? Math.min(rawDebts, 5) : 0;
         const effectiveDebts = rawDebts - exemptedDebts;
         const debtVP = effectiveDebts * -3;
+
+        // Glory: VP Tokens (3 tokens = 10 VP, remainder 1pt each)
+        // Set of 3 = 10pts. Remainder = 1pt each ? -> No, rule says "1枚1点" implies remainder is 1pt each.
+        // Rule: "3枚セットごとに10点。端数は1枚1点。"
+        const tokenSets = Math.floor(p.vpTokens / 3);
+        const tokenRemainder = p.vpTokens % 3;
+        const tokenVP = tokenSets * 10 + tokenRemainder;
+        if (tokenVP > 0) {
+            bonusVP += tokenVP;
+            // Add explanation to breakdown if needed, or just include in total bonus
+            buildingDetails.push({ name: 'VPトークン', baseVP: 0, bonusVP: tokenVP });
+        }
+
+        // Glory: Specific card bonuses
+        if (has('gl_consumers_coop')) {
+            // 農業の資産価値20以上 -> +18
+            const agriValue = p.buildings
+                .filter(b => getCardDef(b.card.defId).tags.includes('farm'))
+                .reduce((sum, b) => sum + getCardDef(b.card.defId).vp, 0);
+            if (agriValue >= 20) {
+                bonusVP += 18;
+                buildingDetails.push({ name: '消費者組合ボーナス', baseVP: 0, bonusVP: 18 });
+            }
+        }
+        if (has('gl_guild_hall')) {
+            // 農業と工業両方所持 -> +20
+            const hasFarm = p.buildings.some(b => getCardDef(b.card.defId).tags.includes('farm'));
+            const hasFactory = p.buildings.some(b => getCardDef(b.card.defId).tags.includes('factory'));
+            if (hasFarm && hasFactory) {
+                bonusVP += 20;
+                buildingDetails.push({ name: 'ギルドホールボーナス', baseVP: 0, bonusVP: 20 });
+            }
+        }
+        if (has('gl_ivory_tower')) {
+            // VPトークン7枚以上 -> +22
+            if (p.vpTokens >= 7) {
+                bonusVP += 22;
+                buildingDetails.push({ name: '象牙の塔ボーナス', baseVP: 0, bonusVP: 22 });
+            }
+        }
+        if (has('gl_revolution_square')) {
+            // 人間の労働者5人 -> +18
+            const humanWorkers = p.workers - p.robotWorkers;
+            if (humanWorkers >= 5) {
+                bonusVP += 18;
+                buildingDetails.push({ name: '革命広場ボーナス', baseVP: 0, bonusVP: 18 });
+            }
+        }
+        if (has('gl_harvest_festival')) {
+            // 手札に消費財4枚以上 -> +26
+            const consumables = p.hand.filter(c => isConsumable(c)).length;
+            if (consumables >= 4) {
+                bonusVP += 26;
+                buildingDetails.push({ name: '収穫祭ボーナス', baseVP: 0, bonusVP: 26 });
+            }
+        }
+        if (has('gl_tech_exhibition')) {
+            // 工業の資産価値30以上 -> +24
+            const factoryValue = p.buildings
+                .filter(b => getCardDef(b.card.defId).tags.includes('factory'))
+                .reduce((sum, b) => sum + getCardDef(b.card.defId).vp, 0);
+            if (factoryValue >= 30) {
+                bonusVP += 24;
+                buildingDetails.push({ name: '技術展示会ボーナス', baseVP: 0, bonusVP: 24 });
+            }
+        }
+        if (has('gl_temple_of_purification')) {
+            // 唯一の売却不可 -> +30
+            const unsellables = p.buildings.filter(b => getCardDef(b.card.defId).unsellable);
+            if (unsellables.length === 1 && unsellables[0].card.defId === 'gl_temple_of_purification') {
+                bonusVP += 30;
+                buildingDetails.push({ name: '浄火の神殿ボーナス', baseVP: 0, bonusVP: 30 });
+            }
+        }
+
         const total = buildingVP + moneyVP + debtVP + bonusVP;
         results.push({ playerIndex: parseInt(pid), score: total, breakdown: { buildingVP, moneyVP, debtVP, bonusVP, total, buildingDetails, rawDebts, exemptedDebts, hasLawOffice } });
     }
@@ -258,10 +402,12 @@ function advanceTurnOrPhase(G: GameState, ctx: Ctx, events: any) {
 function startPayday(G: GameState, _ctx: Ctx, _events: any) {
     G.phase = 'payday';
     const wage = getWagePerWorker(G.round);
-    pushLog(G, `--- 💰 給料日（賃金$${wage}/人） ---`);
+    pushLog(G, `-- - 給料日（賃金$${wage}/人） ---`);
     for (let i = 0; i < Object.keys(G.players).length; i++) {
         const p = G.players[String(i)];
-        const total = wage * p.workers;
+        // Glory: ロボットは賃金不要
+        const payingWorkers = Math.max(0, p.workers - p.robotWorkers);
+        const total = wage * payingWorkers;
         if (p.money >= total) {
             p.money -= total;
             G.household += total;
@@ -278,7 +424,7 @@ function startPayday(G: GameState, _ctx: Ctx, _events: any) {
             p.money = 0;
             const debt = total - paid;
             p.unpaidDebts += debt;
-            pushLog(G, `P${i + 1}: 賃金$${total}不足、$${debt}が未払い（負債合計${p.unpaidDebts}枚）`);
+            pushLog(G, `P${i + 1}: 賃金$${total}不足（$${paid}のみ支払）、$${debt}が未払い（負債合計: ${p.unpaidDebts}）`);
         }
     }
     finishPayday(G, _ctx, _events);
@@ -288,7 +434,8 @@ function continuePayday(G: GameState, ctx: Ctx, events: any) {
     const wage = getWagePerWorker(G.round);
     const startIdx = G.paydayState!.currentPlayerIndex;
     const cp = G.players[String(startIdx)];
-    const total = wage * cp.workers;
+    const payingWorkers = Math.max(0, cp.workers - cp.robotWorkers);
+    const total = wage * payingWorkers;
     if (cp.money >= total) {
         cp.money -= total;
         G.household += total;
@@ -299,11 +446,12 @@ function continuePayday(G: GameState, ctx: Ctx, events: any) {
         cp.money = 0;
         const debt = total - paid;
         cp.unpaidDebts += debt;
-        pushLog(G, `P${startIdx + 1}: 賃金$${total}不足、$${debt}が未払い（負債合計${cp.unpaidDebts}枚）`);
+        pushLog(G, `P${startIdx + 1}: 賃金$${total}不足（$${paid}のみ支払）、$${debt}が未払い（負債合計: ${cp.unpaidDebts}）`);
     }
     for (let i = startIdx + 1; i < Object.keys(G.players).length; i++) {
         const p = G.players[String(i)];
-        const t = wage * p.workers;
+        const payingWorkers = Math.max(0, p.workers - p.robotWorkers);
+        const t = wage * payingWorkers;
         if (p.money >= t) {
             p.money -= t;
             G.household += t;
@@ -320,7 +468,7 @@ function continuePayday(G: GameState, ctx: Ctx, events: any) {
             p.money = 0;
             const debt = t - paid;
             p.unpaidDebts += debt;
-            pushLog(G, `P${i + 1}: 賃金$${t}不足、$${debt}が未払い（負債合計${p.unpaidDebts}枚）`);
+            pushLog(G, `P${i + 1}: 賃金$${t}不足（$${paid}のみ支払）、$${debt}が未払い（負債合計: ${p.unpaidDebts}）`);
         }
     }
     G.paydayState = null;
@@ -366,7 +514,7 @@ function finishCleanup(G: GameState, _ctx: Ctx, _events: any) {
     if (G.round >= 9) {
         G.phase = 'gameEnd';
         G.finalScores = calculateScores(G);
-        pushLog(G, '=== 🏆 ゲーム終了！ ===');
+        pushLog(G, '=== ゲーム終了！ ===');
         return;
     }
     advanceRound(G, _events);
@@ -374,11 +522,11 @@ function finishCleanup(G: GameState, _ctx: Ctx, _events: any) {
 
 function advanceRound(G: GameState, events: any) {
     G.round++;
-    pushLog(G, `=== ラウンド ${G.round} 開始 ===`);
+    pushLog(G, `=== ラウンド ${G.round} 開始（賃金: $${getWagePerWorker(G.round)}, 家計: $${G.household}) ===`);
     const newWP = getRoundWorkplace(G.round, G.numPlayers);
     if (newWP) {
         G.publicWorkplaces.push(newWP);
-        pushLog(G, `新しい職場 [${newWP.name}] が追加されました`);
+        pushLog(G, `新しい職場 [${newWP.name}] が追加されました (効果: ${newWP.effectText})`);
     }
 
     // v5: 焼畑は消滅ではなく捨て札へ
@@ -435,6 +583,32 @@ function advanceRound(G: GameState, events: any) {
 // ============================================================
 function applySimpleBuildingEffect(G: GameState, pid: string, defId: string) {
     const p = G.players[pid];
+    // Glory effects
+    if (defId === 'gl_relic') { p.vpTokens += 2; return; }
+    if (defId === 'gl_studio') { p.hand.push(...drawCards(G, 1)); p.vpTokens += 1; return; }
+    if (defId === 'gl_game_cafe') {
+        const isLastAction = Object.values(G.players).every(pl => pl.availableWorkers === 0);
+        // Note: this function is called immediately after placement, so p.availableWorkers is already decremented.
+        // But "last action of the round" means NO ONE has workers left? Or THIS player? 
+        // "ラウンド最後の行動" usually means the very last worker placed in the round.
+        // Check if all players have 0 available workers.
+        if (totalAvailableWorkers(G) === 0) {
+            p.money += 10; G.household -= 10;
+        } else {
+            p.money += 5; G.household -= 5;
+        }
+        return;
+    }
+    if (defId === 'gl_automaton') {
+        if (p.workers < p.maxWorkers) {
+            p.workers++;
+            p.robotWorkers++;
+            p.availableWorkers++; // "即座に使用可能"
+            pushLog(G, `P${parseInt(pid) + 1}は機械人形を獲得し、即座に使用可能になった！`);
+        }
+        return;
+    }
+
     switch (defId) {
         case 'farm': drawConsumables(G, pid, 2); break;
         case 'slash_burn': drawConsumables(G, pid, 5); break;
@@ -452,6 +626,22 @@ function applySimpleBuildingEffect(G: GameState, pid: string, defId: string) {
             break;
         }
         case 'mansion': break;
+
+        // Glory simple effects
+        case 'gl_poultry_farm': {
+            const drawCount = (p.hand.length % 2 !== 0) ? 3 : 2;
+            drawConsumables(G, pid, drawCount);
+            break;
+        }
+        case 'gl_cotton_farm': drawConsumables(G, pid, 5); break;
+        case 'gl_museum': {
+            const amount = (p.hand.length === 5) ? 14 : 7;
+            p.money += amount; G.household -= amount;
+            break;
+        }
+        case 'gl_coal_mine': p.hand.push(...drawCards(G, 5)); break;
+        case 'gl_refinery': p.hand.push(...drawCards(G, 3)); break;
+        case 'gl_greenhouse': drawConsumables(G, pid, 4); break;
     }
 }
 
@@ -469,36 +659,36 @@ export const NationalEconomy: Game<GameState> = {
         },
     },
 
-    setup: ({ ctx }): GameState => {
+    setup: ({ ctx }, setupData): GameState => {
         _uidCounter = 0;
-        const deck = buildDeck();
-        // スタートプレイヤーをランダムに決定
-        const startPlayer = Math.floor(Math.random() * ctx.numPlayers);
+        const version: GameVersion = (setupData && setupData.version) ? setupData.version : 'base';
+        const deck = buildDeck(version);
         const players: { [k: string]: PlayerState } = {};
         for (let i = 0; i < ctx.numPlayers; i++) {
-            // スタート順に基づく初期所持金（1番手=$5, 2番手=$6, ...）
-            const order = (i - startPlayer + ctx.numPlayers) % ctx.numPlayers;
             players[String(i)] = {
                 hand: deck.splice(0, 3),
-                money: 5 + order,
+                money: 5 + i,
                 workers: 2,
                 availableWorkers: 2,
                 buildings: [],
                 unpaidDebts: 0,
                 maxHandSize: 5,
                 maxWorkers: 5,
+                vpTokens: 0,
+                robotWorkers: 0,
             };
         }
-        const initialLog: GameState['log'] = [{ text: `=== ラウンド 1 開始（${ctx.numPlayers}人プレイ, P${startPlayer + 1}からスタート） ===`, round: 1 }];
+        const initialLog: GameState['log'] = [{ text: `=== ラウンド 1 開始（${ctx.numPlayers}人プレイ / Version: ${version}） ===`, round: 1 }];
         return {
+            version,
             players,
-            publicWorkplaces: createInitialWorkplaces(ctx.numPlayers),
-            household: 0, round: 1, phase: 'work', startPlayer,
+            publicWorkplaces: createInitialWorkplaces(ctx.numPlayers, version),
+            household: 0, round: 1, phase: 'work', startPlayer: 0,
             deck, discard: [], consumableCounter: 0,
             numPlayers: ctx.numPlayers,
             discardState: null, buildState: null, paydayState: null, cleanupState: null,
             designOfficeState: null, dualConstructionState: null,
-            activePlayer: startPlayer,
+            activePlayer: 0,
             log: initialLog,
             finalScores: null,
         };
@@ -531,10 +721,32 @@ export const NationalEconomy: Game<GameState> = {
             }
             if (wp.fromBuildingDefId && !canPlaceOnBuildingWP(G, p, wp.fromBuildingDefId)) return INVALID_MOVE;
 
-            wp.workers.push(parseInt(pid));
-            p.availableWorkers--;
+            // Multi-Worker Check
+            const requiredWorkers = wp.specialEffect === 'ruins' ? 0 : 1; // Ruins takes 1? Usually 1.
+            // Check if workplace has specific requirement (only specific cards have >1 in Glory, public WPs are usually 1)
+            // But Glory cards can become workplaces.
+            let workerCost = 1;
+            if (wp.fromBuildingDefId) {
+                const def = getCardDef(wp.fromBuildingDefId);
+                if (def.workerReq) workerCost = def.workerReq;
+            }
+            if (p.availableWorkers < workerCost) return INVALID_MOVE;
 
-            pushLog(G, `P${parseInt(pid) + 1}が[${wp.name}]にワーカーを配置`);
+            wp.workers.push(parseInt(pid));
+            p.availableWorkers -= workerCost;
+
+            pushLog(G, `P${parseInt(pid) + 1}が[${wp.name}]に配置 (残りワーカー: ${p.availableWorkers}, 所持金: $${p.money})`);
+
+            // Glory: Ruins Effect
+            if (wp.specialEffect === 'ruins') {
+                p.hand.push(makeConsumable());
+                p.vpTokens += 1;
+                pushLog(G, `P${parseInt(pid) + 1}が遺跡で消費財とVPトークンを獲得`);
+                G.phase = 'work';
+                advanceTurnOrPhase(G, ctx, events);
+                return;
+            }
+
             return applyPublicWPEffect(G, ctx, events, wp, pid);
         },
 
@@ -550,21 +762,40 @@ export const NationalEconomy: Game<GameState> = {
 
             const defId = slot.card.defId;
             const def = getCardDef(defId);
+            const workerCost = def.workerReq || 1;
+            if (p.availableWorkers < workerCost) return INVALID_MOVE;
 
-            if (def.unsellable && defId !== 'slash_burn') return INVALID_MOVE;
             if (!canPlaceOnBuildingWP(G, p, defId)) return INVALID_MOVE;
 
             slot.workerPlaced = true;
-            p.availableWorkers--;
+            p.availableWorkers -= workerCost;
 
-            pushLog(G, `P${parseInt(pid) + 1}が自分の[${def.name}]にワーカーを配置`);
+            pushLog(G, `P${parseInt(pid) + 1}が自分の[${def.name}]に配置 (残りワーカー: ${p.availableWorkers}, 所持金: $${p.money})`);
             return applyBuildingEffect(G, ctx, events, pid, defId);
+        },
+
+        // ============ デバッグ用 ============
+        debug_setState: ({ G }, payload: any) => {
+            const pid = payload.pid || '0';
+            const p = G.players[pid];
+            if (payload.money !== undefined) p.money = payload.money;
+            if (payload.vpTokens !== undefined) p.vpTokens = payload.vpTokens;
+            if (payload.robotWorkers !== undefined) p.robotWorkers = payload.robotWorkers;
+            if (payload.workers !== undefined) p.workers = payload.workers;
+            if (payload.availableWorkers !== undefined) p.availableWorkers = payload.availableWorkers;
+            if (payload.hand !== undefined) p.hand = payload.hand; // expects Card[]
+            if (payload.buildings !== undefined) p.buildings = payload.buildings; // expects Building[]
+            if (payload.household !== undefined) G.household = payload.household;
         },
 
         // ============ カード捨て選択トグル ============
         toggleDiscard: ({ G }, cardIndex: number) => {
             if (!G.discardState && !G.cleanupState) return INVALID_MOVE;
             const state = G.discardState || G.cleanupState!;
+
+            // Modernism check for over-selection prevention? 
+            // Ideally we should allow toggling and just validate at confirm.
+
             const idx = state.selectedIndices.indexOf(cardIndex);
             if (idx >= 0) state.selectedIndices.splice(idx, 1);
             else state.selectedIndices.push(cardIndex);
@@ -578,15 +809,34 @@ export const NationalEconomy: Game<GameState> = {
                 const p = G.players[String(cs.currentPlayerIndex)];
                 const sorted = [...cs.selectedIndices].sort((a, b) => b - a);
                 for (const i of sorted) { discardCard(G, p.hand[i]); p.hand.splice(i, 1); }
-                pushLog(G, `P${cs.currentPlayerIndex + 1}が精算で${cs.excessCount}枚を捨てた`);
+                pushLog(G, `P${cs.currentPlayerIndex + 1}が精算で${cs.excessCount}枚を捨てた (手札: ${p.hand.length}枚)`);
                 continueCleanup(G, ctx, events);
                 return;
             }
             if (!G.discardState) return INVALID_MOVE;
             const ds = G.discardState;
-            if (ds.selectedIndices.length !== ds.count) return INVALID_MOVE;
             const pid = ctx.currentPlayer;
             const p = G.players[pid];
+
+            // Modernism Check: Consumables count as 2
+            let currentCount = ds.selectedIndices.length;
+            if (ds.reason.includes('モダニズム')) {
+                currentCount = 0;
+                for (const i of ds.selectedIndices) {
+                    if (isConsumable(p.hand[i])) currentCount += 2;
+                    else currentCount += 1;
+                }
+                // Allow over-payment if unavoidable? N.E rules usually exact or min discard.
+                // Assuming exact match or exceed by 1 only if necessary? 
+                // For simplicity, strict check: MUST equal or be close?
+                // Actually, "Consumables count as 2" might mean we can pay 3 cost with 1 Consumable + 1 Card (Total 3). 
+                // But if cost is 3 and we select 2 Consumables (Total 4), is it allowed? 
+                // Usually yes, overpayment is allowed if minimal set. 
+                // NOT implementing complex "minimal" check for now. strict ">= cost" is safer for user progress.
+                if (currentCount < ds.count) return INVALID_MOVE;
+            } else {
+                if (currentCount !== ds.count) return INVALID_MOVE;
+            }
 
             if (ds.excludeCardUid) {
                 const exIdx = p.hand.findIndex(c => c.uid === ds.excludeCardUid);
@@ -594,7 +844,14 @@ export const NationalEconomy: Game<GameState> = {
             }
 
             const sorted = [...ds.selectedIndices].sort((a, b) => b - a);
-            for (const i of sorted) { discardCard(G, p.hand[i]); p.hand.splice(i, 1); }
+            // Actual Discard
+            const discardedCards = [];
+            for (const i of sorted) {
+                const c = p.hand[i];
+                discardedCards.push(c);
+                discardCard(G, c);
+                p.hand.splice(i, 1);
+            }
 
             const action = ds.callbackAction;
             const data = ds.callbackData;
@@ -605,7 +862,7 @@ export const NationalEconomy: Game<GameState> = {
                     const amount = data.amount as number;
                     G.household -= amount;
                     p.money += amount;
-                    pushLog(G, `P${parseInt(pid) + 1}が${ds.count}枚を捨てて$${amount}を獲得`);
+                    pushLog(G, `P${parseInt(pid) + 1}が${ds.count}枚を売却 → $${amount}獲得 (所持金: $${p.money}, 家計: $${G.household})`);
                     G.phase = 'work';
                     advanceTurnOrPhase(G, ctx, events);
                     break;
@@ -613,7 +870,7 @@ export const NationalEconomy: Game<GameState> = {
                 case 'draw': {
                     const count = data.count as number;
                     p.hand.push(...drawCards(G, count));
-                    pushLog(G, `P${parseInt(pid) + 1}が${ds.count}枚を捨てて${count}枚をドロー`);
+                    pushLog(G, `P${parseInt(pid) + 1}が${ds.count}枚を捨てて${count}枚ドロー (手札: ${p.hand.length}枚)`);
                     G.phase = 'work';
                     advanceTurnOrPhase(G, ctx, events);
                     break;
@@ -621,41 +878,77 @@ export const NationalEconomy: Game<GameState> = {
                 case 'restaurant': {
                     G.household -= 15;
                     p.money += 15;
-                    pushLog(G, `P${parseInt(pid) + 1}が[レストラン]で1枚捨てて$15を獲得`);
+                    pushLog(G, `P${parseInt(pid) + 1}が1枚を捨ててレストランを利用 → $15獲得 (所持金: $${p.money}, 家計: $${G.household})`);
+                    G.phase = 'work';
+                    advanceTurnOrPhase(G, ctx, events);
+                    break;
+                }
+                case 'money_20': {
+                    p.money += 20;
+                    G.household -= 20;
+                    pushLog(G, `P${parseInt(pid) + 1}が2枚を捨てて劇場を利用 → $20獲得`);
                     G.phase = 'work';
                     advanceTurnOrPhase(G, ctx, events);
                     break;
                 }
                 case 'build_cost': {
-                    const buildUid = data.buildCardUid as string;
-                    const bi = p.hand.findIndex(c => c.uid === buildUid);
-                    if (bi >= 0) {
-                        const card = p.hand.splice(bi, 1)[0];
-                        p.buildings.push({ card, workerPlaced: false });
-                        applyBuildPassiveEffect(p, card.defId);
-                        pushLog(G, `P${parseInt(pid) + 1}が[${getCardDef(card.defId).name}]を建設`);
+                    const bd = data as { buildCardUid: string; drawAfterBuild: number };
+                    // Find card based on UID (hand might have shifted if we didn't use UID, but we do)
+                    // Wait, previous logic spliced from hand... 
+                    // Need to find WHERE the build card is. It was NOT discarded.
+                    // But we just spliced Discards. The indices in hand changed.
+                    // We need to find the card by UID again.
+                    const cardIdx = p.hand.findIndex(c => c.uid === bd.buildCardUid);
+                    if (cardIdx < 0) { G.phase = 'work'; advanceTurnOrPhase(G, ctx, events); break; }
+
+                    const card = p.hand.splice(cardIdx, 1)[0];
+                    p.buildings.push({ card, workerPlaced: false });
+                    applyBuildPassiveEffect(G, pid, card.defId);
+
+                    const def = getCardDef(card.defId);
+                    let logMsg = `P${parseInt(pid) + 1}が[${def.name}]を建設`;
+
+                    // Handle Post-Build Effects
+                    const buildAction = G.buildState?.action;
+
+                    if (bd.drawAfterBuild > 0) {
+                        const drawn = drawCards(G, bd.drawAfterBuild);
+                        p.hand.push(...drawn);
+                        logMsg += ` & ${drawn.length}枚ドロー`;
                     }
-                    const drawAfter = data.drawAfterBuild as number;
-                    if (drawAfter > 0) p.hand.push(...drawCards(G, drawAfter));
+
+                    if (buildAction === 'gl_colonist') {
+                        drawConsumables(G, pid, 1);
+                        logMsg += ` & 消費財1枚獲得`;
+                    }
+                    else if (buildAction === 'gl_skyscraper') {
+                        if (p.hand.length === 0) {
+                            const drawn = drawCards(G, 2);
+                            p.hand.push(...drawn);
+                            logMsg += ` & (手札0枚ボーナス)2枚ドロー`;
+                        }
+                    }
+
+                    pushLog(G, logMsg);
+
                     G.buildState = null;
                     G.phase = 'work';
                     advanceTurnOrPhase(G, ctx, events);
                     break;
                 }
                 case 'dual_build_cost': {
-                    const uid1 = data.buildCardUid1 as string;
-                    const uid2 = data.buildCardUid2 as string;
-                    const i1 = p.hand.findIndex(c => c.uid === uid1);
-                    const i2 = p.hand.findIndex(c => c.uid === uid2);
-                    const indices = [i1, i2].filter(x => x >= 0).sort((a, b) => b - a);
+                    const bd = data as { buildCardUid1: string; buildCardUid2: string };
                     const names: string[] = [];
-                    for (const idx of indices) {
-                        const card = p.hand.splice(idx, 1)[0];
-                        p.buildings.push({ card, workerPlaced: false });
-                        applyBuildPassiveEffect(p, card.defId);
-                        names.push(getCardDef(card.defId).name);
+                    for (const uid of [bd.buildCardUid1, bd.buildCardUid2]) {
+                        const idx = p.hand.findIndex(c => c.uid === uid);
+                        if (idx >= 0) {
+                            const c = p.hand.splice(idx, 1)[0];
+                            p.buildings.push({ card: c, workerPlaced: false });
+                            applyBuildPassiveEffect(G, pid, c.defId);
+                            names.push(getCardDef(c.defId).name);
+                        }
                     }
-                    pushLog(G, `P${parseInt(pid) + 1}が[二胡市建設]で[${names.join(']と[')}]を建設`);
+                    pushLog(G, `P${parseInt(pid) + 1}が[二胡市建設]で[${names.join(']と[')}]を建設 (手札: ${p.hand.length}枚)`);
                     G.dualConstructionState = null;
                     G.buildState = null;
                     G.phase = 'work';
@@ -680,11 +973,11 @@ export const NationalEconomy: Game<GameState> = {
 
             if (bs.action === 'pioneer' && !def.tags.includes('farm')) return INVALID_MOVE;
 
-            const actualCost = Math.max(0, def.cost - bs.costReduction);
+            const actualCost = getConstructionCost(p, card.defId, bs.costReduction);
             if (bs.action === 'pioneer') {
                 p.hand.splice(cardIndex, 1);
                 p.buildings.push({ card, workerPlaced: false });
-                applyBuildPassiveEffect(p, card.defId);
+                applyBuildPassiveEffect(G, pid, card.defId);
                 pushLog(G, `P${parseInt(pid) + 1}が[開拓民]で[${def.name}]を無料建設`);
                 G.buildState = null;
                 G.phase = 'work';
@@ -692,14 +985,42 @@ export const NationalEconomy: Game<GameState> = {
                 return;
             }
 
-            if (p.hand.length - 1 < actualCost) return INVALID_MOVE;
+            if (bs.action === 'gl_modernism_construction') {
+                let totalValue = 0;
+                for (const h of p.hand) {
+                    if (h.uid === card.uid) continue;
+                    totalValue += isConsumable(h) ? 2 : 1;
+                }
+                if (totalValue < actualCost) return INVALID_MOVE;
+            } else {
+                if (p.hand.length - 1 < actualCost) return INVALID_MOVE;
+            }
 
             if (actualCost === 0) {
                 p.hand.splice(cardIndex, 1);
                 p.buildings.push({ card, workerPlaced: false });
-                applyBuildPassiveEffect(p, card.defId);
-                if (bs.drawAfterBuild > 0) p.hand.push(...drawCards(G, bs.drawAfterBuild));
-                pushLog(G, `P${parseInt(pid) + 1}が[${def.name}]を建設（コスト0）`);
+                applyBuildPassiveEffect(G, pid, card.defId);
+
+                let logMsg = `P${parseInt(pid) + 1}が[${def.name}]を建設（コスト0）`;
+
+                if (bs.drawAfterBuild > 0) {
+                    const drawn = drawCards(G, bs.drawAfterBuild);
+                    p.hand.push(...drawn);
+                    logMsg += ` & ${drawn.length}枚ドロー`;
+                }
+
+                if (bs.action === 'gl_colonist') {
+                    drawConsumables(G, pid, 1);
+                    logMsg += ` & 消費財1枚獲得`;
+                } else if (bs.action === 'gl_skyscraper') {
+                    if (p.hand.length === 0) {
+                        const drawn = drawCards(G, 2);
+                        p.hand.push(...drawn);
+                        logMsg += ` & (手札0枚ボーナス)2枚ドロー`;
+                    }
+                }
+
+                pushLog(G, logMsg);
                 G.buildState = null;
                 G.phase = 'work';
                 advanceTurnOrPhase(G, ctx, events);
@@ -707,9 +1028,13 @@ export const NationalEconomy: Game<GameState> = {
             }
 
             G.phase = 'discard';
+            const reason = (bs.action === 'gl_modernism_construction')
+                ? `${def.name}の建設（モダニズム：消費財は2コスト分）`
+                : `${def.name}の建設コスト（${actualCost}枚）`;
+
             G.discardState = {
                 count: actualCost,
-                reason: `${def.name}の建設コスト（${actualCost}枚）`,
+                reason: reason,
                 selectedIndices: [],
                 callbackAction: 'build_cost',
                 callbackData: { buildCardUid: card.uid, drawAfterBuild: bs.drawAfterBuild },
@@ -929,7 +1254,7 @@ export const NationalEconomy: Game<GameState> = {
                 for (const ci of sorted) {
                     const c = p.hand.splice(ci, 1)[0];
                     p.buildings.push({ card: c, workerPlaced: false });
-                    applyBuildPassiveEffect(p, c.defId);
+                    applyBuildPassiveEffect(G, pid, c.defId);
                     names.push(getCardDef(c.defId).name);
                 }
                 pushLog(G, `P${parseInt(pid) + 1}が[二胡市建設]で[${names.join(']と[')}]を建設（コスト0）`);
@@ -1021,6 +1346,37 @@ export const NationalEconomy: Game<GameState> = {
             if (G.phase !== 'payday' || !G.paydayState) return INVALID_MOVE;
             continuePayday(G, ctx, events);
         },
+
+        // ============ 農村: 選択 ============
+        selectVillageOption: ({ G, ctx, events }, option: 'draw_consumable' | 'draw_building') => {
+            if (G.phase !== 'choice_village') return INVALID_MOVE;
+            const pid = ctx.currentPlayer;
+            const p = G.players[pid];
+
+            if (option === 'draw_consumable') {
+                drawConsumables(G, pid, 2);
+                pushLog(G, `P${parseInt(pid) + 1}が[農村]で消費財2枚を獲得`);
+                G.phase = 'work';
+                advanceTurnOrPhase(G, ctx, events);
+            } else if (option === 'draw_building') {
+                const consumables = p.hand.filter(c => isConsumable(c));
+                if (consumables.length < 2) return INVALID_MOVE;
+
+                // 消費財を2枚捨てる
+                let discarded = 0;
+                for (let i = p.hand.length - 1; i >= 0 && discarded < 2; i--) {
+                    if (isConsumable(p.hand[i])) {
+                        p.hand.splice(i, 1); // 消費財は捨て札に行かない
+                        discarded++;
+                    }
+                }
+                const drawn = drawCards(G, 3);
+                p.hand.push(...drawn);
+                pushLog(G, `P${parseInt(pid) + 1}が[農村]で消費財2枚を捨てて建物カード${drawn.length}枚を獲得`);
+                G.phase = 'work';
+                advanceTurnOrPhase(G, ctx, events);
+            }
+        },
     },
 
     // オンラインプレイ用: 他プレイヤーの手札を隠蔽
@@ -1049,7 +1405,6 @@ function applyPublicWPEffect(G: GameState, ctx: Ctx, events: any, wp: Workplace,
 
     const sellInfo = parseSellEffect(wp.specialEffect);
     if (sellInfo) {
-        G.activePlayer = parseInt(pid);
         G.phase = 'discard';
         G.discardState = {
             count: sellInfo.count,
@@ -1082,7 +1437,6 @@ function applyPublicWPEffect(G: GameState, ctx: Ctx, events: any, wp: Workplace,
             p.workers = 5;
             break;
         case 'build':
-            G.activePlayer = parseInt(pid);
             G.phase = 'build';
             G.buildState = { costReduction: 0, drawAfterBuild: 0, action: 'build' };
             return;
@@ -1108,7 +1462,6 @@ function applyBuildingEffect(G: GameState, ctx: Ctx, events: any, pid: string, d
                 advanceTurnOrPhase(G, ctx, events);
                 return;
             }
-            G.activePlayer = parseInt(pid);
             G.phase = 'designOffice';
             G.designOfficeState = { revealedCards: revealed };
             return;
@@ -1117,12 +1470,16 @@ function applyBuildingEffect(G: GameState, ctx: Ctx, events: any, pid: string, d
         case 'farm': case 'slash_burn': case 'coffee_shop':
         case 'orchard': case 'large_farm': case 'steel_mill': case 'chemical_plant':
         case 'mansion':
+        // Glory Simple Effects
+        case 'gl_relic': case 'gl_studio': case 'gl_game_cafe': case 'gl_automaton':
+        case 'gl_poultry_farm': case 'gl_cotton_farm':
+        case 'gl_coal_mine': case 'gl_refinery': case 'gl_greenhouse':
+        case 'gl_museum': case 'gl_monument':
             applySimpleBuildingEffect(G, pid, defId);
             advanceTurnOrPhase(G, ctx, events);
             return;
 
         case 'factory':
-            G.activePlayer = parseInt(pid);
             G.phase = 'discard';
             G.discardState = {
                 count: 2, reason: '工場（2枚捨て→4枚引く）',
@@ -1130,7 +1487,6 @@ function applyBuildingEffect(G: GameState, ctx: Ctx, events: any, pid: string, d
             };
             return;
         case 'auto_factory':
-            G.activePlayer = parseInt(pid);
             G.phase = 'discard';
             G.discardState = {
                 count: 3, reason: '自動車工場（3枚捨て→7枚引く）',
@@ -1139,7 +1495,6 @@ function applyBuildingEffect(G: GameState, ctx: Ctx, events: any, pid: string, d
             return;
 
         case 'restaurant':
-            G.activePlayer = parseInt(pid);
             G.phase = 'discard';
             G.discardState = {
                 count: 1, reason: 'レストラン（1枚捨て→家計$15）',
@@ -1148,23 +1503,67 @@ function applyBuildingEffect(G: GameState, ctx: Ctx, events: any, pid: string, d
             return;
 
         case 'construction_co':
-            G.activePlayer = parseInt(pid);
             G.phase = 'build';
             G.buildState = { costReduction: 1, drawAfterBuild: 0, action: 'construction_co' };
             return;
         case 'pioneer':
-            G.activePlayer = parseInt(pid);
             G.phase = 'build';
             G.buildState = { costReduction: 99, drawAfterBuild: 0, action: 'pioneer' };
             return;
         case 'general_contractor':
-            G.activePlayer = parseInt(pid);
             G.phase = 'build';
             G.buildState = { costReduction: 0, drawAfterBuild: 2, action: 'general_contractor' };
             return;
 
+        // Glory Complex Effects
+        case 'gl_village':
+            G.phase = 'choice_village';
+            pushLog(G, `P${parseInt(pid) + 1}が[農村]の効果を選択中...`);
+            return;
+        case 'gl_colonist':
+            G.phase = 'build';
+            // drawAfterBuild is for Building Cards. We need Consumable. 
+            // Hack: Use specific action name to handle consumable draw in generic build callback if possible, 
+            // or we might need to extend BuildState.
+            // For now let's rely on 'action' string to handle post-build effect.
+            G.buildState = { costReduction: 0, drawAfterBuild: 0, action: 'gl_colonist' };
+            return;
+        case 'gl_skyscraper':
+            G.phase = 'build';
+            G.buildState = { costReduction: 0, drawAfterBuild: 0, action: 'gl_skyscraper' };
+            return;
+        case 'gl_modernism_construction':
+            G.phase = 'build';
+            G.buildState = { costReduction: 0, drawAfterBuild: 0, action: 'gl_modernism_construction' };
+            return;
+        case 'gl_teleporter':
+            G.phase = 'build';
+            G.buildState = { costReduction: 99, drawAfterBuild: 0, action: 'gl_teleporter' };
+            return;
+
+        case 'gl_steam_factory':
+            G.phase = 'discard';
+            G.discardState = {
+                count: 2, reason: '蒸気工場（2枚捨て→4枚引く）',
+                selectedIndices: [], callbackAction: 'draw', callbackData: { count: 4 },
+            };
+            return;
+        case 'gl_locomotive_factory':
+            G.phase = 'discard';
+            G.discardState = {
+                count: 3, reason: '機関車工場（3枚捨て→7枚引く）',
+                selectedIndices: [], callbackAction: 'draw', callbackData: { count: 7 },
+            };
+            return;
+        case 'gl_theater':
+            G.phase = 'discard';
+            G.discardState = {
+                count: 2, reason: '劇場（2枚捨て→$20）',
+                selectedIndices: [], callbackAction: 'money_20', callbackData: {},
+            };
+            return;
+
         case 'dual_construction':
-            G.activePlayer = parseInt(pid);
             G.phase = 'dualConstruction';
             G.dualConstructionState = { selectedCardIndices: [] };
             return;
@@ -1174,8 +1573,28 @@ function applyBuildingEffect(G: GameState, ctx: Ctx, events: any, pid: string, d
     }
 }
 
-/** 建設時のパッシブ効果（倉庫、社宅など） */
-function applyBuildPassiveEffect(p: PlayerState, defId: string) {
+/** 建設時の即時効果（倉庫、社宅、機械人形、遺物など） */
+function applyBuildPassiveEffect(G: GameState, pid: string, defId: string) { // Changed signature to take G and pid
+    const p = G.players[pid];
     if (defId === 'warehouse') p.maxHandSize += 4;
     if (defId === 'company_housing') { p.maxWorkers++; }
+
+    // Glory Immediate Effects
+    if (defId === 'gl_automaton') {
+        if (p.workers < p.maxWorkers) {
+            p.workers++;
+            p.robotWorkers++;
+            p.availableWorkers++;
+            pushLog(G, `P${parseInt(pid) + 1}は機械人形を獲得`);
+        }
+    }
+    if (defId === 'gl_relic') {
+        p.vpTokens += 2;
+        pushLog(G, `P${parseInt(pid) + 1}は遺物を建設してVPトークン2枚を獲得`);
+    }
+    if (defId === 'gl_studio') {
+        p.hand.push(...drawCards(G, 1));
+        p.vpTokens += 1;
+        pushLog(G, `P${parseInt(pid) + 1}は工房を建設してカード1枚とVPトークン1枚を獲得`);
+    }
 }

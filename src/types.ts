@@ -14,6 +14,10 @@ export interface CardDef {
     unsellable: boolean;
     consumeOnUse: boolean;
     effectText: string;
+    // Glory Expansion
+    workerReq?: number; // 複数ワーカー配置 (default: 1)
+    variableCostType?: 'vp_token' | 'hand_odd' | 'hand_zero';
+    variableCostParam?: number; // 閾値など
 }
 
 export interface Card {
@@ -98,14 +102,20 @@ export interface PlayerState {
     unpaidDebts: number;
     maxHandSize: number;
     maxWorkers: number;
+    // Glory Expansion
+    vpTokens: number;
+    robotWorkers: number;
 }
 
+export type GameVersion = 'base' | 'glory';
+
 export interface GameState {
+    version: GameVersion;
     players: { [key: string]: PlayerState };
     publicWorkplaces: Workplace[];
     household: number;
     round: number;
-    phase: 'work' | 'discard' | 'build' | 'payday' | 'cleanup' | 'gameEnd' | 'designOffice' | 'dualConstruction';
+    phase: 'work' | 'discard' | 'build' | 'payday' | 'cleanup' | 'gameEnd' | 'designOffice' | 'dualConstruction' | 'choice_village' | 'choice_automaton' | 'choice_modernism' | 'choice_teleporter' | 'choice_skyscraper';
     startPlayer: number;
     deck: Card[];
     discard: Card[];

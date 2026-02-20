@@ -1,28 +1,28 @@
 // ============================================================
-// Board.tsx  –  メインUI (v5: ゲームログ追加)
+// Board.tsx  –  メインUI (v7: プレミアムUI + CPU対戦)
 // ============================================================
 import React, { useState, useRef, useEffect } from 'react';
-import type { Ctx } from 'boardgame.io';
-import type { GameState, Card } from './types';
+import type { BoardProps } from 'boardgame.io/react';
+import type { GameState, Card, PlayerState } from './types';
 import { getCardDef, CONSUMABLE_DEF_ID } from './cards';
-
-// Board用の汎用Props（boardgame.io Client経由でも直接渡しでも使える）
-interface GameBoardProps {
-    G: GameState;
-    ctx: Ctx;
-    moves: Record<string, (...args: any[]) => void>;
-    playerID?: string | null;
-}
+import { getConstructionCost } from './game';
+import { decideCPUMove } from './bots';
+import type { CPUConfig } from './App';
+import { soundManager } from './SoundManager';
+import { SoundSettings } from './SoundSettings';
+import { CPUSettings } from './CPUSettings';
+import {
+    IconMoney, IconWorker, IconHouse, IconDeck, IconDiscard, IconLog,
+    IconHammer, IconRobot, IconPlayer, IconSearch, IconTrash, IconPayment,
+    IconTrophy, IconSoundOn, IconSoundOff, TagFarm, TagFactory, TagLock
+} from './components/Icons';
 
 const isConsumable = (c: Card) => c.defId === CONSUMABLE_DEF_ID;
+/** P2P: playerViewで隠されたカードの判定 */
 const isHidden = (c: Card) => c.defId === 'HIDDEN';
-const cName = (defId: string) => {
-    if (defId === 'HIDDEN') return '???';
-    if (defId === CONSUMABLE_DEF_ID) return '消費財';
-    return getCardDef(defId).name;
-};
+const cName = (defId: string) => defId === CONSUMABLE_DEF_ID ? '消費財' : getCardDef(defId).name;
 const cTags = (defId: string) => {
-    if (defId === CONSUMABLE_DEF_ID || defId === 'HIDDEN') return '';
+    if (defId === CONSUMABLE_DEF_ID) return '';
     const d = getCardDef(defId);
     const t: string[] = [];
     if (d.tags.includes('farm')) t.push('※農園');
@@ -31,9 +31,35 @@ const cTags = (defId: string) => {
     return t.join(' ');
 };
 const cEffect = (defId: string) => {
-    if (defId === CONSUMABLE_DEF_ID || defId === 'HIDDEN') return '';
+    if (defId === CONSUMABLE_DEF_ID) return '';
     return getCardDef(defId).effectText;
 };
+
+/** タグバッジ JSX */
+function TagBadges({ defId }: { defId: string }) {
+    if (defId === CONSUMABLE_DEF_ID) return null;
+    const d = getCardDef(defId);
+    return (
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
+            {d.tags.includes('farm') && <span className="tag-badge tag-farm"><TagFarm size={10} /> 農園</span>}
+            {d.tags.includes('factory') && <span className="tag-badge tag-factory"><TagFactory size={10} /> 工場</span>}
+            {d.unsellable && <span className="tag-badge tag-lock"><TagLock size={10} /> 売却不可</span>}
+        </div>
+    );
+}
+
+/** CPU自動プレイ用: GameStateのフェーズ・選択状態を一意表現する文字列を生成
+ *  P2Pの非同期更新で同じstateに対してmoveを重複発行するのを防止する */
+function computeCpuStateSignature(G: GameState, activePid: string): string {
+    const parts: string[] = [G.phase, String(G.round), String(G.activePlayer), activePid, String(G.log.length)];
+    if (G.discardState) parts.push('ds', String(G.discardState.count), ...G.discardState.selectedIndices.map(String));
+    if (G.paydayState) parts.push('ps', String(G.paydayState.currentPlayerIndex), ...G.paydayState.selectedBuildingIndices.map(String));
+    if (G.cleanupState) parts.push('cs', String(G.cleanupState.currentPlayerIndex), ...G.cleanupState.selectedIndices.map(String));
+    if (G.dualConstructionState) parts.push('dc', ...G.dualConstructionState.selectedCardIndices.map(String));
+    if (G.designOfficeState) parts.push('do', String(G.designOfficeState.revealedCards.length));
+    if (G.buildState) parts.push('bs', G.buildState.action);
+    return parts.join('|');
+}
 
 function getWagePerWorker(r: number): number {
     if (r <= 2) return 2;
@@ -43,37 +69,119 @@ function getWagePerWorker(r: number): number {
 }
 
 // ============================================================
-// キャンセルボタン
+// メインBoard
 // ============================================================
-function CancelButton({ onClick }: { onClick: () => void }) {
-    return (
-        <button onClick={onClick}
-            className="absolute top-3 right-3 bg-gray-600 hover:bg-gray-500 text-gray-200 px-3 py-1.5 rounded-lg text-sm font-medium transition shadow-md hover:shadow-lg flex items-center gap-1">
-            ✕ キャンセル
-        </button>
-    );
-}
-
-export function Board({ G, ctx, moves, playerID }: GameBoardProps) {
+export function Board({ G, ctx, moves, playerID, cpuConfig }: BoardProps<GameState> & { cpuConfig?: CPUConfig }) {
     const [showDiscard, setShowDiscard] = useState(false);
     const [showLog, setShowLog] = useState(false);
+    const [muted, setMuted] = useState(soundManager.getSettings().isMuted);
+    const [showSettings, setShowSettings] = useState(false);
+    const [showCpuSettings, setShowCpuSettings] = useState(false);
     const curPid = ctx.currentPlayer;
     const curIdx = parseInt(curPid);
     const wage = getWagePerWorker(G.round);
-    // オンライン: playerIDがあれば自分のID、なければホットシート（currentPlayer）
+
+    // ====== P2P対応 ======
+    // playerIDがあればP2P（オンライン）モード、なければホットシート/CPU対戦
     const myPid = playerID ?? curPid;
     const isOnline = playerID !== null && playerID !== undefined;
 
-    // モーダルフェーズ中は G.activePlayer が操作者
+    // モーダルフェーズ中の操作者判定
+    // payday/cleanup は G.activePlayer で順番に処理するため G.activePlayer を使用
+    // build/discard/designOffice/dualConstruction は手番プレイヤーの操作なので ctx.currentPlayer を使用
     const modalPhases = ['payday', 'cleanup', 'discard', 'build', 'designOffice', 'dualConstruction'];
     const isModalPhase = modalPhases.includes(G.phase);
-    const effectivePlayer = isModalPhase ? String(G.activePlayer) : curPid;
+    const effectivePlayer = (G.phase === 'payday' || G.phase === 'cleanup')
+        ? String(G.activePlayer) : curPid;
     const isMyTurn = effectivePlayer === myPid;
+
+
+
+
+    // ====== オーディオ管理 (BGM & Log Watcher) ======
+    useEffect(() => {
+        soundManager.playBGM();
+    }, []);
+
+    const lastLogLen = useRef(G.log.length);
+    useEffect(() => {
+        if (G.log.length > lastLogLen.current) {
+            // 最新のログを取得してSFXを再生
+            const entry = G.log[G.log.length - 1];
+            const text = entry.text;
+
+            if (text.includes('=== Round')) soundManager.playSFX('round_start');
+            else if (text.includes('給料日')) soundManager.playSFX('payday'); // 給料日開始
+            else if (text.includes('未払い')) soundManager.playSFX('debt');
+            else if (text.includes('売却')) soundManager.playSFX('sell');
+            else if (text.includes('建設')) {
+                if (text.includes('自動車工場') || text.includes('製鉄所') || text.includes('ゼネコン') || text.includes('二胡市')) {
+                    soundManager.playSFX('build_heavy');
+                } else {
+                    soundManager.playSFX('build');
+                }
+            }
+            else if (text.includes('引く')) soundManager.playSFX('draw');
+            else if (text.includes('家計')) soundManager.playSFX('coin_get');
+            else if (text.includes('支払い')) soundManager.playSFX('coin_pay');
+            else if (text.includes('スタートプレイヤー')) soundManager.playSFX('marker');
+            else if (text.includes('配置')) soundManager.playSFX('place');
+            else if (text.includes('捨て')) soundManager.playSFX('discard');
+            else if (text.includes('キャンセル')) soundManager.playSFX('cancel');
+
+            lastLogLen.current = G.log.length;
+        }
+    }, [G.log]);
+
+    // ====== CPU自動プレイ ======
+    // P2P重複move防止: 同じstateに対してmoveを2回以上発行しないためのガード
+    const cpuMoveSignatureRef = useRef<string>('');
+
+    useEffect(() => {
+        if (!cpuConfig?.enabled) return;
+        if (G.phase === 'gameEnd') return;
+        if (showCpuSettings) return; // 設定中は停止
+
+        // 給料日・精算フェーズでは activePlayer を使う
+        let activePid = curPid;
+        if (G.phase === 'payday' && G.paydayState) {
+            activePid = String(G.paydayState.currentPlayerIndex);
+        } else if (G.phase === 'cleanup' && G.cleanupState) {
+            activePid = String(G.cleanupState.currentPlayerIndex);
+        }
+
+        if (!cpuConfig.cpuPlayers.includes(activePid)) return;
+
+        // stateSignature: トグル系フェーズの状態を一意に表す文字列
+        // P2Pではmove発行後にGが非同期で更新されるため、
+        // 同じsignatureに対して再度moveを発行するのを防ぐ
+        const sig = computeCpuStateSignature(G, activePid);
+        if (sig === cpuMoveSignatureRef.current) return;
+
+        // SoundManagerから常に最新の設定を取得（cpuConfig.moveDelayは無視）
+        const delay = soundManager.getSettings().cpuMoveDelay;
+        const timer = setTimeout(() => {
+            // タイマー発火時にも再チェック（レース条件防止）
+            if (sig === cpuMoveSignatureRef.current) return;
+
+            const action = decideCPUMove(G, activePid, cpuConfig.difficulty);
+            if (action) {
+                const moveFn = (moves as any)[action.moveName];
+                if (moveFn) {
+                    // move発行前にsignatureを記録（重複防止）
+                    cpuMoveSignatureRef.current = sig;
+                    moveFn(...action.args);
+                }
+            }
+        }, delay);
+
+        return () => clearTimeout(timer);
+    }, [G, curPid, cpuConfig, moves, showCpuSettings]);
 
     // ゲーム終了
     if (G.phase === 'gameEnd' && G.finalScores) return <GameOver G={G} />;
 
-    // P2Pモード: 自分のターンでない場合のモーダル系は「待機中」表示にする
+    // P2P: 自分のターンでない場合のモーダル系は「待機中」表示
     if (isOnline && isModalPhase && !isMyTurn) {
         const phaseLabels: Record<string, string> = {
             payday: '💰 給料日の処理',
@@ -84,12 +192,12 @@ export function Board({ G, ctx, moves, playerID }: GameBoardProps) {
             dualConstruction: '🏗️ 二胡市建設',
         };
         return (
-            <div className="min-h-screen bg-gray-900 text-gray-100 flex items-center justify-center">
-                <div className="bg-gray-800 rounded-2xl p-8 max-w-md w-full text-center">
-                    <div className="text-4xl mb-4 animate-pulse">⏳</div>
-                    <h2 className="text-xl font-bold text-amber-400 mb-2">P{G.activePlayer + 1} が操作中...</h2>
-                    <p className="text-gray-400">{phaseLabels[G.phase] || G.phase}を行っています</p>
-                    <p className="text-gray-500 text-sm mt-4">しばらくお待ちください</p>
+            <div className="game-bg" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', padding: 16 }}>
+                <div className="glass-card animate-slide-up" style={{ padding: 40, maxWidth: 420, width: '100%', textAlign: 'center' }}>
+                    <div style={{ fontSize: 48, marginBottom: 16, animation: 'pulse 2s ease-in-out infinite' }}>⏳</div>
+                    <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--gold)', marginBottom: 8 }}>P{G.activePlayer + 1} が操作中...</h2>
+                    <p style={{ color: 'var(--text-secondary)', marginBottom: 4 }}>{phaseLabels[G.phase] || G.phase}を行っています</p>
+                    <p style={{ color: 'var(--text-dim)', fontSize: 12, marginTop: 16 }}>しばらくお待ちください</p>
                 </div>
             </div>
         );
@@ -111,182 +219,308 @@ export function Board({ G, ctx, moves, playerID }: GameBoardProps) {
     if (G.phase === 'dualConstruction' && G.dualConstructionState) return <DualConstructionUI G={G} moves={moves} pid={curPid} />;
 
     return (
-        <div className="min-h-screen bg-gray-900 text-gray-100 p-3 text-sm">
+        <div className="game-bg" style={{ padding: 12 }}>
             {/* ヘッダー */}
-            <div className="flex items-center justify-between mb-3 bg-gray-800 p-2 rounded-lg">
-                <h1 className="text-xl font-bold text-amber-400">🏭 ナショナルエコノミー</h1>
-                <div className="flex gap-2 text-xs">
-                    <span className="bg-blue-900 px-2 py-1 rounded">R<b className="text-blue-300 text-base ml-0.5">{G.round}</b>/9</span>
-                    <span className="bg-cyan-900 px-2 py-1 rounded">💰賃金<b className="text-cyan-300 text-base ml-0.5">${wage}</b>/人</span>
-                    <span className="bg-green-900 px-2 py-1 rounded">家計<b className="text-green-300 text-base ml-0.5">${G.household}</b></span>
-                    <span className="bg-purple-900 px-2 py-1 rounded">山札<b className="text-purple-300 text-base ml-0.5">{G.deck.length}</b></span>
-                    <button onClick={() => setShowDiscard(!showDiscard)} className="bg-orange-900 px-2 py-1 rounded hover:bg-orange-800 cursor-pointer">
-                        捨札<b className="text-orange-300 text-base ml-0.5">{G.discard.length}</b>
+            <div className="game-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px', borderRadius: 12, marginBottom: 16 }}>
+                <h1 style={{ fontSize: 18, fontWeight: 900, color: 'var(--gold)', margin: 0, display: 'flex', alignItems: 'center', gap: 10, letterSpacing: '1px' }}>
+                    <IconHammer size={20} color="var(--gold)" /> <span>NATIONAL ECONOMY</span>
+                </h1>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span className="stat-badge" style={{ borderColor: 'rgba(96, 165, 250, 0.2)' }}>
+                        <span style={{ color: 'var(--text-dim)', fontSize: 10, fontWeight: 700 }}>ROUND</span>
+                        <b style={{ color: 'var(--blue)', fontSize: 16 }}>{G.round}</b>
+                        <span style={{ color: 'var(--text-dim)' }}>/9</span>
+                    </span>
+                    <span className="stat-badge">
+                        <IconMoney size={14} color="var(--teal)" />
+                        <span style={{ color: 'var(--text-dim)' }}>WAGE</span>
+                        <b style={{ color: 'var(--teal)', fontSize: 14 }}>${wage}</b>
+                    </span>
+                    <span className="stat-badge">
+                        <IconHouse size={14} color="var(--green)" />
+                        <span style={{ color: 'var(--text-dim)' }}>BUDGET</span>
+                        <b style={{ color: 'var(--green)', fontSize: 14 }}>${G.household}</b>
+                    </span>
+                    <span className="stat-badge">
+                        <IconDeck size={14} color="var(--purple)" />
+                        <span style={{ color: 'var(--text-dim)' }}>DECK</span>
+                        <b style={{ color: 'var(--purple)', fontSize: 14 }}>{G.deck.length}</b>
+                    </span>
+                    <button onClick={() => { soundManager.playSFX('click'); setShowDiscard(!showDiscard); }} className="stat-badge" style={{ cursor: 'pointer', border: '1px solid rgba(251, 146, 60, 0.15)' }}>
+                        <IconDiscard size={14} color="var(--orange)" />
+                        <span style={{ color: 'var(--text-dim)' }}>DISCARD</span>
+                        <b style={{ color: 'var(--orange)', fontSize: 14 }}>{G.discard.length}</b>
                     </button>
-                    <button onClick={() => setShowLog(!showLog)} className="bg-indigo-900 px-2 py-1 rounded hover:bg-indigo-800 cursor-pointer">
-                        📜ログ<b className="text-indigo-300 text-base ml-0.5">{G.log.length}</b>
+                    <button onClick={() => { soundManager.playSFX('click'); setShowLog(!showLog); }} className="stat-badge" style={{ cursor: 'pointer', border: '1px solid rgba(99, 102, 241, 0.15)' }}>
+                        <IconLog size={14} color="#818cf8" />
+                        <span style={{ color: 'var(--text-dim)' }}>LOG</span>
+                        <b style={{ color: '#818cf8', fontSize: 14 }}>{G.log.length}</b>
                     </button>
+                    <button onClick={() => { soundManager.playSFX('click'); setShowSettings(true); }} className="stat-badge" style={{ cursor: 'pointer', padding: '6px 10px' }} title="音量設定">
+                        {muted ? <IconSoundOff size={16} /> : <IconSoundOn size={16} />}
+                    </button>
+                    {cpuConfig?.enabled && (
+                        <button onClick={() => { soundManager.playSFX('click'); setShowCpuSettings(true); }} className="stat-badge" style={{ cursor: 'pointer', padding: '6px 10px' }} title="CPU設定">
+                            <IconRobot size={16} />
+                        </button>
+                    )}
                 </div>
             </div>
 
+            {/* 設定モーダル */}
+            {showSettings && <SoundSettings onClose={() => {
+                setShowSettings(false);
+                setMuted(soundManager.getSettings().isMuted);
+            }} />}
+            {showCpuSettings && <CPUSettings onClose={() => setShowCpuSettings(false)} />}
+
             {/* 捨て札モーダル */}
             {showDiscard && <DiscardPileModal discard={G.discard} onClose={() => setShowDiscard(false)} />}
-
-            {/* ログモーダル */}
             {showLog && <LogModal log={G.log} onClose={() => setShowLog(false)} />}
 
             {/* ターン表示 */}
-            <div className="bg-indigo-900/80 p-2 rounded mb-3 text-center">
-                👤 <b className="text-yellow-300">P{curIdx + 1}</b> のターン
-                {G.phase === 'build' && <span className="ml-3 bg-red-700 px-2 py-0.5 rounded text-xs">🔨 建設するカードを選択</span>}
+            <div className="turn-bar" style={{ marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                {cpuConfig?.enabled && cpuConfig.cpuPlayers.includes(curPid) ? <IconRobot size={18} /> : <IconPlayer size={18} />}
+                <span>
+                    <b style={{ color: 'var(--gold-light)' }}>P{curIdx + 1}</b> のターン
+                </span>
+                {cpuConfig?.enabled && cpuConfig.cpuPlayers.includes(curPid) && (
+                    <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--text-dim)', background: 'rgba(160, 120, 48, 0.15)', padding: '2px 8px', borderRadius: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <span className="animate-pulse">●</span> Thinking...
+                    </span>
+                )}
+                {G.phase === 'build' && (
+                    <span style={{ marginLeft: 12, background: 'rgba(220, 38, 38, 0.2)', border: '1px solid rgba(220, 38, 38, 0.3)', padding: '2px 10px', borderRadius: 6, fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <IconHammer size={12} /> 建設するカードを選択
+                    </span>
+                )}
             </div>
 
-            {/* 建設フェーズのキャンセルボタン */}
+            {/* 建設キャンセル */}
             {G.phase === 'build' && G.buildState && (
-                <div className="flex justify-end mb-2">
-                    <button onClick={() => moves.cancelAction()}
-                        className="bg-gray-600 hover:bg-gray-500 text-gray-200 px-3 py-1 rounded text-xs font-medium transition">
-                        ✕ 建設をキャンセル
-                    </button>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+                    <button onClick={() => { soundManager.playSFX('click'); moves.cancelAction(); }} className="btn-ghost">✕ 建設をキャンセル</button>
                 </div>
             )}
 
             {/* 公共職場 */}
-            <Section title="📋 公共職場">
-                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-1.5">
+            <div style={{ marginBottom: 20 }}>
+                <div className="section-header"><IconWorker size={14} color="var(--teal)" /> PUBLIC WORKPLACES</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 8 }}>
                     {G.publicWorkplaces.map(wp => {
-                        const ok = G.phase === 'work' && isMyTurn && canPlacePublic(G, curPid, wp);
+                        const ok = G.phase === 'work' && (!isOnline || isMyTurn) && canPlacePublic(G, curPid, wp);
                         return (
-                            <div key={wp.id} onClick={() => ok && moves.placeWorker(wp.id)}
-                                className={`border rounded p-1.5 cursor-pointer transition ${ok ? 'border-teal-500 bg-teal-900/40 hover:bg-teal-800/60' : 'border-gray-700 bg-gray-800/40 opacity-50 cursor-not-allowed'} ${wp.fromBuilding ? 'border-l-4 border-l-emerald-500' : ''}`}>
-                                <div className="font-bold text-teal-300 text-xs">{wp.name}</div>
-                                <div className="text-[10px] text-gray-400">{wp.effectText}</div>
-                                {wp.multipleAllowed && <div className="text-[9px] text-purple-400">∞複数可</div>}
-                                {wp.workers.length > 0 && <div className="mt-0.5 flex gap-0.5 flex-wrap">{wp.workers.map((w, i) => <span key={i} className="bg-blue-700 text-white px-1 rounded text-[9px]">P{w + 1}</span>)}</div>}
+                            <div key={wp.id}
+                                onClick={() => {
+                                    if (ok) {
+                                        soundManager.playSFX('click');
+                                        moves.placeWorker(wp.id);
+                                    }
+                                }}
+                                className={`workplace-card ${ok ? 'workplace-available' : 'game-card-disabled'} ${wp.fromBuilding ? 'workplace-sold' : ''}`}
+                                style={{ padding: '8px 10px', borderRadius: 8 }}>
+                                <div style={{ fontWeight: 700, fontSize: 12, color: ok ? 'var(--teal)' : 'var(--text-dim)' }}>{wp.name}</div>
+                                <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 2, lineHeight: 1.3 }}>{wp.effectText}</div>
+                                {wp.multipleAllowed && <div style={{ fontSize: 9, color: 'var(--purple)', marginTop: 2 }}>∞ 複数配置可</div>}
+                                {wp.workers.length > 0 && (
+                                    <div style={{ marginTop: 4, display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+                                        {wp.workers.map((w, i) => <span key={i} className="worker-chip">P{w + 1}</span>)}
+                                    </div>
+                                )}
                             </div>
                         );
                     })}
                 </div>
-            </Section>
+            </div>
 
             {/* プレイヤーエリア */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-3">
+            <div style={{ display: 'grid', gridTemplateColumns: ctx.numPlayers <= 2 ? '1fr' : '1fr 1fr', gap: 12, marginBottom: 12 }}>
                 {Array.from({ length: ctx.numPlayers }, (_, i) => {
                     const pid = String(i);
                     const p = G.players[pid];
                     const active = pid === curPid;
-                    const isMe = pid === myPid;
                     return (
-                        <div key={pid} className={`rounded-lg p-2 ${active ? 'bg-gray-700 ring-2 ring-yellow-400' : 'bg-gray-800 opacity-70'} ${isMe && isOnline ? 'ring-2 ring-cyan-500' : ''}`}>
-                            <div className="flex items-center justify-between mb-1">
-                                <h3 className={`font-bold ${active ? 'text-yellow-400' : 'text-gray-400'}`}>
-                                    P{i + 1}{isMe && isOnline && <span className="ml-1 text-cyan-400 text-xs">（あなた）</span>}{i === G.startPlayer && <span className="ml-1 text-orange-400 text-xs">⭐</span>}
+                        <div key={pid} className={`player-area ${active ? 'player-area-active' : 'player-area-inactive'}`}>
+                            {/* プレイヤーヘッダー */}
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                                <h3 style={{ margin: 0, fontWeight: 700, fontSize: 14, color: active ? 'var(--gold)' : 'var(--text-dim)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                    {cpuConfig?.enabled && cpuConfig.cpuPlayers.includes(pid) ? <IconRobot size={16} /> : <IconPlayer size={16} />}
+                                    P{i + 1}{i === G.startPlayer && <span style={{ marginLeft: 2, color: 'var(--orange)', fontSize: 10 }}>★</span>}
                                 </h3>
-                                <div className="flex gap-1.5 text-[10px]">
-                                    <span className="bg-yellow-800 px-1.5 py-0.5 rounded">💰${p.money}</span>
-                                    <span className="bg-blue-800 px-1.5 py-0.5 rounded">👷{p.availableWorkers}/{p.workers}</span>
-                                    <span className="bg-gray-600 px-1.5 py-0.5 rounded">🃏{p.hand.length}/{p.maxHandSize}</span>
-                                    {p.unpaidDebts > 0 && <span className="bg-red-800 px-1.5 py-0.5 rounded">⚠{p.unpaidDebts}</span>}
+                                <div style={{ display: 'flex', gap: 4 }}>
+                                    <span className="stat-badge" style={{ fontSize: 10, padding: '2px 8px' }}>
+                                        <IconMoney size={10} color="var(--gold-light)" />
+                                        <b style={{ color: 'var(--gold-light)' }}>${p.money}</b>
+                                    </span>
+                                    <span className="stat-badge" style={{ fontSize: 10, padding: '2px 8px' }}>
+                                        <IconWorker size={10} color="var(--blue)" />
+                                        <b style={{ color: 'var(--blue)' }}>{p.availableWorkers}/{p.workers}</b>
+                                    </span>
+                                    <span className="stat-badge" style={{ fontSize: 10, padding: '2px 8px' }}>
+                                        <IconDeck size={10} color="var(--text-secondary)" />
+                                        <b style={{ color: 'var(--text-secondary)' }}>{p.hand.length}/{p.maxHandSize}</b>
+                                    </span>
+                                    {p.unpaidDebts > 0 && (
+                                        <span className="stat-badge" style={{ fontSize: 10, padding: '2px 8px', borderColor: 'rgba(248, 113, 113, 0.3)' }}>
+                                            <b style={{ color: 'var(--red)' }}>⚠ {p.unpaidDebts}</b>
+                                        </span>
+                                    )}
                                 </div>
                             </div>
-                            {/* 建設済み建物（自分の場＝個人職場） */}
+
+                            {/* Glory Info: VP Tokens & Robots */}
+                            {(p.vpTokens > 0 || p.robotWorkers > 0) && (
+                                <div style={{ display: 'flex', gap: 6, marginBottom: 8, paddingLeft: 2 }}>
+                                    {p.vpTokens > 0 && (
+                                        <span className="stat-badge" style={{ fontSize: 10, padding: '2px 8px', borderColor: 'var(--gold)', color: 'var(--gold)' }}>
+                                            <IconTrophy size={10} color="var(--gold)" />
+                                            <b>{p.vpTokens}</b>
+                                        </span>
+                                    )}
+                                    {p.robotWorkers > 0 && (
+                                        <span className="stat-badge" style={{ fontSize: 10, padding: '2px 8px', borderColor: 'var(--teal)', color: 'var(--teal)' }}>
+                                            <IconRobot size={10} color="var(--teal)" />
+                                            <b>{p.robotWorkers}</b>
+                                        </span>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* 建設済み建物 */}
                             {p.buildings.length > 0 && (
-                                <div className="mb-1">
-                                    <span className="text-[10px] text-gray-400">🏗️ 自分の場:</span>
-                                    <div className="flex flex-wrap gap-1 mt-0.5">
-                                        {p.buildings.map(b => {
+                                <div style={{ marginBottom: 12 }}>
+                                    <span style={{ fontSize: 10, color: 'var(--text-dim)', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
+                                        <IconHammer size={12} /> BUILDINGS
+                                    </span>
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                                        {p.buildings.map((b, bi) => {
                                             const def = getCardDef(b.card.defId);
-                                            const lockBlocked = def.unsellable && b.card.defId !== 'slash_burn';
-                                            const canPlace = active && isMyTurn && G.phase === 'work' && !b.workerPlaced && p.availableWorkers > 0 && !lockBlocked;
-                                            const effectBlocked = canPlace && !canPlaceOnBuilding(G, p, b.card.defId);
-                                            const isActive = canPlace && !effectBlocked;
+                                            // 建設効果発動可能か判定
+                                            const canActivate = active && G.phase === 'work' && !b.workerPlaced && (!isOnline || isMyTurn) && canPlaceOnBuilding(G, p, b.card.defId);
+                                            // ボード上の建物
+                                            const color = def.tags.includes('farm') ? 'var(--green)' : def.tags.includes('factory') ? 'var(--orange)' : 'var(--blue)';
                                             return (
-                                                <div key={b.card.uid} onClick={() => isActive && moves.placeWorkerOnBuilding(b.card.uid)}
-                                                    className={`px-1.5 py-0.5 rounded text-[10px] border ${b.workerPlaced ? 'bg-blue-900 border-blue-600 text-blue-300' : isActive ? 'bg-emerald-900 border-emerald-500 text-emerald-200 cursor-pointer hover:bg-emerald-800' : 'bg-gray-700 border-gray-600 text-gray-400 opacity-50 cursor-not-allowed'}`}
+                                                <div key={`${b.card.defId}-${bi}`}
+                                                    onClick={() => {
+                                                        if (canActivate) {
+                                                            soundManager.playSFX('click');
+                                                            moves.placeWorkerOnBuilding(b.card.uid);
+                                                        }
+                                                    }}
+                                                    className={`building-card ${canActivate ? 'building-card-clickable' : ''} ${b.workerPlaced ? 'building-card-placed' : ''}`}
+                                                    style={{
+                                                        borderColor: color,
+                                                        background: b.workerPlaced ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.03)',
+                                                    }}
                                                     title={`${def.name} (${def.vp}VP) ${def.effectText}`}>
-                                                    {def.name} {def.vp}VP {cTags(b.card.defId)} {b.workerPlaced ? '👷' : ''}
+                                                    <span style={{ fontWeight: 700 }}>{def.name}</span>
+                                                    <span style={{ color: 'var(--text-dim)', marginLeft: 4 }}>{def.vp}VP</span>
+                                                    {b.workerPlaced && <span style={{ marginLeft: 4, display: 'inline-flex', verticalAlign: 'middle' }}><IconWorker size={12} color="white" /></span>}
                                                 </div>
                                             );
                                         })}
                                     </div>
                                 </div>
                             )}
+
                             {/* 手札 */}
+                            {/* 手札表示: P2Pでは自分の手札のみ詳細表示、他は裏面or枚数 */}
                             {(() => {
-                                // 自分の手札は常に表示、他プレイヤーはカード裏面または枚数のみ
-                                const showFullHand = isMe || (!isOnline && active);
-                                const isHiddenHand = p.hand.length > 0 && p.hand[0]?.defId === 'HIDDEN';
-                                if (showFullHand && !isHiddenHand) {
+                                const isMyArea = pid === myPid;
+                                const showHand = isMyArea || !isOnline;
+                                if (!showHand) {
+                                    // P2P: 他プレイヤーの手札は枚数のみ表示
                                     return (
-                                        <div>
-                                            <span className="text-[10px] text-gray-400">🃏 手札:</span>
-                                            <div className="flex flex-wrap gap-1 mt-0.5">
-                                                {p.hand.map((c, ci) => {
-                                                    const isCons = isConsumable(c);
-                                                    const isBuildPhase = G.phase === 'build' && G.buildState;
-                                                    let canClick = false;
-                                                    let highlight = '';
-                                                    if (active && isMyTurn && isBuildPhase && !isCons) {
-                                                        const def = getCardDef(c.defId);
-                                                        const bs = G.buildState!;
-                                                        if (bs.action === 'pioneer') {
-                                                            canClick = def.tags.includes('farm');
-                                                        } else {
-                                                            const cost = Math.max(0, def.cost - bs.costReduction);
-                                                            canClick = p.hand.length - 1 >= cost;
-                                                        }
-                                                        if (canClick) highlight = 'ring-2 ring-amber-400';
-                                                    }
-                                                    const effectText = cEffect(c.defId);
+                                        <div style={{ marginTop: 4 }}>
+                                            <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>手札 {p.hand.length}枚</span>
+                                        </div>
+                                    );
+                                }
+                                // P2P: 自分のエリアか非オンラインモード → 手札を詳細表示
+                                const isBuildPhase = G.phase === 'build' && G.buildState;
+                                const canInteract = active && (!isOnline || isMyTurn);
+                                return (
+                                    <div>
+                                        <span style={{ fontSize: 10, color: 'var(--text-dim)', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
+                                            <IconDeck size={12} /> HAND
+                                        </span>
+                                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+                                            {p.hand.map((c, ci) => {
+                                                // playerViewで隠されたカード
+                                                if (isHidden(c)) {
                                                     return (
-                                                        <div key={c.uid} onClick={() => canClick && moves.selectBuildCard(ci)}
-                                                            className={`border rounded p-1 text-[10px] min-w-[90px] ${isCons ? 'bg-stone-800 border-stone-600' : 'bg-gray-700 border-gray-500'} ${canClick ? 'cursor-pointer hover:border-amber-400' : ''} ${highlight}`}>
-                                                            <div className="font-bold">{cName(c.defId)}</div>
-                                                            {!isCons && <>
-                                                                <div className="text-gray-400">C{getCardDef(c.defId).cost}/{getCardDef(c.defId).vp}VP</div>
-                                                                {cTags(c.defId) && <div className="text-amber-400">{cTags(c.defId)}</div>}
-                                                                {effectText && <div className="text-gray-500 text-[9px] mt-0.5 leading-tight">{effectText}</div>}
-                                                            </>}
+                                                        <div key={`hidden-${ci}`} className="game-card" style={{ minWidth: 70, background: 'linear-gradient(145deg, rgba(30,30,40,0.5), rgba(20,20,30,0.5))', borderColor: 'rgba(100,100,120,0.15)' }}>
+                                                            <div style={{ fontWeight: 700, fontSize: 11, color: 'var(--text-dim)' }}>🂠</div>
                                                         </div>
                                                     );
-                                                })}
-                                            </div>
-                                        </div>
-                                    );
-                                }
-                                // 他プレイヤーの手札: カード裏面表示
-                                if (p.hand.length > 0) {
-                                    return (
-                                        <div>
-                                            <span className="text-[10px] text-gray-400">🃏 手札 ({p.hand.length}枚):</span>
-                                            <div className="flex flex-wrap gap-1 mt-0.5">
-                                                {p.hand.map((c, ci) => (
-                                                    <div key={ci} className="border rounded p-1 text-[10px] min-w-[50px] bg-indigo-900/60 border-indigo-700">
-                                                        <div className="font-bold text-indigo-400 text-center">🂠</div>
+                                                }
+                                                const isCons = isConsumable(c);
+                                                const def = isCons ? null : getCardDef(c.defId);
+                                                let canClick = false;
+
+                                                if (canInteract && isBuildPhase && !isCons && def) {
+                                                    const bs = G.buildState!;
+                                                    if (bs.action === 'pioneer') {
+                                                        canClick = def.tags.includes('farm');
+                                                    } else {
+                                                        const cost = getConstructionCost(p, c.defId, bs.costReduction);
+                                                        canClick = p.hand.length - 1 >= cost;
+                                                    }
+                                                }
+
+                                                return (
+                                                    <div key={c.uid}
+                                                        onClick={() => {
+                                                            if (canClick) {
+                                                                soundManager.playSFX('click');
+                                                                moves.selectBuildCard(ci);
+                                                            }
+                                                        }}
+                                                        className={`game-card ${canClick ? 'game-card-clickable game-card-selected' : ''}`}
+                                                        style={{
+                                                            minWidth: 100,
+                                                            ...(isCons ? { background: 'linear-gradient(145deg, rgba(87, 83, 78, 0.3), rgba(68, 64, 60, 0.3))', borderColor: 'rgba(168, 162, 158, 0.15)' } : {}),
+                                                        }}>
+                                                        <div style={{ fontWeight: 700, fontSize: 11 }}>{cName(c.defId)}</div>
+                                                        {def && (
+                                                            <>
+                                                                <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
+                                                                    <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>
+                                                                        C{isBuildPhase && !isCons ? getConstructionCost(p, c.defId, G.buildState!.costReduction) : def.cost}
+                                                                    </span>
+                                                                    <span style={{ fontSize: 10, color: 'var(--gold-dim)' }}>{def.vp}VP</span>
+                                                                </div>
+                                                                <TagBadges defId={c.defId} />
+                                                                {def.effectText && <div style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 3, lineHeight: 1.3 }}>{def.effectText}</div>}
+                                                            </>
+                                                        )}
                                                     </div>
-                                                ))}
-                                            </div>
+                                                );
+                                            })}
                                         </div>
-                                    );
-                                }
-                                return <div className="text-[10px] text-gray-500">手札0枚</div>;
+                                    </div>
+                                );
                             })()}
                         </div>
                     );
                 })}
             </div>
 
-            {/* インラインログ（最新5件） */}
-            <div className="mt-3 bg-gray-800 rounded-lg p-2">
-                <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs text-gray-400 font-bold">📜 最新ログ</span>
-                    <button onClick={() => setShowLog(true)} className="text-[10px] text-cyan-400 hover:text-cyan-300">
+
+            {/* インラインログ */}
+            <div className="glass-card" style={{ padding: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <span style={{ fontSize: 11, color: 'var(--text-dim)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <IconLog size={12} /> LATEST LOG
+                    </span>
+                    <button onClick={() => { soundManager.playSFX('click'); setShowLog(true); }} className="btn-ghost" style={{ fontSize: 10, padding: '2px 8px' }}>
                         全件表示 ({G.log.length})
                     </button>
                 </div>
-                <div className="space-y-0.5">
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                     {G.log.slice(-5).reverse().map((entry, i) => (
-                        <div key={G.log.length - i} className={`text-[10px] leading-tight ${entry.text.startsWith('===') ? 'text-amber-400 font-bold' : entry.text.startsWith('---') ? 'text-cyan-400' : 'text-gray-300'}`}>
+                        <div key={G.log.length - i}
+                            className={`log-entry ${entry.text.startsWith('===') ? 'log-entry-round' : entry.text.startsWith('---') ? 'log-entry-phase' : 'log-entry-action'}`}>
                             {entry.text}
                         </div>
                     ))}
@@ -297,20 +531,12 @@ export function Board({ G, ctx, moves, playerID }: GameBoardProps) {
 }
 
 // ============================================================
-// セクションヘルパー
-// ============================================================
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-    return <div className="mb-3"><h2 className="text-sm font-bold text-teal-400 border-b border-teal-800 pb-0.5 mb-1">{title}</h2>{children}</div>;
-}
-
-// ============================================================
 // ゲームログモーダル
 // ============================================================
 function LogModal({ log, onClose }: { log: GameState['log']; onClose: () => void }) {
     const bottomRef = useRef<HTMLDivElement>(null);
     useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, []);
 
-    // ラウンドごとにグループ化
     const roundGroups: { round: number; entries: typeof log }[] = [];
     for (const entry of log) {
         const last = roundGroups[roundGroups.length - 1];
@@ -322,18 +548,20 @@ function LogModal({ log, onClose }: { log: GameState['log']; onClose: () => void
     }
 
     return (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={onClose}>
-            <div className="bg-gray-800 rounded-xl p-5 max-w-lg w-full max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
-                <div className="flex items-center justify-between mb-3">
-                    <h2 className="text-lg font-bold text-indigo-400">📜 ゲームログ</h2>
-                    <button onClick={onClose} className="bg-gray-600 hover:bg-gray-500 text-white px-3 py-1 rounded text-sm">閉じる</button>
+        <div className="modal-overlay" onClick={onClose}>
+            <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 560 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                    <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#818cf8', display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <IconLog size={20} /> ゲームログ
+                    </h2>
+                    <button onClick={() => { soundManager.playSFX('click'); onClose(); }} className="btn-ghost">閉じる</button>
                 </div>
-                <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+                <div style={{ overflowY: 'auto', maxHeight: '60vh', paddingRight: 4 }}>
                     {roundGroups.map((group, gi) => (
                         <div key={gi}>
                             {group.entries.map((entry, ei) => (
                                 <div key={`${gi}-${ei}`}
-                                    className={`text-xs leading-relaxed py-0.5 ${entry.text.startsWith('===') ? 'text-amber-400 font-bold mt-2 border-t border-gray-700 pt-2' : entry.text.startsWith('---') ? 'text-cyan-400 font-semibold' : 'text-gray-300 pl-2'}`}>
+                                    className={`log-entry ${entry.text.startsWith('===') ? 'log-entry-round' : entry.text.startsWith('---') ? 'log-entry-phase' : 'log-entry-action'}`}>
                                     {entry.text}
                                 </div>
                             ))}
@@ -352,25 +580,35 @@ function LogModal({ log, onClose }: { log: GameState['log']; onClose: () => void
 function DesignOfficeUI({ G, moves }: { G: GameState; moves: any }) {
     const dos = G.designOfficeState!;
     return (
-        <div className="min-h-screen bg-gray-900 text-gray-100 flex items-center justify-center p-4">
-            <div className="bg-gray-800 rounded-xl p-6 max-w-3xl w-full relative">
-                <CancelButton onClick={() => moves.cancelAction()} />
-                <h2 className="text-xl font-bold text-amber-400 mb-2">🔍 設計事務所</h2>
-                <p className="text-gray-300 mb-3">山札から<b className="text-cyan-400">{dos.revealedCards.length}枚</b>公開しました。<b className="text-amber-400">1枚</b>を選んでください。残りは捨て札になります。</p>
-                <div className="flex flex-wrap gap-3 mb-4">
+        <div className="game-bg" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+            <div className="modal-content animate-slide-up" style={{ position: 'relative' }}>
+                <button onClick={() => { soundManager.playSFX('click'); moves.cancelAction(); }} className="btn-ghost" style={{ position: 'absolute', top: 16, right: 16 }}>✕ キャンセル</button>
+                <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--gold)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <IconSearch size={22} color="var(--gold)" /> 設計事務所
+                </h2>
+                <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>
+                    山札から<b style={{ color: 'var(--teal)' }}>{dos.revealedCards.length}枚</b>公開。
+                    <b style={{ color: 'var(--gold)' }}>1枚</b>を選んでください。残りは捨て札になります。
+                </p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 16 }}>
                     {dos.revealedCards.map((c, ci) => {
                         const isCons = isConsumable(c);
                         const def = isCons ? null : getCardDef(c.defId);
                         return (
-                            <div key={c.uid} onClick={() => moves.selectDesignOfficeCard(ci)}
-                                className="border border-cyan-500 bg-cyan-900/30 rounded p-3 min-w-[120px] cursor-pointer hover:bg-cyan-800/50 hover:ring-2 hover:ring-cyan-400 transition">
-                                <div className="font-bold text-sm">{cName(c.defId)}</div>
-                                {def && <>
-                                    <div className="text-xs text-gray-400">C{def.cost}/{def.vp}VP</div>
-                                    <div className="text-[10px] text-gray-400 mt-1">{def.effectText}</div>
-                                    {cTags(c.defId) && <div className="text-[10px] text-amber-400 mt-0.5">{cTags(c.defId)}</div>}
-                                </>}
-                                {isCons && <div className="text-xs text-gray-400">消費財</div>}
+                            <div key={c.uid} onClick={() => { soundManager.playSFX('click'); moves.selectDesignOfficeCard(ci); }}
+                                className="game-card game-card-clickable"
+                                style={{ minWidth: 120, borderColor: 'rgba(45, 212, 191, 0.2)' }}
+                                onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--teal)'}
+                                onMouseLeave={e => e.currentTarget.style.borderColor = 'rgba(45, 212, 191, 0.2)'}>
+                                <div style={{ fontWeight: 700, fontSize: 12 }}>{cName(c.defId)}</div>
+                                {def && (
+                                    <>
+                                        <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 2 }}>C{def.cost}/{def.vp}VP</div>
+                                        <div style={{ fontSize: 9, color: 'var(--text-dim)', marginTop: 4, lineHeight: 1.3 }}>{def.effectText}</div>
+                                        <TagBadges defId={c.defId} />
+                                    </>
+                                )}
+                                {isCons && <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>消費財</div>}
                             </div>
                         );
                     })}
@@ -409,18 +647,22 @@ function DualConstructionUI({ G, moves, pid }: { G: GameState; moves: any; pid: 
     }
 
     return (
-        <div className="min-h-screen bg-gray-900 text-gray-100 flex items-center justify-center p-4">
-            <div className="bg-gray-800 rounded-xl p-6 max-w-3xl w-full relative">
-                <CancelButton onClick={() => moves.cancelAction()} />
-                <h2 className="text-xl font-bold text-amber-400 mb-2">🏗️ 二胡市建設</h2>
-                <p className="text-gray-300 mb-3">同じコストの建物カードを<b className="text-amber-400">2枚</b>選択してください（コストは1つ分のみ支払い）</p>
-                <p className="text-xs text-gray-400 mb-3">選択中: {ds.selectedCardIndices.length}/2枚</p>
-                <div className="flex flex-wrap gap-2 mb-4">
+        <div className="game-bg" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+            <div className="modal-content animate-slide-up" style={{ position: 'relative' }}>
+                <button onClick={() => { soundManager.playSFX('click'); moves.cancelAction(); }} className="btn-ghost" style={{ position: 'absolute', top: 16, right: 16 }}>✕ キャンセル</button>
+                <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--gold)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <IconHammer size={22} color="var(--gold)" /> 二胡市建設
+                </h2>
+                <p style={{ color: 'var(--text-secondary)', marginBottom: 4 }}>
+                    同じコストの建物カードを<b style={{ color: 'var(--gold)' }}>2枚</b>選択してください（コストは1つ分のみ支払い）
+                </p>
+                <p style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 16 }}>選択中: {ds.selectedCardIndices.length}/2枚</p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
                     {p.hand.map((c, ci) => {
                         const isCons = isConsumable(c);
                         if (isCons) return (
-                            <div key={c.uid} className="border rounded p-2 min-w-[100px] border-gray-600 bg-gray-700 opacity-40 cursor-not-allowed">
-                                <div className="font-bold text-sm">消費財</div>
+                            <div key={c.uid} className="game-card game-card-disabled" style={{ minWidth: 100 }}>
+                                <div style={{ fontWeight: 700, fontSize: 12 }}>消費財</div>
                             </div>
                         );
                         const def = getCardDef(c.defId);
@@ -432,19 +674,20 @@ function DualConstructionUI({ G, moves, pid }: { G: GameState; moves: any; pid: 
                         else selectable = validCosts.has(def.cost);
 
                         return (
-                            <div key={c.uid} onClick={() => selectable && moves.toggleDualCard(ci)}
-                                className={`border rounded p-2 min-w-[100px] transition ${selected ? 'border-amber-500 bg-amber-900/40 ring-2 ring-amber-500' : selectable ? 'border-gray-500 bg-gray-700 cursor-pointer hover:border-amber-400' : 'border-gray-600 bg-gray-700 opacity-40 cursor-not-allowed'}`}>
-                                <div className="font-bold text-sm">{def.name}</div>
-                                <div className="text-[10px] text-gray-400">C{def.cost}/{def.vp}VP</div>
-                                {cTags(c.defId) && <div className="text-[10px] text-amber-400">{cTags(c.defId)}</div>}
-                                {selected && <div className="text-amber-400 text-xs mt-1">✓ 選択中</div>}
+                            <div key={c.uid} onClick={() => selectable && (soundManager.playSFX('click'), moves.toggleDualCard(ci))}
+                                className={`game-card ${selected ? 'game-card-selected' : selectable ? 'game-card-clickable' : 'game-card-disabled'}`}
+                                style={{ minWidth: 100 }}>
+                                <div style={{ fontWeight: 700, fontSize: 12 }}>{def.name}</div>
+                                <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>C{def.cost}/{def.vp}VP</div>
+                                <TagBadges defId={c.defId} />
+                                {selected && <div style={{ color: 'var(--gold)', fontSize: 11, marginTop: 4, fontWeight: 700 }}>✓ 選択中</div>}
                             </div>
                         );
                     })}
                 </div>
-                <button onClick={() => moves.confirmDualConstruction()}
+                <button onClick={() => { soundManager.playSFX('click'); moves.confirmDualConstruction(); }}
                     disabled={!canConfirm}
-                    className={`px-6 py-2 rounded font-bold ${canConfirm ? 'bg-amber-600 hover:bg-amber-500 text-white' : 'bg-gray-600 text-gray-400 cursor-not-allowed'}`}>
+                    className="btn-primary">
                     ✅ 建設決定（{ds.selectedCardIndices.length}/2枚選択中）
                 </button>
             </div>
@@ -466,32 +709,41 @@ function DiscardUI({ G, moves, pid }: { G: GameState; moves: any; pid: string })
     }
 
     return (
-        <div className="min-h-screen bg-gray-900 text-gray-100 flex items-center justify-center p-4">
-            <div className="bg-gray-800 rounded-xl p-6 max-w-3xl w-full relative">
-                <CancelButton onClick={() => moves.cancelAction()} />
-                <h2 className="text-xl font-bold text-amber-400 mb-2">🃏 カードを捨てる</h2>
-                <p className="text-gray-300 mb-3">{ds.reason} — <b className="text-red-400">{ds.count}枚</b>選択してください（選択中: {ds.selectedIndices.length}枚）</p>
-                <div className="flex flex-wrap gap-2 mb-4">
+        <div className="game-bg" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+            <div className="modal-content animate-slide-up" style={{ position: 'relative', maxWidth: 750 }}>
+                <button onClick={() => { soundManager.playSFX('click'); moves.cancelAction(); }} className="btn-ghost" style={{ position: 'absolute', top: 16, right: 16 }}>✕ キャンセル</button>
+                <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--gold)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <IconTrash size={22} color="var(--gold)" /> カードを捨てる
+                </h2>
+                <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>
+                    {ds.reason} — <b style={{ color: 'var(--red)' }}>{ds.count}枚</b>選択してください（選択中: {ds.selectedIndices.length}枚）
+                </p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
                     {p.hand.map((c, ci) => {
                         const excluded = excludeUids.has(c.uid);
                         const selected = ds.selectedIndices.includes(ci);
                         const isCons = isConsumable(c);
                         return (
                             <div key={c.uid}
-                                onClick={() => !excluded && moves.toggleDiscard(ci)}
-                                className={`border rounded p-2 min-w-[100px] cursor-pointer transition ${excluded ? 'border-amber-500 bg-amber-900/30 opacity-60 cursor-not-allowed' : selected ? 'border-red-500 bg-red-900/40 ring-2 ring-red-500' : 'border-gray-500 bg-gray-700 hover:border-gray-300'}`}>
-                                <div className="font-bold text-sm">{cName(c.defId)}</div>
-                                {excluded && <div className="text-[10px] text-amber-400">建設対象</div>}
-                                {!isCons && !excluded && !isHidden(c) && <div className="text-[10px] text-gray-400">C{getCardDef(c.defId).cost}/{getCardDef(c.defId).vp}VP</div>}
-                                {cTags(c.defId) && <div className="text-[10px] text-amber-400">{cTags(c.defId)}</div>}
-                                {selected && <div className="text-red-400 text-xs mt-1">✓ 捨てる</div>}
+                                onClick={() => !excluded && (soundManager.playSFX('click'), moves.toggleDiscard(ci))}
+                                className={`game-card ${excluded ? '' : 'game-card-clickable'}`}
+                                style={{
+                                    minWidth: 100,
+                                    ...(excluded ? { borderColor: 'rgba(212, 168, 83, 0.3)', background: 'rgba(212, 168, 83, 0.08)', opacity: 0.6, cursor: 'not-allowed' } : {}),
+                                    ...(selected ? { borderColor: 'var(--red)', boxShadow: '0 0 15px rgba(248, 113, 113, 0.2)' } : {}),
+                                }}>
+                                <div style={{ fontWeight: 700, fontSize: 12 }}>{cName(c.defId)}</div>
+                                {excluded && <div style={{ fontSize: 9, color: 'var(--gold)' }}>建設対象</div>}
+                                {!isCons && !excluded && <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>C{getCardDef(c.defId).cost}/{getCardDef(c.defId).vp}VP</div>}
+                                <TagBadges defId={c.defId} />
+                                {selected && <div style={{ color: 'var(--red)', fontSize: 11, marginTop: 4, fontWeight: 700 }}>✓ 捨てる</div>}
                             </div>
                         );
                     })}
                 </div>
-                <button onClick={() => moves.confirmDiscard()}
+                <button onClick={() => { soundManager.playSFX('click'); moves.confirmDiscard(); }}
                     disabled={ds.selectedIndices.length !== ds.count}
-                    className={`px-6 py-2 rounded font-bold ${ds.selectedIndices.length === ds.count ? 'bg-red-600 hover:bg-red-500 text-white' : 'bg-gray-600 text-gray-400 cursor-not-allowed'}`}>
+                    className="btn-danger">
                     ✅ 確定（{ds.selectedIndices.length}/{ds.count}）
                 </button>
             </div>
@@ -515,66 +767,74 @@ function PaydayUI({ G, moves }: { G: GameState; moves: any }) {
     const allSellableCount = p.buildings.filter(b => !getCardDef(b.card.defId).unsellable).length;
     const allSellableSelected = ps.selectedBuildingIndices.length === allSellableCount;
 
-    // 過剰売却判定:
-    // 「選択中の建物のうち最もVPの低い建物を1つ除いても賃金を支払える」場合は過剰
-    // ※全選択でも、1つ除いて払えるなら過剰（全選択で"ギリギリ"や"不足"の場合のみ許可）
     let isExcessive = false;
-    if (selectedVPs.length > 0) {
+    if (selectedVPs.length > 0 && !allSellableSelected) {
         const minVP = Math.min(...selectedVPs);
-        const fundsWithoutMin = totalFunds - minVP;
-        if (fundsWithoutMin >= ps.totalWage) {
-            isExcessive = true;
-        }
+        if ((totalFunds - minVP) >= ps.totalWage) isExcessive = true;
     }
 
-    // ボタン活性条件:
-    // - 過剰売却でないこと
-    // - かつ、賃金を支払えるか、全売却可能建物を選択済み（負債覚悟）であること
-    // - 何も選択していない状態では不可（所持金だけで足りないのでこの画面が出ている）
-    const hasSelection = ps.selectedBuildingIndices.length > 0;
-    const canConfirm = !isExcessive && (canAfford || allSellableSelected) && (hasSelection || p.money >= ps.totalWage);
+    const canConfirm = !isExcessive && (canAfford || allSellableSelected);
 
     return (
-        <div className="min-h-screen bg-gray-900 text-gray-100 flex items-center justify-center p-4">
-            <div className="bg-gray-800 rounded-xl p-6 max-w-2xl w-full">
-                <h2 className="text-xl font-bold text-amber-400 mb-2">💰 給料日 — P{ps.currentPlayerIndex + 1}</h2>
-                <div className="grid grid-cols-2 gap-2 mb-3 text-sm">
-                    <div className="bg-gray-700 p-2 rounded">賃金: <b>${ps.wagePerWorker}</b>/人 × {p.workers}人 = <b className="text-red-400">${ps.totalWage}</b></div>
-                    <div className="bg-gray-700 p-2 rounded">所持金: <b className="text-yellow-400">${p.money}</b> + 売却: <b className="text-green-400">${sellTotal}</b> = <b className={totalFunds >= ps.totalWage ? 'text-green-400' : 'text-red-400'}>${totalFunds}</b></div>
+        <div className="game-bg" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+            <div className="modal-content animate-slide-up" style={{ maxWidth: 640 }}>
+                <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--gold)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <IconPayment size={22} color="var(--gold)" /> 給料日 — P{ps.currentPlayerIndex + 1}
+                </h2>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
+                    <div className="glass-card" style={{ padding: 12 }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>賃金</div>
+                        <div style={{ fontSize: 14, fontWeight: 700, marginTop: 4 }}>
+                            ${ps.wagePerWorker}/人 × {Math.max(0, p.workers - p.robotWorkers)}人 = <span style={{ color: 'var(--red)' }}>${ps.totalWage}</span>
+                        </div>
+                    </div>
+                    <div className="glass-card" style={{ padding: 12 }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>所持金 + 売却</div>
+                        <div style={{ fontSize: 14, fontWeight: 700, marginTop: 4 }}>
+                            <span style={{ color: 'var(--gold-light)' }}>${p.money}</span> + <span style={{ color: 'var(--green)' }}>${sellTotal}</span> = <span style={{ color: totalFunds >= ps.totalWage ? 'var(--green)' : 'var(--red)' }}>${totalFunds}</span>
+                        </div>
+                    </div>
                 </div>
-                {shortage > 0 && <p className="text-red-400 mb-3">⚠️ 不足: ${shortage} — 建物を売却してください（1VP=$1）</p>}
+
+                {shortage > 0 && <p style={{ color: 'var(--red)', marginBottom: 12, fontSize: 13 }}>⚠️ 不足: ${shortage} — 建物を売却してください（1VP=$1）</p>}
+
                 {p.buildings.length > 0 && (
-                    <div className="mb-3">
-                        <span className="text-xs text-gray-400 mb-1 block">🏗️ 建物（クリックで売却選択/解除）:</span>
-                        <div className="flex flex-wrap gap-2">
+                    <div style={{ marginBottom: 12 }}>
+                        <span style={{ fontSize: 11, color: 'var(--text-dim)', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <IconHouse size={14} /> 建物（クリックで売却選択/解除）:
+                        </span>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
                             {p.buildings.map((b, bi) => {
                                 const def = getCardDef(b.card.defId);
                                 const selected = ps.selectedBuildingIndices.includes(bi);
                                 const disabled = def.unsellable;
                                 return (
-                                    <div key={b.card.uid} onClick={() => !disabled && moves.togglePaydaySell(bi)}
-                                        className={`border rounded p-2 text-left text-xs transition ${disabled ? 'border-gray-600 bg-gray-700 opacity-40 cursor-not-allowed' : selected ? 'border-yellow-500 bg-yellow-900/50 ring-2 ring-yellow-500 cursor-pointer' : 'border-yellow-600 bg-yellow-900/30 hover:bg-yellow-800/50 cursor-pointer'}`}>
-                                        <div className="font-bold">{def.name}</div>
-                                        <div className="text-gray-400">{def.vp}VP = <b className="text-yellow-400">${def.vp}</b></div>
-                                        {disabled && <div className="text-red-400">売却不可</div>}
-                                        {selected && <div className="text-yellow-400 mt-1">✓ 売却</div>}
+                                    <div key={b.card.uid} onClick={() => !disabled && (soundManager.playSFX('click'), moves.togglePaydaySell(bi))}
+                                        className={`game-card ${disabled ? 'game-card-disabled' : 'game-card-clickable'}`}
+                                        style={{
+                                            ...(selected ? { borderColor: 'var(--gold)', boxShadow: 'var(--glow-gold)' } : {}),
+                                        }}>
+                                        <div style={{ fontWeight: 700, fontSize: 12 }}>{def.name}</div>
+                                        <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>{def.vp}VP = <b style={{ color: 'var(--gold-light)' }}>${def.vp}</b></div>
+                                        {disabled && <div style={{ color: 'var(--red)', fontSize: 9 }}>売却不可</div>}
+                                        {selected && <div style={{ color: 'var(--gold)', fontSize: 11, marginTop: 3, fontWeight: 700 }}>✓ 売却</div>}
                                     </div>
                                 );
                             })}
                         </div>
                     </div>
                 )}
-                {/* 過剰売却メッセージ */}
-                {isExcessive && (
-                    <div className="bg-orange-900/50 border border-orange-500 rounded-lg p-3 mb-3">
-                        <p className="text-orange-400 font-bold text-sm">⚠️ 余分に建物を売ることはできません</p>
-                        <p className="text-orange-300 text-xs mt-1">最もVPの低い建物を除いても賃金を支払えます。不要な建物の選択を解除してください。</p>
-                    </div>
-                )}
-                <button onClick={() => moves.confirmPaydaySell()}
+
+                {isExcessive && <p style={{ color: 'var(--orange)', fontSize: 12, marginBottom: 8 }}>⚠️ 余分に建物を売ることはできません</p>}
+
+                <button onClick={() => {
+                    soundManager.playSFX('click');
+                    moves.confirmPaydaySell();
+                }}
                     disabled={!canConfirm}
-                    className={`px-6 py-2 rounded font-bold transition ${canConfirm ? 'bg-green-700 hover:bg-green-600 text-white' : 'bg-gray-600 text-gray-400 cursor-not-allowed'}`}>
-                    💳 支払い確定{!canAfford && allSellableSelected ? `（不足$${ps.totalWage - totalFunds}は負債）` : ''}
+                    className="btn-primary">
+                    <IconPayment size={16} /> 支払い確定{!canAfford && allSellableSelected ? `（不足$${ps.totalWage - totalFunds}は負債）` : ''}
                 </button>
             </div>
         </div>
@@ -588,26 +848,35 @@ function CleanupUI({ G, moves }: { G: GameState; moves: any }) {
     const cs = G.cleanupState!;
     const p = G.players[String(cs.currentPlayerIndex)];
     return (
-        <div className="min-h-screen bg-gray-900 text-gray-100 flex items-center justify-center p-4">
-            <div className="bg-gray-800 rounded-xl p-6 max-w-3xl w-full">
-                <h2 className="text-xl font-bold text-amber-400 mb-2">🗑️ 精算 — P{cs.currentPlayerIndex + 1}</h2>
-                <p className="text-gray-300 mb-3">手札上限 {p.maxHandSize}枚を超えています。<b className="text-red-400">{cs.excessCount}枚</b>捨ててください（選択中: {cs.selectedIndices.length}枚）</p>
-                <div className="flex flex-wrap gap-2 mb-4">
+        <div className="game-bg" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+            <div className="modal-content animate-slide-up" style={{ maxWidth: 750 }}>
+                <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--gold)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <IconTrash size={22} color="var(--gold)" /> 精算 — P{cs.currentPlayerIndex + 1}
+                </h2>
+                <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>
+                    手札上限 {p.maxHandSize}枚を超えています。<b style={{ color: 'var(--red)' }}>{cs.excessCount}枚</b>捨ててください（選択中: {cs.selectedIndices.length}枚）
+                </p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
                     {p.hand.map((c, ci) => {
                         const selected = cs.selectedIndices.includes(ci);
                         return (
-                            <div key={c.uid} onClick={() => moves.toggleDiscard(ci)}
-                                className={`border rounded p-2 min-w-[90px] cursor-pointer transition ${selected ? 'border-red-500 bg-red-900/40 ring-2 ring-red-500' : 'border-gray-500 bg-gray-700 hover:border-gray-300'}`}>
-                                <div className="font-bold text-sm">{cName(c.defId)}</div>
-                                {!isConsumable(c) && !isHidden(c) && <div className="text-[10px] text-gray-400">C{getCardDef(c.defId).cost}/{getCardDef(c.defId).vp}VP {cTags(c.defId)}</div>}
-                                {selected && <div className="text-red-400 text-xs mt-1">✓ 捨てる</div>}
+                            <div key={c.uid} onClick={() => { soundManager.playSFX('click'); moves.toggleDiscard(ci); }}
+                                className={`game-card game-card-clickable`}
+                                style={{
+                                    minWidth: 90,
+                                    ...(selected ? { borderColor: 'var(--red)', boxShadow: '0 0 15px rgba(248, 113, 113, 0.2)' } : {}),
+                                }}>
+                                <div style={{ fontWeight: 700, fontSize: 12 }}>{cName(c.defId)}</div>
+                                {!isConsumable(c) && <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>C{getCardDef(c.defId).cost}/{getCardDef(c.defId).vp}VP</div>}
+                                <TagBadges defId={c.defId} />
+                                {selected && <div style={{ color: 'var(--red)', fontSize: 11, marginTop: 3, fontWeight: 700 }}>✓ 捨てる</div>}
                             </div>
                         );
                     })}
                 </div>
-                <button onClick={() => moves.confirmDiscard()}
+                <button onClick={() => { soundManager.playSFX('click'); moves.confirmDiscard(); }}
                     disabled={cs.selectedIndices.length !== cs.excessCount}
-                    className={`px-6 py-2 rounded font-bold ${cs.selectedIndices.length === cs.excessCount ? 'bg-red-600 hover:bg-red-500 text-white' : 'bg-gray-600 text-gray-400 cursor-not-allowed'}`}>
+                    className="btn-danger">
                     ✅ 確定（{cs.selectedIndices.length}/{cs.excessCount}）
                 </button>
             </div>
@@ -626,16 +895,30 @@ function DiscardPileModal({ discard, onClose }: { discard: GameState['discard'];
     }
     const entries = Object.entries(groups).sort((a, b) => b[1] - a[1]);
     return (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50" onClick={onClose}>
-            <div className="bg-gray-800 rounded-xl p-5 max-w-md w-full max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-                <h2 className="text-lg font-bold text-orange-400 mb-3">🗃️ 捨て札（{discard.length}枚）</h2>
-                {entries.length === 0 ? <p className="text-gray-400">なし</p> : (
-                    <table className="w-full text-sm">
-                        <thead><tr className="border-b border-gray-600"><th className="text-left py-1">カード名</th><th className="text-right py-1">枚数</th></tr></thead>
-                        <tbody>{entries.map(([name, count]) => <tr key={name} className="border-b border-gray-700"><td className="py-1">{name}</td><td className="text-right py-1 text-orange-300">{count}</td></tr>)}</tbody>
+        <div className="modal-overlay" onClick={onClose}>
+            <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 420 }}>
+                <h2 style={{ fontSize: 18, fontWeight: 700, color: 'var(--orange)', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <IconDiscard size={20} color="var(--orange)" /> 捨て札（{discard.length}枚）
+                </h2>
+                {entries.length === 0 ? <p style={{ color: 'var(--text-dim)' }}>なし</p> : (
+                    <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+                        <thead>
+                            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                                <th style={{ textAlign: 'left', padding: '6px 0', color: 'var(--text-dim)', fontWeight: 500 }}>カード名</th>
+                                <th style={{ textAlign: 'right', padding: '6px 0', color: 'var(--text-dim)', fontWeight: 500 }}>枚数</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {entries.map(([name, count]) => (
+                                <tr key={name} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                                    <td style={{ padding: '5px 0' }}>{name}</td>
+                                    <td style={{ textAlign: 'right', padding: '5px 0', color: 'var(--orange)', fontWeight: 700 }}>{count}</td>
+                                </tr>
+                            ))}
+                        </tbody>
                     </table>
                 )}
-                <button onClick={onClose} className="mt-3 bg-gray-600 hover:bg-gray-500 text-white px-4 py-1 rounded text-sm">閉じる</button>
+                <button onClick={() => { soundManager.playSFX('click'); onClose(); }} className="btn-ghost" style={{ marginTop: 16 }}>閉じる</button>
             </div>
         </div>
     );
@@ -648,54 +931,61 @@ function GameOver({ G }: { G: GameState }) {
     const [expandedPlayer, setExpandedPlayer] = useState<number | null>(null);
     const [expandedDebt, setExpandedDebt] = useState<number | null>(null);
     const [showFinalLog, setShowFinalLog] = useState(false);
+    useEffect(() => {
+        soundManager.playSFX('win');
+    }, []);
+
     if (!G.finalScores) return null;
     return (
-        <div className="min-h-screen bg-gray-900 text-gray-100 flex items-center justify-center p-4">
-            <div className="bg-gray-800 rounded-2xl p-8 max-w-3xl w-full">
-                <h1 className="text-3xl font-bold text-center text-amber-400 mb-6">🏆 ゲーム終了！</h1>
+        <div className="game-bg" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+            <div className="modal-content animate-slide-up" style={{ maxWidth: 700 }}>
+                <h1 className="trophy-glow" style={{ textAlign: 'center', fontSize: 32, fontWeight: 900, color: 'var(--gold)', marginBottom: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
+                    <IconTrophy size={48} color="var(--gold)" /> ゲーム終了！
+                </h1>
                 {G.finalScores.map((s, i) => {
                     const isExpanded = expandedPlayer === s.playerIndex;
                     const isDebtExpanded = expandedDebt === s.playerIndex;
                     return (
-                        <div key={s.playerIndex} className={`mb-3 rounded-lg p-4 ${i === 0 ? 'bg-amber-900/30 ring-2 ring-amber-500' : 'bg-gray-700'}`}>
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                    <span className="text-2xl">{['🥇', '🥈', '🥉'][i] || `${i + 1}位`}</span>
-                                    <span className="font-bold text-lg">P{s.playerIndex + 1}</span>
+                        <div key={s.playerIndex} className="glass-card" style={{
+                            marginBottom: 12, padding: 16,
+                            ...(i === 0 ? { borderColor: 'rgba(212, 168, 83, 0.3)', boxShadow: 'var(--glow-gold)' } : {}),
+                        }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                    <span style={{ fontSize: 28 }}>{['🥇', '🥈', '🥉'][i] || `${i + 1}位`}</span>
+                                    <span style={{ fontWeight: 700, fontSize: 18 }}>P{s.playerIndex + 1}</span>
                                 </div>
-                                <span className="text-3xl font-bold text-amber-300">{s.breakdown.total}VP</span>
+                                <span style={{ fontSize: 28, fontWeight: 900, color: 'var(--gold)' }}>{s.breakdown.total}VP</span>
                             </div>
-                            <div className="mt-2 grid grid-cols-3 gap-2 text-sm">
-                                <div className="bg-gray-800 rounded p-2">
-                                    <div className="text-gray-400 text-xs">建物合計</div>
-                                    <div className="text-green-400 font-bold">{s.breakdown.buildingVP + s.breakdown.bonusVP}VP</div>
-                                    <button onClick={() => setExpandedPlayer(isExpanded ? null : s.playerIndex)}
-                                        className="text-[10px] text-cyan-400 hover:text-cyan-300 mt-1">
-                                        {isExpanded ? '▲ 閉じる' : '▼ 内訳を見る'}
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginTop: 12 }}>
+                                <div className="glass-card" style={{ padding: 10 }}>
+                                    <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>建物合計</div>
+                                    <div style={{ fontWeight: 700, color: 'var(--green)', fontSize: 16 }}>{s.breakdown.buildingVP + s.breakdown.bonusVP}VP</div>
+                                    <button onClick={() => { soundManager.playSFX('click'); setExpandedPlayer(isExpanded ? null : s.playerIndex); }} className="btn-ghost" style={{ fontSize: 9, marginTop: 4, padding: '1px 6px' }}>
+                                        {isExpanded ? '▲ 閉じる' : '▼ 内訳'}
                                     </button>
                                 </div>
-                                <div className="bg-gray-800 rounded p-2">
-                                    <div className="text-gray-400 text-xs">所持金</div>
-                                    <div className="text-yellow-400 font-bold">{s.breakdown.moneyVP}VP</div>
+                                <div className="glass-card" style={{ padding: 10 }}>
+                                    <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>所持金</div>
+                                    <div style={{ fontWeight: 700, color: 'var(--gold-light)', fontSize: 16 }}>{s.breakdown.moneyVP}VP</div>
                                 </div>
-                                <div className="bg-gray-800 rounded p-2">
-                                    <div className="text-gray-400 text-xs">未払い賃金</div>
-                                    <div className="text-red-400 font-bold">{s.breakdown.debtVP}VP</div>
+                                <div className="glass-card" style={{ padding: 10 }}>
+                                    <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>未払い賃金</div>
+                                    <div style={{ fontWeight: 700, color: 'var(--red)', fontSize: 16 }}>{s.breakdown.debtVP}VP</div>
                                     {s.breakdown.rawDebts > 0 && (
-                                        <button onClick={() => setExpandedDebt(isDebtExpanded ? null : s.playerIndex)}
-                                            className="text-[10px] text-cyan-400 hover:text-cyan-300 mt-1">
-                                            {isDebtExpanded ? '▲ 閉じる' : '▼ 内訳を見る'}
+                                        <button onClick={() => { soundManager.playSFX('click'); setExpandedDebt(isDebtExpanded ? null : s.playerIndex); }} className="btn-ghost" style={{ fontSize: 9, marginTop: 4, padding: '1px 6px' }}>
+                                            {isDebtExpanded ? '▲ 閉じる' : '▼ 内訳'}
                                         </button>
                                     )}
                                 </div>
                             </div>
                             {isExpanded && s.breakdown.buildingDetails && (
-                                <div className="mt-2 bg-gray-800 rounded p-3 text-sm">
-                                    <div className="text-gray-400 text-xs mb-1">📋 建物VP内訳:</div>
+                                <div className="glass-card" style={{ marginTop: 8, padding: 12 }}>
+                                    <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 6 }}>📋 建物VP内訳:</div>
                                     {s.breakdown.buildingDetails.map((bd, bdi) => (
-                                        <div key={bdi} className="flex justify-between py-0.5 border-b border-gray-700 last:border-b-0">
-                                            <span className="text-gray-300">{bd.name}</span>
-                                            <span className="text-green-400">
+                                        <div key={bdi} style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                                            <span style={{ fontSize: 12 }}>{bd.name}</span>
+                                            <span style={{ fontSize: 12, color: 'var(--green)', fontWeight: 600 }}>
                                                 {bd.bonusVP > 0 ? `${bd.baseVP} + ${bd.bonusVP}` : `${bd.baseVP}`}VP
                                             </span>
                                         </div>
@@ -703,33 +993,34 @@ function GameOver({ G }: { G: GameState }) {
                                 </div>
                             )}
                             {isDebtExpanded && s.breakdown.rawDebts > 0 && (
-                                <div className="mt-2 bg-gray-800 rounded p-3 text-sm">
-                                    <div className="text-gray-400 text-xs mb-1">📋 未払い賃金内訳:</div>
-                                    <div className="flex justify-between py-0.5 border-b border-gray-700">
-                                        <span className="text-gray-300">未払い賃金カード</span>
-                                        <span className="text-red-400">{s.breakdown.rawDebts}枚 × -3 = {s.breakdown.rawDebts * -3}VP</span>
+                                <div className="glass-card" style={{ marginTop: 8, padding: 12 }}>
+                                    <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 6 }}>📋 未払い賃金内訳:</div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: 12, borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                                        <span>未払い賃金カード</span>
+                                        <span style={{ color: 'var(--red)' }}>{s.breakdown.rawDebts}枚 × -3 = {s.breakdown.rawDebts * -3}VP</span>
                                     </div>
                                     {s.breakdown.hasLawOffice && s.breakdown.exemptedDebts > 0 && (
-                                        <div className="flex justify-between py-0.5 border-b border-gray-700">
-                                            <span className="text-gray-300">法律事務所による免除</span>
-                                            <span className="text-green-400">+{s.breakdown.exemptedDebts * 3}VP（{s.breakdown.exemptedDebts}枚免除）</span>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: 12, borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                                            <span>法律事務所による免除</span>
+                                            <span style={{ color: 'var(--green)' }}>+{s.breakdown.exemptedDebts * 3}VP（{s.breakdown.exemptedDebts}枚免除）</span>
                                         </div>
                                     )}
-                                    <div className="flex justify-between py-0.5 mt-1 font-bold">
-                                        <span className="text-gray-200">合計</span>
-                                        <span className="text-red-400">{s.breakdown.debtVP}VP</span>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', marginTop: 4, fontWeight: 700, fontSize: 12 }}>
+                                        <span>合計</span>
+                                        <span style={{ color: 'var(--red)' }}>{s.breakdown.debtVP}VP</span>
                                     </div>
                                 </div>
                             )}
                         </div>
                     );
                 })}
-                <div className="text-center mt-4 flex gap-4 justify-center">
-                    <button onClick={() => setShowFinalLog(!showFinalLog)}
-                        className="bg-indigo-700 hover:bg-indigo-600 text-white px-6 py-3 rounded-lg text-sm font-bold">
+                <div style={{ textAlign: 'center', marginTop: 16, display: 'flex', gap: 12, justifyContent: 'center' }}>
+                    <button onClick={() => { soundManager.playSFX('click'); setShowFinalLog(!showFinalLog); }} className="btn-ghost" style={{ padding: '10px 20px' }}>
                         📜 ゲームログ
                     </button>
-                    <button onClick={() => window.location.reload()} className="bg-amber-600 hover:bg-amber-500 text-white px-8 py-3 rounded-lg text-lg font-bold">🔄 もう一度</button>
+                    <button onClick={() => { soundManager.playSFX('click'); window.location.reload(); }} className="btn-primary" style={{ padding: '10px 28px', fontSize: 16 }}>
+                        🔄 もう一度
+                    </button>
                 </div>
                 {showFinalLog && <LogModal log={G.log} onClose={() => setShowFinalLog(false)} />}
             </div>
@@ -795,7 +1086,7 @@ function canPlaceOnBuilding(G: GameState, p: GameState['players'][string], defId
 
 function canBuildAnything(p: GameState['players'][string], costReduction: number): boolean {
     for (const card of p.hand) {
-        if (isConsumable(card) || isHidden(card)) continue;
+        if (isConsumable(card)) continue;
         const def = getCardDef(card.defId);
         const cost = Math.max(0, def.cost - costReduction);
         if (p.hand.length - 1 >= cost) return true;
@@ -804,13 +1095,13 @@ function canBuildAnything(p: GameState['players'][string], costReduction: number
 }
 
 function canBuildFarmFree(p: GameState['players'][string]): boolean {
-    return p.hand.some(c => !isConsumable(c) && !isHidden(c) && getCardDef(c.defId).tags.includes('farm'));
+    return p.hand.some(c => !isConsumable(c) && getCardDef(c.defId).tags.includes('farm'));
 }
 
 function canDualConstruct(p: GameState['players'][string]): boolean {
     const costGroups: Record<number, number> = {};
     for (const c of p.hand) {
-        if (!isConsumable(c) && !isHidden(c)) {
+        if (!isConsumable(c)) {
             const def = getCardDef(c.defId);
             costGroups[def.cost] = (costGroups[def.cost] || 0) + 1;
         }

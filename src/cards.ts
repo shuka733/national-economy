@@ -1,293 +1,59 @@
 // ============================================================
-// cards.ts  –  全建物カード定義
+// cards.ts  –  カード定義統合ローダー
 // ============================================================
-import type { CardDef } from './types';
+import type { CardDef, GameVersion } from './types';
+import { BASE_CARD_DEFS } from './base_cards';
+import { GLORY_CARD_DEFS } from './glory_cards';
 
-export const CARD_DEFS: CardDef[] = [
-    // ===== コスト 1 =====
-    {
-        id: 'farm',
-        name: '農場',
-        cost: 1,
-        vp: 6,
-        copies: 8,
-        tags: ['farm'],
-        unsellable: false,
-        consumeOnUse: false,
-        effectText: '消費財を2枚引く',
-    },
-    {
-        id: 'slash_burn',
-        name: '焼畑',
-        cost: 1,
-        vp: 0,
-        copies: 2,
-        tags: ['farm'],
-        unsellable: true,
-        consumeOnUse: true,
-        effectText: '消費財を5枚引く。使用後捨て札。',
-    },
-    {
-        id: 'coffee_shop',
-        name: '珈琲店',
-        cost: 1,
-        vp: 8,
-        copies: 2,
-        tags: [],
-        unsellable: false,
-        consumeOnUse: false,
-        effectText: '家計から$5を得る',
-    },
-    {
-        id: 'design_office',
-        name: '設計事務所',
-        cost: 1,
-        vp: 8,
-        copies: 4,
-        tags: [],
-        unsellable: false,
-        consumeOnUse: false,
-        effectText: '山札から5枚公開し、1枚を手札に加え残りを捨てる',
-    },
+/** 消費財のダミーカード定義ID */
+export const CONSUMABLE_DEF_ID = '__consumable__';
+/** 消費財のカード名 */
+export const CONSUMABLE_NAME = '消費財';
 
-    // ===== コスト 2 =====
-    {
-        id: 'factory',
-        name: '工場',
-        cost: 2,
-        vp: 12,
-        copies: 8,
-        tags: ['factory'],
-        unsellable: false,
-        consumeOnUse: false,
-        effectText: '手札2枚捨てて、4枚引く',
-    },
-    {
-        id: 'construction_co',
-        name: '建設会社',
-        cost: 2,
-        vp: 10,
-        copies: 4,
-        tags: [],
-        unsellable: false,
-        consumeOnUse: false,
-        effectText: '建物を1つ作る（コスト-1）',
-    },
-    {
-        id: 'warehouse',
-        name: '倉庫',
-        cost: 2,
-        vp: 10,
-        copies: 3,
-        tags: [],
-        unsellable: true,
-        consumeOnUse: false,
-        effectText: '手札上限+4',
-    },
-    {
-        id: 'law_office',
-        name: '法律事務所',
-        cost: 2,
-        vp: 8,
-        copies: 1,
-        tags: [],
-        unsellable: true,
-        consumeOnUse: false,
-        effectText: '終了時、負債トークン5枚までを免除',
-    },
-    {
-        id: 'orchard',
-        name: '果樹園',
-        cost: 2,
-        vp: 10,
-        copies: 3,
-        tags: ['farm'],
-        unsellable: false,
-        consumeOnUse: false,
-        effectText: '手札が4枚になるまで消費財を引く',
-    },
-    {
-        id: 'company_housing',
-        name: '社宅',
-        cost: 2,
-        vp: 8,
-        copies: 2,
-        tags: [],
-        unsellable: true,
-        consumeOnUse: false,
-        effectText: '労働者上限+1',
-    },
+// 全カード定義の統合マップ (ID -> Def)
+const ALL_CARDS_MAP = new Map<string, CardDef>();
 
-    // ===== コスト 3 =====
-    {
-        id: 'real_estate',
-        name: '不動産屋',
-        cost: 3,
-        vp: 10,
-        copies: 2,
-        tags: [],
-        unsellable: true,
-        consumeOnUse: false,
-        effectText: '終了時、所有建物1つにつき+3VP',
-    },
-    {
-        id: 'pioneer',
-        name: '開拓民',
-        cost: 3,
-        vp: 14,
-        copies: 2,
-        tags: [],
-        unsellable: false,
-        consumeOnUse: false,
-        effectText: '手札にある[※農園]マーク付き建物を1つ無料で建設する',
-    },
-    {
-        id: 'restaurant',
-        name: 'レストラン',
-        cost: 3,
-        vp: 16,
-        copies: 2,
-        tags: [],
-        unsellable: false,
-        consumeOnUse: false,
-        effectText: '手札1枚捨てて、家計から$15を得る',
-    },
-    {
-        id: 'large_farm',
-        name: '大農園',
-        cost: 3,
-        vp: 12,
-        copies: 3,
-        tags: ['farm'],
-        unsellable: false,
-        consumeOnUse: false,
-        effectText: '消費財を3枚引く',
-    },
-    {
-        id: 'agri_coop',
-        name: '農協',
-        cost: 3,
-        vp: 12,
-        copies: 1,
-        tags: [],
-        unsellable: true,
-        consumeOnUse: false,
-        effectText: '終了時、手札の消費財1枚につき+3VP',
-    },
+function registerCards(defs: CardDef[]) {
+    for (const d of defs) {
+        if (ALL_CARDS_MAP.has(d.id)) {
+            console.warn(`Duplicate card ID detected: ${d.id}`);
+        }
+        ALL_CARDS_MAP.set(d.id, d);
+    }
+}
 
-    // ===== コスト 4 =====
-    {
-        id: 'general_contractor',
-        name: 'ゼネコン',
-        cost: 4,
-        vp: 18,
-        copies: 3,
-        tags: [],
-        unsellable: false,
-        consumeOnUse: false,
-        effectText: '建物を1つ作り、その後カードを2枚引く',
-    },
-    {
-        id: 'steel_mill',
-        name: '製鉄所',
-        cost: 4,
-        vp: 20,
-        copies: 3,
-        tags: ['factory'],
-        unsellable: false,
-        consumeOnUse: false,
-        effectText: 'カードを3枚引く',
-    },
-    {
-        id: 'mansion',
-        name: '邸宅',
-        cost: 4,
-        vp: 28,
-        copies: 1,
-        tags: [],
-        unsellable: true,
-        consumeOnUse: false,
-        effectText: '効果なし（VPのみ）',
-    },
-    {
-        id: 'chemical_plant',
-        name: '化学工場',
-        cost: 4,
-        vp: 18,
-        copies: 2,
-        tags: ['factory'],
-        unsellable: false,
-        consumeOnUse: false,
-        effectText: 'カードを2枚引く（手札0枚なら4枚引く）',
-    },
-    {
-        id: 'labor_union',
-        name: '労働組合',
-        cost: 4,
-        vp: 0,
-        copies: 1,
-        tags: [],
-        unsellable: true,
-        consumeOnUse: false,
-        effectText: '終了時、労働者1人につき+6VP',
-    },
-
-    // ===== コスト 5 =====
-    {
-        id: 'auto_factory',
-        name: '自動車工場',
-        cost: 5,
-        vp: 24,
-        copies: 3,
-        tags: ['factory'],
-        unsellable: false,
-        consumeOnUse: false,
-        effectText: '手札3枚捨てて、7枚引く',
-    },
-    {
-        id: 'headquarters',
-        name: '本社ビル',
-        cost: 5,
-        vp: 20,
-        copies: 1,
-        tags: [],
-        unsellable: true,
-        consumeOnUse: false,
-        effectText: '終了時、所有する[売却不可]マークにつき+6VP',
-    },
-    {
-        id: 'dual_construction',
-        name: '二胡市建設',
-        cost: 5,
-        vp: 20,
-        copies: 2,
-        tags: [],
-        unsellable: false,
-        consumeOnUse: false,
-        effectText: '同じコストの建物を2つ同時に作る（コストは1つ分のみ支払う）',
-    },
-    {
-        id: 'railroad',
-        name: '鉄道',
-        cost: 5,
-        vp: 18,
-        copies: 1,
-        tags: [],
-        unsellable: true,
-        consumeOnUse: false,
-        effectText: '終了時、所有する[※工場]マークにつき+8VP',
-    },
-];
+// 初期化: 全カードを登録
+registerCards(BASE_CARD_DEFS);
+registerCards(GLORY_CARD_DEFS);
 
 /** カードIDからカード定義を取得 */
 export function getCardDef(defId: string): CardDef {
-    const def = CARD_DEFS.find((d) => d.id === defId);
+    if (defId === CONSUMABLE_DEF_ID) {
+        // 消費財のダミー定義を返す
+        return {
+            id: CONSUMABLE_DEF_ID,
+            name: CONSUMABLE_NAME,
+            cost: 0,
+            vp: 0,
+            copies: 0,
+            tags: [],
+            unsellable: false,
+            consumeOnUse: true,
+            effectText: '消費財',
+        };
+    }
+    const def = ALL_CARDS_MAP.get(defId);
     if (!def) throw new Error(`Unknown card defId: ${defId}`);
     return def;
 }
 
-/** 消費財のダミーカード定義ID */
-export const CONSUMABLE_DEF_ID = '__consumable__';
+/** バージョンに応じたデッキ構築用カード定義リストを取得 */
+export function getDeckDefs(version: GameVersion): CardDef[] {
+    if (version === 'glory') {
+        return GLORY_CARD_DEFS;
+    }
+    return BASE_CARD_DEFS;
+}
 
-/** 消費財のカード名 */
-export const CONSUMABLE_NAME = '消費財';
+// 互換性のためにデフォルトエクスポートも維持
+export const CARD_DEFS = BASE_CARD_DEFS;
