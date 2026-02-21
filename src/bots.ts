@@ -13,6 +13,7 @@
 // ============================================================
 import type { GameState, PlayerState, Workplace, Card } from './types';
 import { getCardDef, CONSUMABLE_DEF_ID, CARD_DEFS } from './cards';
+import { getConstructionCost, canBuildModernism } from './game';
 
 // ============================================================
 // 型定義
@@ -70,16 +71,7 @@ function canAffordHire(G: GameState, pid: string): boolean {
 function canBuildAnything(p: PlayerState, costReduction: number): boolean {
     for (const card of p.hand) {
         if (isConsumable(card)) continue;
-        const def = getCardDef(card.defId);
-
-        // V5: Variable Cost Logic (Glory)
-        let base = def.cost;
-        if (def.variableCostType === 'vp_token') {
-            const threshold = def.variableCostParam || 0;
-            if (p.vpTokens >= threshold) base -= 1;
-        }
-
-        const cost = Math.max(0, base - costReduction);
+        const cost = getConstructionCost(p, card.defId, costReduction);
         if (p.hand.length - 1 >= cost) return true;
     }
     return false;
@@ -122,7 +114,9 @@ function canPlaceOnBuildingWP(G: GameState, p: PlayerState, defId: string): bool
         case 'gl_theater': return p.hand.length >= 2;
         case 'gl_colonist': return canBuildAnything(p, 0);
         case 'gl_skyscraper': return canBuildAnything(p, 0);
-        case 'gl_modernism_construction': return canBuildAnything(p, 0);
+        case 'gl_modernism_construction':
+            return canBuildModernism(p);
+
         case 'gl_teleporter': return canBuildAnything(p, 99);
 
         default: return true;
@@ -581,6 +575,14 @@ function getValidPublicWorkplaces(G: GameState, pid: string): Workplace[] {
         }
 
         if (wp.fromBuildingDefId && !canPlaceOnBuildingWP(G, p, wp.fromBuildingDefId)) return false;
+
+        let workerCost = 1;
+        if (wp.fromBuildingDefId) {
+            const def = getCardDef(wp.fromBuildingDefId);
+            if (def.workerReq) workerCost = def.workerReq;
+        }
+        if (p.availableWorkers < workerCost) return false;
+
         return true;
     });
 }
@@ -981,11 +983,6 @@ function evaluateBuildingWorkplace(G: GameState, pid: string, defId: string): nu
         case 'gl_theater': return baseScore + 65;
 
         // Glory Special
-        case 'gl_automaton': {
-            // Hire Immediate
-            if (p.workers >= p.maxWorkers) return 0;
-            return baseScore + 100; // Very high priority
-        }
         case 'gl_relic': return baseScore + 20; // 2 VP tokens (~6.6 VP)
         case 'gl_studio': return baseScore + 40; // Draw 1 + Token
 
@@ -1121,8 +1118,22 @@ function decideBuildPhase(
         const card = p.hand[i];
         if (isConsumable(card)) continue;
         const def = getCardDef(card.defId);
-        const cost = Math.max(0, def.cost - costReduction);
-        if (p.hand.length - 1 >= cost) {
+        const cost = getConstructionCost(p, card.defId, costReduction);
+
+        // 建設可否の判定（モダニズム特例）
+        let canBuild = false;
+        if (bs.action === 'gl_modernism_construction') {
+            let totalValue = 0;
+            for (const h of p.hand) {
+                if (h.uid === card.uid) continue;
+                totalValue += isConsumable(h) ? 2 : 1;
+            }
+            canBuild = totalValue >= cost;
+        } else {
+            canBuild = (p.hand.length - 1 >= cost);
+        }
+
+        if (canBuild) {
             if (bs.action === 'pioneer' && !def.tags.includes('farm')) continue;
 
             const score = difficulty === 'heuristic'
@@ -1316,48 +1327,97 @@ function decideDiscardPhase(
     if (!ds) return null;
 
     const p = G.players[pid];
-    const count = ds.count;
+    const targetCount = ds.count;
+    const isModernism = ds.reason.includes('モダニズム');
 
+    // 選択可能なカードを集める（除外カードを除く）
     const selectableIndices: number[] = [];
     for (let i = 0; i < p.hand.length; i++) {
         if (ds.excludeCardUid && p.hand[i].uid === ds.excludeCardUid) continue;
         selectableIndices.push(i);
     }
 
-    if (selectableIndices.length < count) return null;
+    // 現在の選択済みカードのカウント合計を計算（モダニズムは消費財2、建物1）
+    // dsはnull確認済みなのでそのまま利用可能だが、内部関数のスコープのためにキャプチャする
+    const localDs = ds;
+    function calcCurrentCount(): number {
+        if (!isModernism) return localDs.selectedIndices.length;
+        let total = 0;
+        for (const i of localDs.selectedIndices) {
+            if (i < p.hand.length && isConsumable(p.hand[i])) total += 2;
+            else total += 1;
+        }
+        return total;
+    }
 
-    // 現在の選択数が目標に達していない場合: 追加選択
-    if (ds.selectedIndices.length < count) {
-        // まだ選択されていないカードから選ぶ
-        const unselected = selectableIndices.filter(i => !ds.selectedIndices.includes(i));
-        if (unselected.length > 0) {
-            if (difficulty === 'random') {
-                // ランダムに1枚追加（既選択は維持）
-                const idx = unselected[Math.floor(Math.random() * unselected.length)];
-                return { moveName: 'toggleDiscard', args: [idx] };
-            } else {
-                // 保持価値が最も低いカードを1枚追加
-                const scored = unselected.map(i => ({
-                    index: i,
-                    value: evaluateCardRetainValue(p.hand[i], G, pid),
-                }));
-                scored.sort((a, b) => a.value - b.value);
-                return { moveName: 'toggleDiscard', args: [scored[0].index] };
-            }
+    // モダニズムの場合、選択可能なカードの合計コスト値を確認
+    // 手札が全部消費財でもtotalValue >= targetCountなら選択可能
+    if (isModernism) {
+        let maxPossible = 0;
+        for (const i of selectableIndices) {
+            maxPossible += isConsumable(p.hand[i]) ? 2 : 1;
+        }
+        if (maxPossible < targetCount) {
+            // どうしても払えない場合はキャンセル（建設フェーズへのロールバック）
+            return { moveName: 'confirmDiscard', args: [] };
+        }
+    } else {
+        if (selectableIndices.length < targetCount) {
+            // 手札不足（通常は発生しないが安全策）
+            return { moveName: 'confirmDiscard', args: [] };
         }
     }
 
-    // 目標数に達したら確定
-    if (ds.selectedIndices.length === count) {
-        return { moveName: 'confirmDiscard', args: [] };
+    const currentCount = calcCurrentCount();
+
+    // ---- ここからは「理想の選択リスト」と現在の選択リストを同期させる1ステップ処理 ----
+
+    // 理想の選択リストを最初から作り直す：捨てるカードをスコアが低い順に選ぶ
+    function computeIdealSelection(): number[] {
+        if (!isModernism) {
+            // 通常の場合: 保持価値が低い順にtargetCount枚を選択
+            const scored = selectableIndices.map(i => ({
+                index: i,
+                value: evaluateCardRetainValue(p.hand[i], G, pid),
+            }));
+            scored.sort((a, b) => a.value - b.value);
+            return scored.slice(0, targetCount).map(s => s.index);
+        } else {
+            // モダニズムの場合: 消費財1枚=2カウント分として必要合計数に達する選択
+            const scored = selectableIndices.map(i => ({
+                index: i,
+                value: evaluateCardRetainValue(p.hand[i], G, pid),
+                worth: isConsumable(p.hand[i]) ? 2 : 1,
+            }));
+            scored.sort((a, b) => a.value - b.value);
+            const selected: number[] = [];
+            let total = 0;
+            for (const s of scored) {
+                if (total >= targetCount) break;
+                selected.push(s.index);
+                total += s.worth;
+            }
+            return selected;
+        }
     }
 
-    // 超過選択されている場合（通常発生しないが安全策）: 1枚解除
-    if (ds.selectedIndices.length > count) {
-        return { moveName: 'toggleDiscard', args: [ds.selectedIndices[ds.selectedIndices.length - 1]] };
+    const idealSelection = computeIdealSelection();
+
+    // 現在の選択と理想の選択を同期（1アクションずつ修正）
+    // まず「外すべきカード」（現在選択中だが理想外）を外す
+    const toDeselect = ds.selectedIndices.filter(i => !idealSelection.includes(i));
+    if (toDeselect.length > 0) {
+        return { moveName: 'toggleDiscard', args: [toDeselect[0]] };
     }
 
-    return null;
+    // 次に「追加すべきカード」（理想に入っているが未選択）を追加
+    const toSelect = idealSelection.filter(i => !ds.selectedIndices.includes(i));
+    if (toSelect.length > 0) {
+        return { moveName: 'toggleDiscard', args: [toSelect[0]] };
+    }
+
+    // 選択が理想と一致したら確定
+    return { moveName: 'confirmDiscard', args: [] };
 }
 
 /** カードの保持価値を評価（低い=捨ててよい） - v3改善⑧ */

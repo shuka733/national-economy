@@ -142,7 +142,7 @@ function canBuildAnything(p: PlayerState, costReduction: number, isModernism: bo
 }
 
 /** モダニズム建設が可能か（消費財2枚分カウント） */
-function canBuildModernism(p: PlayerState): boolean {
+export function canBuildModernism(p: PlayerState): boolean {
     for (const card of p.hand) {
         if (isConsumable(card)) continue;
         const cost = getConstructionCost(p, card.defId, 0);
@@ -1138,10 +1138,14 @@ export const NationalEconomy: Game<GameState> = {
 
             if (G.phase === 'build' && G.buildState) {
                 const action = G.buildState.action;
-                const buildingDefIds = ['construction_co', 'pioneer', 'general_contractor'];
+                const buildingDefIds = ['construction_co', 'pioneer', 'general_contractor', 'gl_colonist', 'gl_skyscraper', 'gl_modernism_construction', 'gl_teleporter'];
                 if (buildingDefIds.includes(action)) {
                     const slot = p.buildings.find(b => b.card.defId === action && b.workerPlaced);
-                    if (slot) { slot.workerPlaced = false; p.availableWorkers++; }
+                    if (slot) {
+                        slot.workerPlaced = false;
+                        const def = getCardDef(action);
+                        p.availableWorkers += def.workerReq || 1;
+                    }
                 } else {
                     for (const wp of G.publicWorkplaces) {
                         if (wp.specialEffect === 'build' && wp.workers.includes(parseInt(pid))) {

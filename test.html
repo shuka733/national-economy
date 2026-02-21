@@ -1,10 +1,80 @@
 <!DOCTYPE html>
 <html>
+
 <head>
     <title>CPU Test - National Economy</title>
+    <style>
+        body {
+            background: #0d1117;
+            color: #c9d1d9;
+            font-family: monospace;
+            padding: 20px;
+        }
+
+        h1 {
+            color: #58a6ff;
+        }
+
+        .menu {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .menu a {
+            display: inline-block;
+            padding: 10px 20px;
+            background: #21262d;
+            border: 1px solid #30363d;
+            border-radius: 6px;
+            color: #58a6ff;
+            text-decoration: none;
+            font-size: 14px;
+        }
+
+        .menu a:hover {
+            background: #30363d;
+        }
+
+        .menu a.active {
+            background: #1f6feb;
+            color: #fff;
+            border-color: #1f6feb;
+        }
+    </style>
 </head>
+
 <body>
-    <h1>CPU自動テスト実行中...</h1>
-    <script type="module" src="/src/cpu_test.ts"></script>
+    <h1>National Economy – CPU自動テスト</h1>
+    <div class="menu" id="menu"></div>
+    <script type="module">
+        // URLパラメータでテスト種別を切り替え
+        const params = new URLSearchParams(window.location.search);
+        const mode = params.get('mode') ?? 'base';
+
+        const menu = document.getElementById('menu');
+        const items = [
+            { label: '🏠 Base版テスト', mode: 'base' },
+            { label: '✨ Glory版シミュレーション', mode: 'glory' },
+            { label: '📡 P2Pテスト', mode: 'p2p' },
+        ];
+        items.forEach(item => {
+            const a = document.createElement('a');
+            a.href = `?mode=${item.mode}`;
+            a.textContent = item.label;
+            if (item.mode === mode) a.classList.add('active');
+            menu.appendChild(a);
+        });
+
+        // モードに応じたスクリプトを読み込む
+        if (mode === 'glory') {
+            // グローリー拡張シミュレーション
+            import('/src/sim_glory.ts');
+        } else {
+            // Base版 / P2Pテスト（cpu_test.ts内でmode判定）
+            import('/src/cpu_test.ts');
+        }
+    </script>
 </body>
+
 </html>
