@@ -61,16 +61,35 @@ export interface BuildSelectState {
     action: string; // 'build','construction_co','pioneer','general_contractor','dual_construction'
 }
 
-/** 給料日状態 */
-export interface PaydayState {
-    currentPlayerIndex: number;
-    wagePerWorker: number;
+/** 給料日 個別プレイヤー状態 */
+export interface PaydayPlayerState {
     totalWage: number;
+    needsSelling: boolean;       // 売却操作が必要か
     selectedBuildingIndices: number[]; // 売却選択中の建物インデックス
+    confirmed: boolean;          // 操作完了したか
 }
 
-/** 精算状態 */
+/** 給料日状態（全プレイヤー同時処理） */
+export interface PaydayState {
+    wagePerWorker: number;
+    playerStates: { [pid: string]: PaydayPlayerState };
+    // 後方互換用: 現在操作表示用に残すが、同時処理では複数プレイヤーが操作中
+    currentPlayerIndex: number;
+    totalWage: number;
+    selectedBuildingIndices: number[];
+}
+
+/** 精算 個別プレイヤー状態 */
+export interface CleanupPlayerState {
+    excessCount: number;
+    selectedIndices: number[];
+    confirmed: boolean;          // 操作完了したか
+}
+
+/** 精算状態（全プレイヤー同時処理） */
 export interface CleanupState {
+    playerStates: { [pid: string]: CleanupPlayerState };
+    // 後方互換用
     currentPlayerIndex: number;
     excessCount: number;
     selectedIndices: number[];
@@ -134,6 +153,9 @@ export interface GameState {
     log: { text: string; round: number }[]; // ゲームログ
 
     finalScores: { playerIndex: number; score: number; breakdown: ScoreBreakdown }[] | null;
+
+    /** P2P（オンライン）モードかどうか */
+    isOnline: boolean;
 }
 
 export interface ScoreBreakdown {

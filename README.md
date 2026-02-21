@@ -4,6 +4,7 @@
 > 基本セットとGlory拡張に対応し、2〜4人でのローカル対戦・CPU対戦・P2Pオンライン対戦が楽しめます。
 
 **🌐 オンラインプレイ**: [https://shuka733.github.io/national-economy/](https://shuka733.github.io/national-economy/)
+**💻 ローカルホスト**: [http://localhost:5173/national-economy/](http://localhost:5173/national-economy/)
 
 ---
 

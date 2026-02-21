@@ -493,9 +493,9 @@ export function decideCPUMove(
         case 'discard':
             return decideDiscardPhase(G, playerID, difficulty);
         case 'payday':
-            return decidePaydayPhase(G);
+            return decidePaydayPhase(G, playerID);
         case 'cleanup':
-            return decideCleanupPhase(G);
+            return decideCleanupPhase(G, playerID);
         case 'designOffice':
             return decideDesignOfficePhase(G, playerID, difficulty);
         case 'dualConstruction':
@@ -1326,30 +1326,38 @@ function decideDiscardPhase(
 
     if (selectableIndices.length < count) return null;
 
-    let selectedIndices: number[];
-
-    if (difficulty === 'random') {
-        selectedIndices = shuffle(selectableIndices).slice(0, count);
-    } else {
-        const scored = selectableIndices.map(i => ({
-            index: i,
-            value: evaluateCardRetainValue(p.hand[i], G, pid),
-        }));
-        scored.sort((a, b) => a.value - b.value);
-        selectedIndices = scored.slice(0, count).map(s => s.index);
+    // 現在の選択数が目標に達していない場合: 追加選択
+    if (ds.selectedIndices.length < count) {
+        // まだ選択されていないカードから選ぶ
+        const unselected = selectableIndices.filter(i => !ds.selectedIndices.includes(i));
+        if (unselected.length > 0) {
+            if (difficulty === 'random') {
+                // ランダムに1枚追加（既選択は維持）
+                const idx = unselected[Math.floor(Math.random() * unselected.length)];
+                return { moveName: 'toggleDiscard', args: [idx] };
+            } else {
+                // 保持価値が最も低いカードを1枚追加
+                const scored = unselected.map(i => ({
+                    index: i,
+                    value: evaluateCardRetainValue(p.hand[i], G, pid),
+                }));
+                scored.sort((a, b) => a.value - b.value);
+                return { moveName: 'toggleDiscard', args: [scored[0].index] };
+            }
+        }
     }
 
-    const toToggle = selectedIndices.filter(i => !ds.selectedIndices.includes(i));
-    const toUntoggle = ds.selectedIndices.filter(i => !selectedIndices.includes(i));
-
-    if (toUntoggle.length > 0) {
-        return { moveName: 'toggleDiscard', args: [toUntoggle[0]] };
-    }
-    if (toToggle.length > 0) {
-        return { moveName: 'toggleDiscard', args: [toToggle[0]] };
+    // 目標数に達したら確定
+    if (ds.selectedIndices.length === count) {
+        return { moveName: 'confirmDiscard', args: [] };
     }
 
-    return { moveName: 'confirmDiscard', args: [] };
+    // 超過選択されている場合（通常発生しないが安全策）: 1枚解除
+    if (ds.selectedIndices.length > count) {
+        return { moveName: 'toggleDiscard', args: [ds.selectedIndices[ds.selectedIndices.length - 1]] };
+    }
+
+    return null;
 }
 
 /** カードの保持価値を評価（低い=捨ててよい） - v3改善⑧ */
@@ -1409,34 +1417,38 @@ function evaluateCardRetainValue(card: Card, G: GameState, pid: string): number 
 //   売却優先2: 低コスト建物（再建設容易）
 //   売却禁止: 建設系・金策系（公共化で他人を有利にする）
 // ============================================================
-function decidePaydayPhase(G: GameState): CPUAction | null {
+function decidePaydayPhase(G: GameState, activePid: string): CPUAction | null {
     const ps = G.paydayState;
     if (!ps) return null;
 
-    const pid = String(ps.currentPlayerIndex);
+    // playerStatesから自分の状態を取得
+    const pps = ps.playerStates[activePid];
+    if (!pps || pps.confirmed) return null; // 既に確認済みならスキップ
+
+    const pid = activePid;
     const p = G.players[pid];
     const remainingRounds = 9 - G.round;
 
     // 既にお金で払える場合（建物売却不要）
-    if (p.money >= ps.totalWage) {
+    if (p.money >= pps.totalWage) {
         // 売却選択なし＆お金で払える → confirmPayday でOK
-        if (ps.selectedBuildingIndices.length === 0) {
+        if (pps.selectedBuildingIndices.length === 0) {
             return { moveName: 'confirmPayday', args: [] };
         }
         // 既に建物を選択してしまっている場合は解除
-        return { moveName: 'togglePaydaySell', args: [ps.selectedBuildingIndices[0]] };
+        return { moveName: 'togglePaydaySell', args: [pps.selectedBuildingIndices[0]] };
     }
 
     // 選択済み売却額を計算
-    const selectedVPs = ps.selectedBuildingIndices.map(bi => getCardDef(p.buildings[bi].card.defId).vp);
+    const selectedVPs = pps.selectedBuildingIndices.map(bi => getCardDef(p.buildings[bi].card.defId).vp);
     const totalFunds = p.money + selectedVPs.reduce((sum, vp) => sum + vp, 0);
 
-    if (totalFunds >= ps.totalWage) {
+    if (totalFunds >= pps.totalWage) {
         // 過剰売却チェック（game.tsに合わせて全選択でも1つ除いて払えるなら過剰）
         if (selectedVPs.length > 0) {
             const minVP = Math.min(...selectedVPs);
-            if ((totalFunds - minVP) >= ps.totalWage) {
-                const minIdx = ps.selectedBuildingIndices.find(bi => getCardDef(p.buildings[bi].card.defId).vp === minVP);
+            if ((totalFunds - minVP) >= pps.totalWage) {
+                const minIdx = pps.selectedBuildingIndices.find(bi => getCardDef(p.buildings[bi].card.defId).vp === minVP);
                 if (minIdx !== undefined) {
                     return { moveName: 'togglePaydaySell', args: [minIdx] };
                 }
@@ -1444,7 +1456,7 @@ function decidePaydayPhase(G: GameState): CPUAction | null {
         }
         // ★修正: 建物を選んでいる場合は confirmPaydaySell、
         // 選択が空（過剰チェックで全解除された）の場合はお金で払えるので confirmPayday
-        if (ps.selectedBuildingIndices.length > 0) {
+        if (pps.selectedBuildingIndices.length > 0) {
             return { moveName: 'confirmPaydaySell', args: [] };
         }
         return { moveName: 'confirmPayday', args: [] };
@@ -1455,7 +1467,7 @@ function decidePaydayPhase(G: GameState): CPUAction | null {
         .map((b, i) => {
             const def = getCardDef(b.card.defId);
             if (def.unsellable) return null;
-            if (ps.selectedBuildingIndices.includes(i)) return null;
+            if (pps.selectedBuildingIndices.includes(i)) return null;
 
             const category = getCardCategory(def.id);
             const danger = SELL_DANGER[def.id] || 3;
@@ -1492,7 +1504,7 @@ function decidePaydayPhase(G: GameState): CPUAction | null {
     // ★ユーザー指摘: 資金不足時の売却は「任意」ではなく「強制」
     // つまり、払えないなら売れるものを売って払わなければならない
     // 選択肢があるのは「どれを売るか」だけ
-    const deficit = ps.totalWage - totalFunds;
+    const deficit = pps.totalWage - totalFunds;
 
     if (deficit > 0) {
         // 資金不足: 強制的に売却候補（一番安いもの）を選択
@@ -1503,7 +1515,7 @@ function decidePaydayPhase(G: GameState): CPUAction | null {
 
         // 売るものがない場合
         // 既に選択された売却候補があるなら、それを確定して少しでも負債を減らす
-        if (ps.selectedBuildingIndices.length > 0) {
+        if (pps.selectedBuildingIndices.length > 0) {
             return { moveName: 'confirmPaydaySell', args: [] };
         }
 
@@ -1514,10 +1526,10 @@ function decidePaydayPhase(G: GameState): CPUAction | null {
     // V4: 借金戦略 (Aggressive Debt)
     // 資金は足りているが、あえて払わない戦略の検討（終盤のみ）
     // 未払いペナルティ(-3VP/枚) < 守る建物のVP ならば、あえて払わない
-    if (remainingRounds <= 1 && totalFunds >= ps.totalWage) {
+    if (remainingRounds <= 1 && totalFunds >= pps.totalWage) {
         // 現在選択されている売却対象の中に、高VPのものが含まれているか？
         // 含まれているなら、それを「売らない」ようにチェックを外す
-        for (const bi of ps.selectedBuildingIndices) {
+        for (const bi of pps.selectedBuildingIndices) {
             const b = p.buildings[bi];
             const def = getCardDef(b.card.defId);
             // 損益分岐点: 建物VP > 3 (未払いペナルティ)
@@ -1538,17 +1550,21 @@ function decidePaydayPhase(G: GameState): CPUAction | null {
 // ============================================================
 // Cleanup Phase: 精算（手札超過分を捨てる）
 // ============================================================
-function decideCleanupPhase(G: GameState): CPUAction | null {
+function decideCleanupPhase(G: GameState, activePid: string): CPUAction | null {
     const cs = G.cleanupState;
     if (!cs) return null;
 
-    const pid = String(cs.currentPlayerIndex);
+    // playerStatesから自分の状態を取得
+    const cps = cs.playerStates[activePid];
+    if (!cps || cps.confirmed) return null; // 既に確認済みならスキップ
+
+    const pid = activePid;
     const p = G.players[pid];
 
-    if (cs.selectedIndices.length < cs.excessCount) {
+    if (cps.selectedIndices.length < cps.excessCount) {
         const scored = p.hand
             .map((card, i) => ({ index: i, value: evaluateCardRetainValue(card, G, pid) }))
-            .filter(x => !cs.selectedIndices.includes(x.index))
+            .filter(x => !cps.selectedIndices.includes(x.index))
             .sort((a, b) => a.value - b.value);
 
         if (scored.length > 0) {
@@ -1556,7 +1572,7 @@ function decideCleanupPhase(G: GameState): CPUAction | null {
         }
     }
 
-    if (cs.selectedIndices.length === cs.excessCount) {
+    if (cps.selectedIndices.length === cps.excessCount) {
         return { moveName: 'confirmDiscard', args: [] };
     }
 

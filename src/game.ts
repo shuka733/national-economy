@@ -2,7 +2,7 @@
 // game.ts  –  ナショナルエコノミー ゲームロジック (v5)
 // ============================================================
 import type { Game, Ctx } from 'boardgame.io';
-import { INVALID_MOVE } from 'boardgame.io/core';
+import { INVALID_MOVE, Stage } from 'boardgame.io/core';
 import type { GameState, PlayerState, Workplace, Card, BuildingVPDetail, ScoreBreakdown, GameVersion } from './types';
 import { getCardDef, getDeckDefs, CONSUMABLE_DEF_ID } from './cards';
 
@@ -402,77 +402,106 @@ function advanceTurnOrPhase(G: GameState, ctx: Ctx, events: any) {
 function startPayday(G: GameState, _ctx: Ctx, _events: any) {
     G.phase = 'payday';
     const wage = getWagePerWorker(G.round);
-    pushLog(G, `-- - 給料日（賃金$${wage}/人） ---`);
+    pushLog(G, `--- 給料日（賌金$${wage}/人） ---`);
+
+    // 全プレイヤーの給料日状態を同時に初期化
+    const playerStates: { [pid: string]: import('./types').PaydayPlayerState } = {};
+    let firstNeedsSelling = -1;
+
     for (let i = 0; i < Object.keys(G.players).length; i++) {
         const p = G.players[String(i)];
-        // Glory: ロボットは賃金不要
         const payingWorkers = Math.max(0, p.workers - p.robotWorkers);
         const total = wage * payingWorkers;
+
         if (p.money >= total) {
+            // 自動支払い
             p.money -= total;
             G.household += total;
-            pushLog(G, `P${i + 1}: 賃金$${total}を支払い（残金$${p.money}）`);
+            pushLog(G, `P${i + 1}: 賌金$${total}を支払い（残金$${p.money}）`);
+            playerStates[String(i)] = {
+                totalWage: total,
+                needsSelling: false,
+                selectedBuildingIndices: [],
+                confirmed: true,
+            };
         } else {
             const hasSellable = p.buildings.some(b => !getCardDef(b.card.defId).unsellable);
-            if (hasSellable && p.money < total) {
-                G.paydayState = { currentPlayerIndex: i, wagePerWorker: wage, totalWage: total, selectedBuildingIndices: [] };
-                G.activePlayer = i;
-                return;
+            if (hasSellable) {
+                // 売却が必要→操作待ち
+                playerStates[String(i)] = {
+                    totalWage: total,
+                    needsSelling: true,
+                    selectedBuildingIndices: [],
+                    confirmed: false,
+                };
+                if (firstNeedsSelling < 0) firstNeedsSelling = i;
+            } else {
+                // 売却可能な建物なし→自動で負債処理
+                const paid = p.money;
+                G.household += paid;
+                p.money = 0;
+                const debt = total - paid;
+                p.unpaidDebts += debt;
+                pushLog(G, `P${i + 1}: 賌金$${total}不足（$${paid}のみ支払）、$${debt}が未払い（負債合計: ${p.unpaidDebts}）`);
+                playerStates[String(i)] = {
+                    totalWage: total,
+                    needsSelling: false,
+                    selectedBuildingIndices: [],
+                    confirmed: true,
+                };
             }
-            const paid = p.money;
-            G.household += paid;
-            p.money = 0;
-            const debt = total - paid;
-            p.unpaidDebts += debt;
-            pushLog(G, `P${i + 1}: 賃金$${total}不足（$${paid}のみ支払）、$${debt}が未払い（負債合計: ${p.unpaidDebts}）`);
         }
     }
-    finishPayday(G, _ctx, _events);
+
+    G.paydayState = {
+        wagePerWorker: wage,
+        playerStates,
+        // 後方互換用
+        currentPlayerIndex: firstNeedsSelling >= 0 ? firstNeedsSelling : 0,
+        totalWage: firstNeedsSelling >= 0 ? playerStates[String(firstNeedsSelling)].totalWage : 0,
+        selectedBuildingIndices: [],
+    };
+    G.activePlayer = firstNeedsSelling >= 0 ? firstNeedsSelling : 0;
+
+    // 全員が自動処理済みなら即座に次へ
+    const allConfirmed = Object.values(playerStates).every(ps => ps.confirmed);
+    if (allConfirmed) {
+        finishPayday(G, _ctx, _events);
+    } else {
+        if (G.isOnline) {
+            // P2P対応: 全未確認プレイヤーが同時にMoveを送信できるようにする
+            _events.setActivePlayers({ all: Stage.NULL });
+        } else {
+            // ホットシート: ctx.currentPlayerをcurrentPlayerIndexに同期
+            _events.endTurn({ next: String(G.paydayState.currentPlayerIndex) });
+        }
+    }
 }
 
+/** 給料日の続行: 全員confirmedなら次のフェーズへ、そうでなければ次の未確認プレイヤーに切り替え */
 function continuePayday(G: GameState, ctx: Ctx, events: any) {
-    const wage = getWagePerWorker(G.round);
-    const startIdx = G.paydayState!.currentPlayerIndex;
-    const cp = G.players[String(startIdx)];
-    const payingWorkers = Math.max(0, cp.workers - cp.robotWorkers);
-    const total = wage * payingWorkers;
-    if (cp.money >= total) {
-        cp.money -= total;
-        G.household += total;
-        pushLog(G, `P${startIdx + 1}: 賃金$${total}を支払い（残金$${cp.money}）`);
+    if (!G.paydayState) return;
+    const allConfirmed = Object.values(G.paydayState.playerStates).every(ps => ps.confirmed);
+    if (allConfirmed) {
+        G.paydayState = null;
+        finishPayday(G, ctx, events);
     } else {
-        const paid = cp.money;
-        G.household += paid;
-        cp.money = 0;
-        const debt = total - paid;
-        cp.unpaidDebts += debt;
-        pushLog(G, `P${startIdx + 1}: 賃金$${total}不足（$${paid}のみ支払）、$${debt}が未払い（負債合計: ${cp.unpaidDebts}）`);
-    }
-    for (let i = startIdx + 1; i < Object.keys(G.players).length; i++) {
-        const p = G.players[String(i)];
-        const payingWorkers = Math.max(0, p.workers - p.robotWorkers);
-        const t = wage * payingWorkers;
-        if (p.money >= t) {
-            p.money -= t;
-            G.household += t;
-            pushLog(G, `P${i + 1}: 賃金$${t}を支払い（残金$${p.money}）`);
-        } else {
-            const hasSellable = p.buildings.some(b => !getCardDef(b.card.defId).unsellable);
-            if (hasSellable && p.money < t) {
-                G.paydayState = { currentPlayerIndex: i, wagePerWorker: wage, totalWage: t, selectedBuildingIndices: [] };
-                G.activePlayer = i;
-                return;
+        // 次の未確認プレイヤーにcurrentPlayerIndexを更新
+        const nextUnconfirmed = Object.entries(G.paydayState.playerStates)
+            .find(([, ps]) => !ps.confirmed);
+        if (nextUnconfirmed) {
+            const nextPid = parseInt(nextUnconfirmed[0]);
+            G.paydayState.currentPlayerIndex = nextPid;
+            G.paydayState.totalWage = nextUnconfirmed[1].totalWage;
+            G.paydayState.selectedBuildingIndices = nextUnconfirmed[1].selectedBuildingIndices;
+            G.activePlayer = nextPid;
+            if (!G.isOnline) {
+                // ホットシート: ctx.currentPlayerを同期
+                events.endTurn({ next: String(nextPid) });
             }
-            const paid = p.money;
-            G.household += paid;
-            p.money = 0;
-            const debt = t - paid;
-            p.unpaidDebts += debt;
-            pushLog(G, `P${i + 1}: 賃金$${t}不足（$${paid}のみ支払）、$${debt}が未払い（負債合計: ${p.unpaidDebts}）`);
+            // P2P: endTurnは呼ばず、setActivePlayersで全員がMove可能な状態を維持
         }
     }
-    G.paydayState = null;
-    finishPayday(G, ctx, events);
 }
 
 function finishPayday(G: GameState, ctx: Ctx, events: any) {
@@ -482,31 +511,78 @@ function finishPayday(G: GameState, ctx: Ctx, events: any) {
 
 function startCleanup(G: GameState, _ctx: Ctx, events: any) {
     G.phase = 'cleanup';
+
+    // 全プレイヤーの精算状態を同時に初期化
+    const playerStates: { [pid: string]: import('./types').CleanupPlayerState } = {};
+    let firstNeedsCleanup = -1;
+    let anyNeedsCleanup = false;
+
     for (let i = 0; i < Object.keys(G.players).length; i++) {
         const p = G.players[String(i)];
-        if (p.hand.length > p.maxHandSize) {
-            const excess = p.hand.length - p.maxHandSize;
-            G.cleanupState = { currentPlayerIndex: i, excessCount: excess, selectedIndices: [] };
-            G.activePlayer = i;
-            return;
+        const excess = Math.max(0, p.hand.length - p.maxHandSize);
+        if (excess > 0) {
+            playerStates[String(i)] = {
+                excessCount: excess,
+                selectedIndices: [],
+                confirmed: false,
+            };
+            anyNeedsCleanup = true;
+            if (firstNeedsCleanup < 0) firstNeedsCleanup = i;
+        } else {
+            playerStates[String(i)] = {
+                excessCount: 0,
+                selectedIndices: [],
+                confirmed: true,
+            };
         }
     }
-    finishCleanup(G, _ctx, events);
+
+    if (!anyNeedsCleanup) {
+        finishCleanup(G, _ctx, events);
+        return;
+    }
+
+    G.cleanupState = {
+        playerStates,
+        // 後方互換用
+        currentPlayerIndex: firstNeedsCleanup,
+        excessCount: firstNeedsCleanup >= 0 ? playerStates[String(firstNeedsCleanup)].excessCount : 0,
+        selectedIndices: [],
+    };
+    G.activePlayer = firstNeedsCleanup;
+    if (G.isOnline) {
+        // P2P対応: 全未確認プレイヤーが同時にMoveを送信できるようにする
+        events.setActivePlayers({ all: Stage.NULL });
+    } else {
+        // ホットシート: ctx.currentPlayerをcurrentPlayerIndexに同期
+        events.endTurn({ next: String(firstNeedsCleanup) });
+    }
 }
 
+/** 精算の続行: 全員confirmedなら次のフェーズへ、そうでなければ次の未確認プレイヤーに切り替え */
 function continueCleanup(G: GameState, ctx: Ctx, events: any) {
-    const startIdx = G.cleanupState!.currentPlayerIndex;
-    for (let i = startIdx + 1; i < Object.keys(G.players).length; i++) {
-        const p = G.players[String(i)];
-        if (p.hand.length > p.maxHandSize) {
-            const excess = p.hand.length - p.maxHandSize;
-            G.cleanupState = { currentPlayerIndex: i, excessCount: excess, selectedIndices: [] };
-            G.activePlayer = i;
-            return;
+    if (!G.cleanupState) return;
+    const allConfirmed = Object.values(G.cleanupState.playerStates).every(ps => ps.confirmed);
+    if (allConfirmed) {
+        G.cleanupState = null;
+        finishCleanup(G, ctx, events);
+    } else {
+        // 次の未確認プレイヤーにcurrentPlayerIndexを更新
+        const nextUnconfirmed = Object.entries(G.cleanupState.playerStates)
+            .find(([, ps]) => !ps.confirmed);
+        if (nextUnconfirmed) {
+            const nextPid = parseInt(nextUnconfirmed[0]);
+            G.cleanupState.currentPlayerIndex = nextPid;
+            G.cleanupState.excessCount = nextUnconfirmed[1].excessCount;
+            G.cleanupState.selectedIndices = nextUnconfirmed[1].selectedIndices;
+            G.activePlayer = nextPid;
+            if (!G.isOnline) {
+                // ホットシート: ctx.currentPlayerを同期
+                events.endTurn({ next: String(nextPid) });
+            }
+            // P2P: endTurnは呼ばず、setActivePlayersで全員がMove可能な状態を維持
         }
     }
-    G.cleanupState = null;
-    finishCleanup(G, ctx, events);
 }
 
 function finishCleanup(G: GameState, _ctx: Ctx, _events: any) {
@@ -691,6 +767,7 @@ export const NationalEconomy: Game<GameState> = {
             activePlayer: 0,
             log: initialLog,
             finalScores: null,
+            isOnline: !!(setupData && setupData.isOnline),
         };
     },
 
@@ -789,12 +866,20 @@ export const NationalEconomy: Game<GameState> = {
         },
 
         // ============ カード捨て選択トグル ============
-        toggleDiscard: ({ G }, cardIndex: number) => {
-            if (!G.discardState && !G.cleanupState) return INVALID_MOVE;
-            const state = G.discardState || G.cleanupState!;
-
-            // Modernism check for over-selection prevention? 
-            // Ideally we should allow toggling and just validate at confirm.
+        toggleDiscard: ({ G, ctx, playerID }, cardIndex: number) => {
+            // 精算フェーズの場合は個別playerStateを操作
+            if (G.cleanupState) {
+                // P2P対応: playerIDから操作元プレイヤーを特定
+                const pid = (playerID !== undefined && playerID !== null) ? String(playerID) : String(G.cleanupState.currentPlayerIndex);
+                const cps = G.cleanupState.playerStates[pid];
+                if (!cps || cps.confirmed) return INVALID_MOVE;
+                const idx = cps.selectedIndices.indexOf(cardIndex);
+                if (idx >= 0) cps.selectedIndices.splice(idx, 1);
+                else cps.selectedIndices.push(cardIndex);
+                return;
+            }
+            if (!G.discardState) return INVALID_MOVE;
+            const state = G.discardState;
 
             const idx = state.selectedIndices.indexOf(cardIndex);
             if (idx >= 0) state.selectedIndices.splice(idx, 1);
@@ -802,14 +887,18 @@ export const NationalEconomy: Game<GameState> = {
         },
 
         // ============ カード捨て確定 ============
-        confirmDiscard: ({ G, ctx, events }) => {
+        confirmDiscard: ({ G, ctx, events, playerID }) => {
             if (G.phase === 'cleanup' && G.cleanupState) {
-                const cs = G.cleanupState;
-                if (cs.selectedIndices.length !== cs.excessCount) return INVALID_MOVE;
-                const p = G.players[String(cs.currentPlayerIndex)];
-                const sorted = [...cs.selectedIndices].sort((a, b) => b - a);
+                // P2P対応: playerIDから操作元プレイヤーを特定
+                const pid = (playerID !== undefined && playerID !== null) ? String(playerID) : String(G.cleanupState.currentPlayerIndex);
+                const cps = G.cleanupState.playerStates[pid];
+                if (!cps || cps.confirmed) return INVALID_MOVE;
+                if (cps.selectedIndices.length !== cps.excessCount) return INVALID_MOVE;
+                const p = G.players[pid];
+                const sorted = [...cps.selectedIndices].sort((a, b) => b - a);
                 for (const i of sorted) { discardCard(G, p.hand[i]); p.hand.splice(i, 1); }
-                pushLog(G, `P${cs.currentPlayerIndex + 1}が精算で${cs.excessCount}枚を捨てた (手札: ${p.hand.length}枚)`);
+                pushLog(G, `P${parseInt(pid) + 1}が精算で${cps.excessCount}枚を捨てた (手札: ${p.hand.length}枚)`);
+                cps.confirmed = true;
                 continueCleanup(G, ctx, events);
                 return;
             }
@@ -1276,49 +1365,57 @@ export const NationalEconomy: Game<GameState> = {
         },
 
         // ============ 給料日: 建物売却トグル ============
-        togglePaydaySell: ({ G }, buildingIndex: number) => {
+        togglePaydaySell: ({ G, playerID }, buildingIndex: number) => {
             if (G.phase !== 'payday' || !G.paydayState) return INVALID_MOVE;
             const ps = G.paydayState;
-            const p = G.players[String(ps.currentPlayerIndex)];
+            // P2P対応: playerIDから操作元プレイヤーを特定
+            const pid = (playerID !== undefined && playerID !== null) ? String(playerID) : String(ps.currentPlayerIndex);
+            const pps = ps.playerStates[pid];
+            if (!pps || pps.confirmed || !pps.needsSelling) return INVALID_MOVE;
+
+            const p = G.players[pid];
             if (buildingIndex < 0 || buildingIndex >= p.buildings.length) return INVALID_MOVE;
 
             const def = getCardDef(p.buildings[buildingIndex].card.defId);
             if (def.unsellable) return INVALID_MOVE;
 
-            const idx = ps.selectedBuildingIndices.indexOf(buildingIndex);
+            const idx = pps.selectedBuildingIndices.indexOf(buildingIndex);
             if (idx >= 0) {
-                ps.selectedBuildingIndices.splice(idx, 1);
+                pps.selectedBuildingIndices.splice(idx, 1);
             } else {
-                ps.selectedBuildingIndices.push(buildingIndex);
+                pps.selectedBuildingIndices.push(buildingIndex);
             }
         },
 
         // ============ 給料日: 売却確定 ============
-        confirmPaydaySell: ({ G, ctx, events }) => {
+        confirmPaydaySell: ({ G, ctx, events, playerID }) => {
             if (G.phase !== 'payday' || !G.paydayState) return INVALID_MOVE;
             const ps = G.paydayState;
-            const pid = String(ps.currentPlayerIndex);
+            // P2P対応: playerIDから操作元プレイヤーを特定
+            const pid = (playerID !== undefined && playerID !== null) ? String(playerID) : String(ps.currentPlayerIndex);
+            const pps = ps.playerStates[pid];
+            if (!pps || pps.confirmed) return INVALID_MOVE;
             const p = G.players[pid];
 
-            const selectedVPs = ps.selectedBuildingIndices.map(bi => getCardDef(p.buildings[bi].card.defId).vp);
+            const selectedVPs = pps.selectedBuildingIndices.map(bi => getCardDef(p.buildings[bi].card.defId).vp);
             const sellTotal = selectedVPs.reduce((sum, vp) => sum + vp, 0);
             const totalFunds = p.money + sellTotal;
 
             const allSellableCount = p.buildings.filter(b => !getCardDef(b.card.defId).unsellable).length;
-            const allSelected = ps.selectedBuildingIndices.length === allSellableCount;
+            const allSelected = pps.selectedBuildingIndices.length === allSellableCount;
 
-            if (ps.selectedBuildingIndices.length === 0 && p.money < ps.totalWage) return INVALID_MOVE;
+            if (pps.selectedBuildingIndices.length === 0 && p.money < pps.totalWage) return INVALID_MOVE;
 
-            // 過剰売却チェック（全選択でも1つ除いて払えるなら過剰）
+            // 過剰売却チェック
             if (selectedVPs.length > 0) {
                 const minVP = Math.min(...selectedVPs);
-                if ((totalFunds - minVP) >= ps.totalWage) return INVALID_MOVE;
+                if ((totalFunds - minVP) >= pps.totalWage) return INVALID_MOVE;
             }
 
-            if (totalFunds < ps.totalWage && !allSelected) return INVALID_MOVE;
+            if (totalFunds < pps.totalWage && !allSelected) return INVALID_MOVE;
 
             // 売却実行
-            const sorted = [...ps.selectedBuildingIndices].sort((a, b) => b - a);
+            const sorted = [...pps.selectedBuildingIndices].sort((a, b) => b - a);
             for (const bi of sorted) {
                 const slot = p.buildings[bi];
                 const def = getCardDef(slot.card.defId);
@@ -1334,16 +1431,38 @@ export const NationalEconomy: Game<GameState> = {
                     fromBuilding: true,
                     fromBuildingDefId: def.id,
                 });
-                pushLog(G, `P${ps.currentPlayerIndex + 1}が給料日に[${def.name}]を売却（$${def.vp}）`);
+                pushLog(G, `P${parseInt(pid) + 1}が給料日に[${def.name}]を売却（$${def.vp}）`);
                 p.buildings.splice(bi, 1);
             }
 
+            // 賌金支払い
+            if (p.money >= pps.totalWage) {
+                p.money -= pps.totalWage;
+                G.household += pps.totalWage;
+                pushLog(G, `P${parseInt(pid) + 1}: 賌金$${pps.totalWage}を支払い（残金$${p.money}）`);
+            } else {
+                const paid = p.money;
+                G.household += paid;
+                p.money = 0;
+                const debt = pps.totalWage - paid;
+                p.unpaidDebts += debt;
+                pushLog(G, `P${parseInt(pid) + 1}: 賌金$${pps.totalWage}不足（$${paid}のみ支払）、$${debt}が未払い`);
+            }
+
+            pps.confirmed = true;
             continuePayday(G, ctx, events);
         },
 
         // ============ 給料日: 売却なしで確定 ============
-        confirmPayday: ({ G, ctx, events }) => {
+        confirmPayday: ({ G, ctx, events, playerID }) => {
             if (G.phase !== 'payday' || !G.paydayState) return INVALID_MOVE;
+            // P2P対応: playerIDから操作元プレイヤーを特定
+            const pid = (playerID !== undefined && playerID !== null) ? String(playerID) : String(G.paydayState.currentPlayerIndex);
+            const pps = G.paydayState.playerStates[pid];
+            if (!pps) return INVALID_MOVE;
+            if (!pps.confirmed) {
+                pps.confirmed = true;
+            }
             continuePayday(G, ctx, events);
         },
 

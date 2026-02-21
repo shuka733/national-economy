@@ -53,8 +53,14 @@ function TagBadges({ defId }: { defId: string }) {
 function computeCpuStateSignature(G: GameState, activePid: string): string {
     const parts: string[] = [G.phase, String(G.round), String(G.activePlayer), activePid, String(G.log.length)];
     if (G.discardState) parts.push('ds', String(G.discardState.count), ...G.discardState.selectedIndices.map(String));
-    if (G.paydayState) parts.push('ps', String(G.paydayState.currentPlayerIndex), ...G.paydayState.selectedBuildingIndices.map(String));
-    if (G.cleanupState) parts.push('cs', String(G.cleanupState.currentPlayerIndex), ...G.cleanupState.selectedIndices.map(String));
+    if (G.paydayState) {
+        const pps = G.paydayState.playerStates[activePid];
+        if (pps) parts.push('ps', String(pps.confirmed), ...pps.selectedBuildingIndices.map(String));
+    }
+    if (G.cleanupState) {
+        const cps = G.cleanupState.playerStates[activePid];
+        if (cps) parts.push('cs', String(cps.confirmed), ...cps.selectedIndices.map(String));
+    }
     if (G.dualConstructionState) parts.push('dc', ...G.dualConstructionState.selectedCardIndices.map(String));
     if (G.designOfficeState) parts.push('do', String(G.designOfficeState.revealedCards.length));
     if (G.buildState) parts.push('bs', G.buildState.action);
@@ -87,13 +93,37 @@ export function Board({ G, ctx, moves, playerID, cpuConfig }: BoardProps<GameSta
     const isOnline = playerID !== null && playerID !== undefined;
 
     // モーダルフェーズ中の操作者判定
-    // payday/cleanup は G.activePlayer で順番に処理するため G.activePlayer を使用
+    // payday/cleanup は同時処理対応: P2Pでは全員が自分の操作をする
     // build/discard/designOffice/dualConstruction は手番プレイヤーの操作なので ctx.currentPlayer を使用
     const modalPhases = ['payday', 'cleanup', 'discard', 'build', 'designOffice', 'dualConstruction'];
     const isModalPhase = modalPhases.includes(G.phase);
-    const effectivePlayer = (G.phase === 'payday' || G.phase === 'cleanup')
-        ? String(G.activePlayer) : curPid;
-    const isMyTurn = effectivePlayer === myPid;
+
+    // payday/cleanupでは各プレイヤーが自分を操作
+    // P2P時: 給料日/精算は自分のplayerStatesに基づく
+    let effectivePlayer: string;
+    let isMyTurn: boolean;
+    if (G.phase === 'payday' && G.paydayState) {
+        if (isOnline) {
+            const pps = G.paydayState.playerStates[myPid];
+            isMyTurn = !!pps && !pps.confirmed && pps.needsSelling;
+            effectivePlayer = myPid;
+        } else {
+            effectivePlayer = String(G.activePlayer);
+            isMyTurn = effectivePlayer === myPid;
+        }
+    } else if (G.phase === 'cleanup' && G.cleanupState) {
+        if (isOnline) {
+            const cps = G.cleanupState.playerStates[myPid];
+            isMyTurn = !!cps && !cps.confirmed && cps.excessCount > 0;
+            effectivePlayer = myPid;
+        } else {
+            effectivePlayer = String(G.activePlayer);
+            isMyTurn = effectivePlayer === myPid;
+        }
+    } else {
+        effectivePlayer = curPid;
+        isMyTurn = effectivePlayer === myPid;
+    }
 
 
 
@@ -136,47 +166,66 @@ export function Board({ G, ctx, moves, playerID, cpuConfig }: BoardProps<GameSta
     // ====== CPU自動プレイ ======
     // P2P重複move防止: 同じstateに対してmoveを2回以上発行しないためのガード
     const cpuMoveSignatureRef = useRef<string>('');
+    // フォールバック: signatureが一定時間変わらない場合にリセットするためのタイマー
+    const cpuStuckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     useEffect(() => {
         if (!cpuConfig?.enabled) return;
         if (G.phase === 'gameEnd') return;
         if (showCpuSettings) return; // 設定中は停止
 
-        // 給料日・精算フェーズでは activePlayer を使う
+        // CPU自動プレイ時の給料日・精算: 各CPUプレイヤーの未確認分を処理
         let activePid = curPid;
         if (G.phase === 'payday' && G.paydayState) {
-            activePid = String(G.paydayState.currentPlayerIndex);
+            // 未確認のCPUプレイヤーを探す
+            const unconfirmed = Object.entries(G.paydayState.playerStates)
+                .find(([pid, ps]) => !ps.confirmed && cpuConfig.cpuPlayers.includes(pid));
+            activePid = unconfirmed ? unconfirmed[0] : String(G.paydayState.currentPlayerIndex);
         } else if (G.phase === 'cleanup' && G.cleanupState) {
-            activePid = String(G.cleanupState.currentPlayerIndex);
+            const unconfirmed = Object.entries(G.cleanupState.playerStates)
+                .find(([pid, ps]) => !ps.confirmed && cpuConfig.cpuPlayers.includes(pid));
+            activePid = unconfirmed ? unconfirmed[0] : String(G.cleanupState.currentPlayerIndex);
         }
 
         if (!cpuConfig.cpuPlayers.includes(activePid)) return;
 
         // stateSignature: トグル系フェーズの状態を一意に表す文字列
+        const sig = computeCpuStateSignature(G, activePid);
+
         // P2Pではmove発行後にGが非同期で更新されるため、
         // 同じsignatureに対して再度moveを発行するのを防ぐ
-        const sig = computeCpuStateSignature(G, activePid);
-        if (sig === cpuMoveSignatureRef.current) return;
+        // ホットシートではMoveが同期処理されるため重複チェック不要
+        const isOnlineMode = playerID !== null && playerID !== undefined;
+        if (isOnlineMode && sig === cpuMoveSignatureRef.current) return;
 
         // SoundManagerから常に最新の設定を取得（cpuConfig.moveDelayは無視）
         const delay = soundManager.getSettings().cpuMoveDelay;
         const timer = setTimeout(() => {
-            // タイマー発火時にも再チェック（レース条件防止）
-            if (sig === cpuMoveSignatureRef.current) return;
+            // タイマー発火時にも再チェック（P2Pのみ）
+            if (isOnlineMode && sig === cpuMoveSignatureRef.current) return;
 
             const action = decideCPUMove(G, activePid, cpuConfig.difficulty);
             if (action) {
                 const moveFn = (moves as any)[action.moveName];
                 if (moveFn) {
-                    // move発行前にsignatureを記録（重複防止）
+                    // move発行前にsignatureを記録（P2P重複防止用）
                     cpuMoveSignatureRef.current = sig;
                     moveFn(...action.args);
                 }
             }
         }, delay);
 
-        return () => clearTimeout(timer);
-    }, [G, curPid, cpuConfig, moves, showCpuSettings]);
+        // フォールバック: 3秒後にsignatureをリセット（CPUが停止した場合の回復）
+        if (cpuStuckTimerRef.current) clearTimeout(cpuStuckTimerRef.current);
+        cpuStuckTimerRef.current = setTimeout(() => {
+            cpuMoveSignatureRef.current = '';
+        }, 3000);
+
+        return () => {
+            clearTimeout(timer);
+            if (cpuStuckTimerRef.current) clearTimeout(cpuStuckTimerRef.current);
+        };
+    }, [G, curPid, cpuConfig, moves, showCpuSettings, playerID]);
 
     // ゲーム終了
     if (G.phase === 'gameEnd' && G.finalScores) return <GameOver G={G} />;
@@ -204,10 +253,10 @@ export function Board({ G, ctx, moves, playerID, cpuConfig }: BoardProps<GameSta
     }
 
     // 給料日モーダル
-    if (G.phase === 'payday' && G.paydayState) return <PaydayUI G={G} moves={moves} />;
+    if (G.phase === 'payday' && G.paydayState) return <PaydayUI G={G} moves={moves} myPid={myPid} isOnline={isOnline} />;
 
     // 精算（手札捨て）
-    if (G.phase === 'cleanup' && G.cleanupState) return <CleanupUI G={G} moves={moves} />;
+    if (G.phase === 'cleanup' && G.cleanupState) return <CleanupUI G={G} moves={moves} myPid={myPid} isOnline={isOnline} />;
 
     // 捨てカード選択モーダル
     if (G.phase === 'discard' && G.discardState) return <DiscardUI G={G} moves={moves} pid={curPid} />;
@@ -754,23 +803,44 @@ function DiscardUI({ G, moves, pid }: { G: GameState; moves: any; pid: string })
 // ============================================================
 // 給料日UI
 // ============================================================
-function PaydayUI({ G, moves }: { G: GameState; moves: any }) {
+function PaydayUI({ G, moves, myPid, isOnline }: { G: GameState; moves: any; myPid: string; isOnline: boolean }) {
     const ps = G.paydayState!;
-    const p = G.players[String(ps.currentPlayerIndex)];
-    const shortage = ps.totalWage - p.money;
 
-    const selectedVPs = ps.selectedBuildingIndices.map(bi => getCardDef(p.buildings[bi].card.defId).vp);
+    // P2P時: 自分のplayerStatesを使う / ホットシート: currentPlayerIndexを使う
+    const targetPid = isOnline ? myPid : String(ps.currentPlayerIndex);
+    const pps = ps.playerStates[targetPid];
+    const p = G.players[targetPid];
+
+    // 確認済みまたは売却不要 → 待機画面
+    if (pps && (pps.confirmed || !pps.needsSelling)) {
+        const waiting = Object.entries(ps.playerStates).filter(([_, s]) => !s.confirmed);
+        return (
+            <div className="game-bg" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+                <div className="glass-card animate-slide-up" style={{ padding: 40, maxWidth: 420, width: '100%', textAlign: 'center' }}>
+                    <div style={{ fontSize: 48, marginBottom: 16, animation: 'pulse 2s ease-in-out infinite' }}>💰</div>
+                    <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--gold)', marginBottom: 8 }}>給料日処理中...</h2>
+                    <p style={{ color: 'var(--text-secondary)', marginBottom: 4 }}>あなたの賌金は自動支払い済みです</p>
+                    {waiting.length > 0 && <p style={{ color: 'var(--text-dim)', fontSize: 12, marginTop: 8 }}>待機中: {waiting.map(([pid]) => `P${parseInt(pid) + 1}`).join(', ')}</p>}
+                </div>
+            </div>
+        );
+    }
+
+    // 売却操作が必要なプレイヤーのUI
+    const selectedVPs = (pps?.selectedBuildingIndices ?? []).map(bi => getCardDef(p.buildings[bi].card.defId).vp);
     const sellTotal = selectedVPs.reduce((sum, vp) => sum + vp, 0);
+    const totalWage = pps?.totalWage ?? ps.totalWage;
     const totalFunds = p.money + sellTotal;
-    const canAfford = totalFunds >= ps.totalWage;
+    const canAfford = totalFunds >= totalWage;
+    const shortage = totalWage - p.money;
 
     const allSellableCount = p.buildings.filter(b => !getCardDef(b.card.defId).unsellable).length;
-    const allSellableSelected = ps.selectedBuildingIndices.length === allSellableCount;
+    const allSellableSelected = (pps?.selectedBuildingIndices ?? []).length === allSellableCount;
 
     let isExcessive = false;
     if (selectedVPs.length > 0 && !allSellableSelected) {
         const minVP = Math.min(...selectedVPs);
-        if ((totalFunds - minVP) >= ps.totalWage) isExcessive = true;
+        if ((totalFunds - minVP) >= totalWage) isExcessive = true;
     }
 
     const canConfirm = !isExcessive && (canAfford || allSellableSelected);
@@ -779,20 +849,20 @@ function PaydayUI({ G, moves }: { G: GameState; moves: any }) {
         <div className="game-bg" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
             <div className="modal-content animate-slide-up" style={{ maxWidth: 640 }}>
                 <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--gold)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <IconPayment size={22} color="var(--gold)" /> 給料日 — P{ps.currentPlayerIndex + 1}
+                    <IconPayment size={22} color="var(--gold)" /> 給料日 — P{parseInt(targetPid) + 1}
                 </h2>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
                     <div className="glass-card" style={{ padding: 12 }}>
-                        <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>賃金</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>賌金</div>
                         <div style={{ fontSize: 14, fontWeight: 700, marginTop: 4 }}>
-                            ${ps.wagePerWorker}/人 × {Math.max(0, p.workers - p.robotWorkers)}人 = <span style={{ color: 'var(--red)' }}>${ps.totalWage}</span>
+                            ${ps.wagePerWorker}/人 × {Math.max(0, p.workers - p.robotWorkers)}人 = <span style={{ color: 'var(--red)' }}>${totalWage}</span>
                         </div>
                     </div>
                     <div className="glass-card" style={{ padding: 12 }}>
                         <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>所持金 + 売却</div>
                         <div style={{ fontSize: 14, fontWeight: 700, marginTop: 4 }}>
-                            <span style={{ color: 'var(--gold-light)' }}>${p.money}</span> + <span style={{ color: 'var(--green)' }}>${sellTotal}</span> = <span style={{ color: totalFunds >= ps.totalWage ? 'var(--green)' : 'var(--red)' }}>${totalFunds}</span>
+                            <span style={{ color: 'var(--gold-light)' }}>${p.money}</span> + <span style={{ color: 'var(--green)' }}>${sellTotal}</span> = <span style={{ color: totalFunds >= totalWage ? 'var(--green)' : 'var(--red)' }}>${totalFunds}</span>
                         </div>
                     </div>
                 </div>
@@ -807,7 +877,7 @@ function PaydayUI({ G, moves }: { G: GameState; moves: any }) {
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
                             {p.buildings.map((b, bi) => {
                                 const def = getCardDef(b.card.defId);
-                                const selected = ps.selectedBuildingIndices.includes(bi);
+                                const selected = (pps?.selectedBuildingIndices ?? []).includes(bi);
                                 const disabled = def.unsellable;
                                 return (
                                     <div key={b.card.uid} onClick={() => !disabled && (soundManager.playSFX('click'), moves.togglePaydaySell(bi))}
@@ -834,7 +904,7 @@ function PaydayUI({ G, moves }: { G: GameState; moves: any }) {
                 }}
                     disabled={!canConfirm}
                     className="btn-primary">
-                    <IconPayment size={16} /> 支払い確定{!canAfford && allSellableSelected ? `（不足$${ps.totalWage - totalFunds}は負債）` : ''}
+                    <IconPayment size={16} /> 支払い確定{!canAfford && allSellableSelected ? `（不足$${totalWage - totalFunds}は負債）` : ''}
                 </button>
             </div>
         </div>
@@ -844,21 +914,44 @@ function PaydayUI({ G, moves }: { G: GameState; moves: any }) {
 // ============================================================
 // 精算UI
 // ============================================================
-function CleanupUI({ G, moves }: { G: GameState; moves: any }) {
+function CleanupUI({ G, moves, myPid, isOnline }: { G: GameState; moves: any; myPid: string; isOnline: boolean }) {
     const cs = G.cleanupState!;
-    const p = G.players[String(cs.currentPlayerIndex)];
+
+    // P2P時: 自分のplayerStatesを使う / ホットシート: currentPlayerIndexを使う
+    const targetPid = isOnline ? myPid : String(cs.currentPlayerIndex);
+    const cps = cs.playerStates[targetPid];
+    const p = G.players[targetPid];
+
+    // 確認済みまたは精算不要 → 待機画面
+    if (cps && (cps.confirmed || cps.excessCount === 0)) {
+        const waiting = Object.entries(cs.playerStates).filter(([_, s]) => !s.confirmed);
+        return (
+            <div className="game-bg" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+                <div className="glass-card animate-slide-up" style={{ padding: 40, maxWidth: 420, width: '100%', textAlign: 'center' }}>
+                    <div style={{ fontSize: 48, marginBottom: 16, animation: 'pulse 2s ease-in-out infinite' }}>🗑️</div>
+                    <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--gold)', marginBottom: 8 }}>精算処理中...</h2>
+                    <p style={{ color: 'var(--text-secondary)', marginBottom: 4 }}>あなたの手札整理は完了しています</p>
+                    {waiting.length > 0 && <p style={{ color: 'var(--text-dim)', fontSize: 12, marginTop: 8 }}>待機中: {waiting.map(([pid]) => `P${parseInt(pid) + 1}`).join(', ')}</p>}
+                </div>
+            </div>
+        );
+    }
+
+    const excessCount = cps?.excessCount ?? cs.excessCount;
+    const selectedIndices = cps?.selectedIndices ?? cs.selectedIndices;
+
     return (
         <div className="game-bg" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
             <div className="modal-content animate-slide-up" style={{ maxWidth: 750 }}>
                 <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--gold)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <IconTrash size={22} color="var(--gold)" /> 精算 — P{cs.currentPlayerIndex + 1}
+                    <IconTrash size={22} color="var(--gold)" /> 精算 — P{parseInt(targetPid) + 1}
                 </h2>
                 <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>
-                    手札上限 {p.maxHandSize}枚を超えています。<b style={{ color: 'var(--red)' }}>{cs.excessCount}枚</b>捨ててください（選択中: {cs.selectedIndices.length}枚）
+                    手札上限 {p.maxHandSize}枚を超えています。<b style={{ color: 'var(--red)' }}>{excessCount}枚</b>捨ててください（選択中: {selectedIndices.length}枚）
                 </p>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
                     {p.hand.map((c, ci) => {
-                        const selected = cs.selectedIndices.includes(ci);
+                        const selected = selectedIndices.includes(ci);
                         return (
                             <div key={c.uid} onClick={() => { soundManager.playSFX('click'); moves.toggleDiscard(ci); }}
                                 className={`game-card game-card-clickable`}
@@ -875,9 +968,9 @@ function CleanupUI({ G, moves }: { G: GameState; moves: any }) {
                     })}
                 </div>
                 <button onClick={() => { soundManager.playSFX('click'); moves.confirmDiscard(); }}
-                    disabled={cs.selectedIndices.length !== cs.excessCount}
+                    disabled={selectedIndices.length !== excessCount}
                     className="btn-danger">
-                    ✅ 確定（{cs.selectedIndices.length}/{cs.excessCount}）
+                    ✅ 確定（{selectedIndices.length}/{excessCount}）
                 </button>
             </div>
         </div>
