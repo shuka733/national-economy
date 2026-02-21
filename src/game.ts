@@ -3,7 +3,7 @@
 // ============================================================
 import type { Game, Ctx } from 'boardgame.io';
 import { INVALID_MOVE, Stage } from 'boardgame.io/core';
-import type { GameState, PlayerState, Workplace, Card, BuildingVPDetail, ScoreBreakdown, GameVersion } from './types';
+import type { GameState, PlayerState, Workplace, Card, BuildingVPDetail, ScoreBreakdown, GameVersion, GameStats } from './types';
 import { getCardDef, getDeckDefs, CONSUMABLE_DEF_ID } from './cards';
 
 // ============================================================
@@ -585,8 +585,30 @@ function continueCleanup(G: GameState, ctx: Ctx, events: any) {
     }
 }
 
+function recordRoundStats(G: GameState) {
+    if (!G.stats) return;
+    const scores = calculateScores(G);
+    for (const pid of Object.keys(G.players)) {
+        const p = G.players[pid];
+        const pScore = scores.find(s => s.playerIndex === parseInt(pid));
+        G.stats.players[pid].push({
+            round: G.round,
+            money: p.money,
+            workers: p.workers,
+            buildingCount: p.buildings.length,
+            unpaidDebts: p.unpaidDebts,
+            vpTokens: p.vpTokens,
+            currentVP: pScore ? pScore.score : 0,
+        });
+    }
+}
+
 function finishCleanup(G: GameState, _ctx: Ctx, _events: any) {
     G.cleanupState = null;
+
+    // 現在のラウンドの統計を記録
+    recordRoundStats(G);
+
     if (G.round >= 9) {
         G.phase = 'gameEnd';
         G.finalScores = calculateScores(G);
@@ -755,6 +777,12 @@ export const NationalEconomy: Game<GameState> = {
             };
         }
         const initialLog: GameState['log'] = [{ text: `=== ラウンド 1 開始（${ctx.numPlayers}人プレイ / Version: ${version}） ===`, round: 1 }];
+
+        const stats: GameStats = { players: {} };
+        for (let i = 0; i < ctx.numPlayers; i++) {
+            stats.players[String(i)] = [];
+        }
+
         return {
             version,
             players,
@@ -768,6 +796,7 @@ export const NationalEconomy: Game<GameState> = {
             log: initialLog,
             finalScores: null,
             isOnline: !!(setupData && setupData.isOnline),
+            stats,
         };
     },
 
@@ -1542,6 +1571,10 @@ function applyPublicWPEffect(G: GameState, ctx: Ctx, events: any, wp: Workplace,
     switch (wp.specialEffect) {
         case 'draw1':
             p.hand.push(...drawCards(G, 1));
+            break;
+        case 'ruins':
+            p.vpTokens++;
+            drawConsumables(G, pid, 1);
             break;
         case 'start_player_draw':
             p.hand.push(...drawCards(G, 1));

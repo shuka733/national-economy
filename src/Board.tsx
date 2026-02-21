@@ -95,7 +95,7 @@ export function Board({ G, ctx, moves, playerID, cpuConfig }: BoardProps<GameSta
     // モーダルフェーズ中の操作者判定
     // payday/cleanup は同時処理対応: P2Pでは全員が自分の操作をする
     // build/discard/designOffice/dualConstruction は手番プレイヤーの操作なので ctx.currentPlayer を使用
-    const modalPhases = ['payday', 'cleanup', 'discard', 'build', 'designOffice', 'dualConstruction'];
+    const modalPhases = ['payday', 'cleanup', 'discard', 'build', 'designOffice', 'dualConstruction', 'choice_village'];
     const isModalPhase = modalPhases.includes(G.phase);
 
     // payday/cleanupでは各プレイヤーが自分を操作
@@ -239,6 +239,7 @@ export function Board({ G, ctx, moves, playerID, cpuConfig }: BoardProps<GameSta
             build: '🔨 建設',
             designOffice: '🔍 設計事務所',
             dualConstruction: '🏗️ 二胡市建設',
+            choice_village: '🌾 農村（選択中）',
         };
         return (
             <div className="game-bg" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', padding: 16 }}>
@@ -266,6 +267,9 @@ export function Board({ G, ctx, moves, playerID, cpuConfig }: BoardProps<GameSta
 
     // 二胡市建設モーダル
     if (G.phase === 'dualConstruction' && G.dualConstructionState) return <DualConstructionUI G={G} moves={moves} pid={curPid} />;
+
+    // 農村 効果選択モーダル
+    if (G.phase === 'choice_village') return <VillageChoiceUI G={G} moves={moves} pid={curPid} />;
 
     return (
         <div className="game-bg" style={{ padding: 12 }}>
@@ -745,11 +749,66 @@ function DualConstructionUI({ G, moves, pid }: { G: GameState; moves: any; pid: 
 }
 
 // ============================================================
+// 農村 効果選択UI (gl_village)
+// ============================================================
+function VillageChoiceUI({ G, moves, pid }: { G: GameState; moves: any; pid: string }) {
+    // 手札の消費財枚数を確認
+    const p = G.players[pid];
+    const consumableCount = p.hand.filter(c => isConsumable(c)).length;
+    const canDrawBuilding = consumableCount >= 2;
+
+    return (
+        <div className="game-bg" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', padding: 16 }}>
+            <div className="modal-content animate-slide-up" style={{ maxWidth: 480, width: '100%', textAlign: 'center' }}>
+                <div style={{ fontSize: 40, marginBottom: 16 }}>🌾</div>
+                <h2 style={{ fontSize: 22, fontWeight: 700, color: 'var(--gold)', marginBottom: 8 }}>農村</h2>
+                <p style={{ color: 'var(--text-secondary)', marginBottom: 8, lineHeight: 1.6 }}>
+                    効果を選んでください
+                </p>
+                <p style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 24 }}>
+                    手札の消費財: <b style={{ color: consumableCount >= 2 ? 'var(--green)' : 'var(--red)' }}>{consumableCount}枚</b>
+                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    <button
+                        onClick={() => { soundManager.playSFX('click'); moves.selectVillageOption('draw_consumable'); }}
+                        className="btn-primary"
+                        style={{ padding: '16px 24px', fontSize: 15 }}>
+                        🌽 消費財を2枚引く
+                    </button>
+                    <button
+                        onClick={() => { if (canDrawBuilding) { soundManager.playSFX('click'); moves.selectVillageOption('draw_building'); } }}
+                        disabled={!canDrawBuilding}
+                        className="btn-ghost"
+                        style={{ padding: '16px 24px', fontSize: 15, opacity: canDrawBuilding ? 1 : 0.4, cursor: canDrawBuilding ? 'pointer' : 'not-allowed' }}>
+                        🏗️ 消費財2枚捨てて建物カード3枚引く
+                    </button>
+                </div>
+                {!canDrawBuilding && (
+                    <p style={{ fontSize: 11, color: 'var(--red)', marginTop: 16 }}>
+                        ⚠️ 消費財が2枚未満のため、建物カードを引くオプションは選べません
+                    </p>
+                )}
+            </div>
+        </div>
+    );
+}
+
+// ============================================================
 // 捨てカード選択UI
 // ============================================================
 function DiscardUI({ G, moves, pid }: { G: GameState; moves: any; pid: string }) {
     const ds = G.discardState!;
     const p = G.players[pid];
+
+    const isModernism = ds.reason.includes('モダニズム');
+    let currentCount = ds.selectedIndices.length;
+    if (isModernism) {
+        currentCount = 0;
+        for (const i of ds.selectedIndices) {
+            if (i < p.hand.length && isConsumable(p.hand[i])) currentCount += 2;
+            else currentCount += 1;
+        }
+    }
 
     const excludeUids = new Set<string>();
     if (ds.excludeCardUid) excludeUids.add(ds.excludeCardUid);
@@ -765,7 +824,7 @@ function DiscardUI({ G, moves, pid }: { G: GameState; moves: any; pid: string })
                     <IconTrash size={22} color="var(--gold)" /> カードを捨てる
                 </h2>
                 <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>
-                    {ds.reason} — <b style={{ color: 'var(--red)' }}>{ds.count}枚</b>選択してください（選択中: {ds.selectedIndices.length}枚）
+                    {ds.reason} — コスト <b style={{ color: 'var(--red)' }}>{ds.count}</b> 分を選択してください（現在: {currentCount}）
                 </p>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
                     {p.hand.map((c, ci) => {
@@ -791,9 +850,9 @@ function DiscardUI({ G, moves, pid }: { G: GameState; moves: any; pid: string })
                     })}
                 </div>
                 <button onClick={() => { soundManager.playSFX('click'); moves.confirmDiscard(); }}
-                    disabled={ds.selectedIndices.length !== ds.count}
+                    disabled={isModernism ? currentCount < ds.count : currentCount !== ds.count}
                     className="btn-danger">
-                    ✅ 確定（{ds.selectedIndices.length}/{ds.count}）
+                    ✅ 確定（{currentCount}/{ds.count}）
                 </button>
             </div>
         </div>

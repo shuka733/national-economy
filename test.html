@@ -56,6 +56,7 @@
         const items = [
             { label: '🏠 Base版テスト', mode: 'base' },
             { label: '✨ Glory版シミュレーション', mode: 'glory' },
+            { label: '🔬 Glory カード効果デバッグ', mode: 'glory_debug' },
             { label: '📡 P2Pテスト', mode: 'p2p' },
         ];
         items.forEach(item => {
@@ -70,6 +71,9 @@
         if (mode === 'glory') {
             // グローリー拡張シミュレーション
             import('/src/sim_glory.ts');
+        } else if (mode === 'glory_debug') {
+            // グローリー拡張カード効果デバッグ
+            import('/src/debug_glory_cards.ts');
         } else {
             // Base版 / P2Pテスト（cpu_test.ts内でmode判定）
             import('/src/cpu_test.ts');

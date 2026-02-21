@@ -156,6 +156,23 @@ export interface GameState {
 
     /** P2P（オンライン）モードかどうか */
     isOnline: boolean;
+
+    /** 統計データ（グラフ描画用） */
+    stats?: GameStats;
+}
+
+export interface PlayerRoundStat {
+    round: number;
+    money: number;
+    workers: number;
+    buildingCount: number;
+    unpaidDebts: number;
+    vpTokens: number;
+    currentVP: number;
+}
+
+export interface GameStats {
+    players: Record<string, PlayerRoundStat[]>;
 }
 
 export interface ScoreBreakdown {
