@@ -1202,15 +1202,16 @@ export const NationalEconomy: Game<GameState> = {
                         }
                     }
                 } else if (ds.callbackAction === 'draw') {
-                    const factoryDefIds = ['factory', 'auto_factory'];
+                    // callbackAction='draw'になるカード一覧（工場系）
+                    const drawFactoryDefIds = ['factory', 'auto_factory', 'gl_steam_factory', 'gl_locomotive_factory'];
                     let found = false;
-                    for (const defId of factoryDefIds) {
+                    for (const defId of drawFactoryDefIds) {
                         const slot = p.buildings.find(b => b.card.defId === defId && b.workerPlaced);
                         if (slot) { slot.workerPlaced = false; p.availableWorkers++; found = true; break; }
                     }
                     if (!found) {
                         for (const wp of G.publicWorkplaces) {
-                            if (wp.fromBuildingDefId && factoryDefIds.includes(wp.fromBuildingDefId) && wp.workers.includes(parseInt(pid))) {
+                            if (wp.fromBuildingDefId && drawFactoryDefIds.includes(wp.fromBuildingDefId) && wp.workers.includes(parseInt(pid))) {
                                 wp.workers = wp.workers.filter(w => w !== parseInt(pid));
                                 p.availableWorkers++;
                                 break;
@@ -1223,6 +1224,19 @@ export const NationalEconomy: Game<GameState> = {
                     else {
                         for (const wp of G.publicWorkplaces) {
                             if (wp.fromBuildingDefId === 'restaurant' && wp.workers.includes(parseInt(pid))) {
+                                wp.workers = wp.workers.filter(w => w !== parseInt(pid));
+                                p.availableWorkers++;
+                                break;
+                            }
+                        }
+                    }
+                } else if (ds.callbackAction === 'money_20') {
+                    // callbackAction='money_20'になるカード（劇場）
+                    const slot = p.buildings.find(b => b.card.defId === 'gl_theater' && b.workerPlaced);
+                    if (slot) { slot.workerPlaced = false; p.availableWorkers++; }
+                    else {
+                        for (const wp of G.publicWorkplaces) {
+                            if (wp.fromBuildingDefId === 'gl_theater' && wp.workers.includes(parseInt(pid))) {
                                 wp.workers = wp.workers.filter(w => w !== parseInt(pid));
                                 p.availableWorkers++;
                                 break;

@@ -6,7 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:unit": "vitest run src/unit.test.ts",
+    "test:integration": "vitest run src/integration.test.ts",
+    "test:system": "vitest run src/batch-test.test.ts",
+    "test:all": "vitest run src/unit.test.ts src/integration.test.ts src/batch-test.test.ts",
+    "test:acceptance": "playwright test src/acceptance.test.ts"
   },
   "keywords": [],
   "author": "",
@@ -18,12 +23,14 @@
     "react-dom": "^19.2.4"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@tailwindcss/vite": "^4.1.18",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.4",
     "tailwindcss": "^4.1.18",
     "typescript": "^5.9.3",
-    "vite": "^7.3.1"
+    "vite": "^7.3.1",
+    "vitest": "^4.0.18"
   }
 }
