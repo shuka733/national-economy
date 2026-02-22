@@ -59,9 +59,13 @@
             { label: '🔬 Glory カード効果デバッグ', mode: 'glory_debug' },
             { label: '📡 P2Pテスト', mode: 'p2p' },
         ];
+
+        // Viteのbase ('/national-economy/') を考慮したパスを構築
+        const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+
         items.forEach(item => {
             const a = document.createElement('a');
-            a.href = `?mode=${item.mode}`;
+            a.href = `${base}/test.html?mode=${item.mode}`; // baseをプレフィクスにする
             a.textContent = item.label;
             if (item.mode === mode) a.classList.add('active');
             menu.appendChild(a);
