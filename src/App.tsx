@@ -15,6 +15,7 @@ import type { AIDifficulty } from './bots';
 import type { GameVersion, GameState } from './types';
 import { soundManager } from './SoundManager';
 import { LogoFactory, IconRobot, IconPlayer, IconHammer, IconTrophy } from './components/Icons';
+import { DevCardGallery } from './DevCardGallery';
 
 // ============================================================
 // 型定義
@@ -28,7 +29,7 @@ export type CPUConfig = {
     moveDelay: number;
 };
 
-type Screen = 'menu' | 'local_setup' | 'online_menu' | 'host' | 'join' | 'playing';
+type Screen = 'menu' | 'local_setup' | 'online_menu' | 'host' | 'join' | 'playing' | 'dev_gallery';
 
 // ============================================================
 // ICE設定（STUN + TURNサーバー設定でNAT越え対応）
@@ -268,9 +269,10 @@ function StartNotification({ playerNum, startPlayer, onDismiss }: { playerNum: n
 // ============================================================
 // メインメニュー：モード選択のみ
 // ============================================================
-function MainMenuScreen({ onLocal, onOnline }: {
+function MainMenuScreen({ onLocal, onOnline, onDevGallery }: {
     onLocal: () => void;
     onOnline: () => void;
+    onDevGallery: () => void;
 }) {
     return (
         <div className="game-bg" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', padding: 16 }}>
@@ -304,6 +306,17 @@ function MainMenuScreen({ onLocal, onOnline }: {
                             transition: 'all 0.2s',
                         }}>
                             🌐 オンライン対戦（P2P）
+                        </button>
+                        {/* DEVメニュー - カードギャラリー */}
+                        <button onClick={() => { soundManager.playSFX('click'); onDevGallery(); }} style={{
+                            width: '100%', fontSize: 12, padding: '8px 0',
+                            background: 'rgba(34, 197, 94, 0.06)',
+                            border: '1px dashed rgba(34, 197, 94, 0.25)',
+                            color: 'rgba(34, 197, 94, 0.55)',
+                            borderRadius: 10, cursor: 'pointer', fontWeight: 600,
+                            transition: 'all 0.2s',
+                        }}>
+                            🛠️ [DEV] カードギャラリー
                         </button>
                     </div>
                 </div>
@@ -866,7 +879,9 @@ export default function App() {
     // 画面ルーティング
     switch (screen) {
         case 'menu':
-            return <MainMenuScreen onLocal={() => setScreen('local_setup')} onOnline={() => setScreen('online_menu')} />;
+            return <MainMenuScreen onLocal={() => setScreen('local_setup')} onOnline={() => setScreen('online_menu')} onDevGallery={() => setScreen('dev_gallery')} />;
+        case 'dev_gallery':
+            return <DevCardGallery onBack={() => setScreen('menu')} />;
         case 'local_setup':
             return <LocalSetupScreen onStart={handleStartLocal} onBack={() => setScreen('menu')} />;
         case 'online_menu':
