@@ -191,6 +191,10 @@ function GameSettingsPanel({
                                     style={btnStyle(difficulty === 'heuristic', '255, 42, 109')}>
                                     Hard
                                 </button>
+                                <button onClick={() => { soundManager.playSFX('click'); setDifficulty('strategic'); }}
+                                    style={btnStyle(difficulty === 'strategic', '168, 85, 247')}>
+                                    Strategic
+                                </button>
                             </div>
                         </div>
 

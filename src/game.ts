@@ -3,7 +3,7 @@
 // ============================================================
 import type { Game, Ctx } from 'boardgame.io';
 import { INVALID_MOVE, Stage } from 'boardgame.io/core';
-import type { GameState, PlayerState, Workplace, Card, BuildingVPDetail, ScoreBreakdown, GameVersion } from './types';
+import type { GameState, PlayerState, Workplace, Card, BuildingVPDetail, ScoreBreakdown, GameVersion, GameStats } from './types';
 import { getCardDef, getDeckDefs, CONSUMABLE_DEF_ID } from './cards';
 
 // ============================================================
@@ -142,7 +142,7 @@ function canBuildAnything(p: PlayerState, costReduction: number, isModernism: bo
 }
 
 /** モダニズム建設が可能か（消費財2枚分カウント） */
-function canBuildModernism(p: PlayerState): boolean {
+export function canBuildModernism(p: PlayerState): boolean {
     for (const card of p.hand) {
         if (isConsumable(card)) continue;
         const cost = getConstructionCost(p, card.defId, 0);
@@ -585,8 +585,30 @@ function continueCleanup(G: GameState, ctx: Ctx, events: any) {
     }
 }
 
+function recordRoundStats(G: GameState) {
+    if (!G.stats) return;
+    const scores = calculateScores(G);
+    for (const pid of Object.keys(G.players)) {
+        const p = G.players[pid];
+        const pScore = scores.find(s => s.playerIndex === parseInt(pid));
+        G.stats.players[pid].push({
+            round: G.round,
+            money: p.money,
+            workers: p.workers,
+            buildingCount: p.buildings.length,
+            unpaidDebts: p.unpaidDebts,
+            vpTokens: p.vpTokens,
+            currentVP: pScore ? pScore.score : 0,
+        });
+    }
+}
+
 function finishCleanup(G: GameState, _ctx: Ctx, _events: any) {
     G.cleanupState = null;
+
+    // 現在のラウンドの統計を記録
+    recordRoundStats(G);
+
     if (G.round >= 9) {
         G.phase = 'gameEnd';
         G.finalScores = calculateScores(G);
@@ -755,6 +777,12 @@ export const NationalEconomy: Game<GameState> = {
             };
         }
         const initialLog: GameState['log'] = [{ text: `=== ラウンド 1 開始（${ctx.numPlayers}人プレイ / Version: ${version}） ===`, round: 1 }];
+
+        const stats: GameStats = { players: {} };
+        for (let i = 0; i < ctx.numPlayers; i++) {
+            stats.players[String(i)] = [];
+        }
+
         return {
             version,
             players,
@@ -768,6 +796,7 @@ export const NationalEconomy: Game<GameState> = {
             log: initialLog,
             finalScores: null,
             isOnline: !!(setupData && setupData.isOnline),
+            stats,
         };
     },
 
@@ -1138,10 +1167,14 @@ export const NationalEconomy: Game<GameState> = {
 
             if (G.phase === 'build' && G.buildState) {
                 const action = G.buildState.action;
-                const buildingDefIds = ['construction_co', 'pioneer', 'general_contractor'];
+                const buildingDefIds = ['construction_co', 'pioneer', 'general_contractor', 'gl_colonist', 'gl_skyscraper', 'gl_modernism_construction', 'gl_teleporter'];
                 if (buildingDefIds.includes(action)) {
                     const slot = p.buildings.find(b => b.card.defId === action && b.workerPlaced);
-                    if (slot) { slot.workerPlaced = false; p.availableWorkers++; }
+                    if (slot) {
+                        slot.workerPlaced = false;
+                        const def = getCardDef(action);
+                        p.availableWorkers += def.workerReq || 1;
+                    }
                 } else {
                     for (const wp of G.publicWorkplaces) {
                         if (wp.specialEffect === 'build' && wp.workers.includes(parseInt(pid))) {
@@ -1169,15 +1202,16 @@ export const NationalEconomy: Game<GameState> = {
                         }
                     }
                 } else if (ds.callbackAction === 'draw') {
-                    const factoryDefIds = ['factory', 'auto_factory'];
+                    // callbackAction='draw'になるカード一覧（工場系）
+                    const drawFactoryDefIds = ['factory', 'auto_factory', 'gl_steam_factory', 'gl_locomotive_factory'];
                     let found = false;
-                    for (const defId of factoryDefIds) {
+                    for (const defId of drawFactoryDefIds) {
                         const slot = p.buildings.find(b => b.card.defId === defId && b.workerPlaced);
                         if (slot) { slot.workerPlaced = false; p.availableWorkers++; found = true; break; }
                     }
                     if (!found) {
                         for (const wp of G.publicWorkplaces) {
-                            if (wp.fromBuildingDefId && factoryDefIds.includes(wp.fromBuildingDefId) && wp.workers.includes(parseInt(pid))) {
+                            if (wp.fromBuildingDefId && drawFactoryDefIds.includes(wp.fromBuildingDefId) && wp.workers.includes(parseInt(pid))) {
                                 wp.workers = wp.workers.filter(w => w !== parseInt(pid));
                                 p.availableWorkers++;
                                 break;
@@ -1190,6 +1224,19 @@ export const NationalEconomy: Game<GameState> = {
                     else {
                         for (const wp of G.publicWorkplaces) {
                             if (wp.fromBuildingDefId === 'restaurant' && wp.workers.includes(parseInt(pid))) {
+                                wp.workers = wp.workers.filter(w => w !== parseInt(pid));
+                                p.availableWorkers++;
+                                break;
+                            }
+                        }
+                    }
+                } else if (ds.callbackAction === 'money_20') {
+                    // callbackAction='money_20'になるカード（劇場）
+                    const slot = p.buildings.find(b => b.card.defId === 'gl_theater' && b.workerPlaced);
+                    if (slot) { slot.workerPlaced = false; p.availableWorkers++; }
+                    else {
+                        for (const wp of G.publicWorkplaces) {
+                            if (wp.fromBuildingDefId === 'gl_theater' && wp.workers.includes(parseInt(pid))) {
                                 wp.workers = wp.workers.filter(w => w !== parseInt(pid));
                                 p.availableWorkers++;
                                 break;
@@ -1538,6 +1585,10 @@ function applyPublicWPEffect(G: GameState, ctx: Ctx, events: any, wp: Workplace,
     switch (wp.specialEffect) {
         case 'draw1':
             p.hand.push(...drawCards(G, 1));
+            break;
+        case 'ruins':
+            p.vpTokens++;
+            drawConsumables(G, pid, 1);
             break;
         case 'start_player_draw':
             p.hand.push(...drawCards(G, 1));
