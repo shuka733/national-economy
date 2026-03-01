@@ -13,11 +13,12 @@
 // ============================================================
 import type { GameState, PlayerState, Workplace, Card } from './types';
 import { getCardDef, CONSUMABLE_DEF_ID, CARD_DEFS } from './cards';
+import { getConstructionCost, canBuildModernism, isConsumable, getWagePerWorker, canBuildAnything, canBuildFarmFree, canDualConstruct, canPlaceOnBuilding } from './game';
 
 // ============================================================
 // 型定義
 // ============================================================
-export type AIDifficulty = 'random' | 'heuristic';
+export type AIDifficulty = 'random' | 'heuristic' | 'strategic';
 
 export interface CPUAction {
     moveName: string;
@@ -27,9 +28,9 @@ export interface CPUAction {
 // ============================================================
 // ユーティリティ
 // ============================================================
-function isConsumable(c: Card): boolean {
-    return c.defId === CONSUMABLE_DEF_ID;
-}
+// game.ts バリデーション関数は import で共有済み
+// isConsumable, getWagePerWorker, canBuildAnything, canBuildFarmFree,
+// canDualConstruct, canPlaceOnBuilding → game.ts から import
 
 function shuffle<T>(arr: T[]): T[] {
     const a = [...arr];
@@ -44,13 +45,6 @@ function pickRandom<T>(arr: T[]): T {
     return arr[Math.floor(Math.random() * arr.length)];
 }
 
-function getWagePerWorker(round: number): number {
-    if (round <= 2) return 2;
-    if (round <= 5) return 3;
-    if (round <= 7) return 4;
-    return 5;
-}
-
 /** 破産防止: 増員しても次ラウンドの賃金を払えるか判定 */
 function canAffordHire(G: GameState, pid: string): boolean {
     const p = G.players[pid];
@@ -62,71 +56,6 @@ function canAffordHire(G: GameState, pid: string): boolean {
         .reduce((sum, b) => sum + getCardDef(b.card.defId).vp, 0);
     const totalAssets = p.money + sellableValue;
     return totalAssets >= futureTotalWage * 1.2;
-}
-
-// ============================================================
-// game.ts バリデーション関数の再実装（AI判断用）
-// ============================================================
-function canBuildAnything(p: PlayerState, costReduction: number): boolean {
-    for (const card of p.hand) {
-        if (isConsumable(card)) continue;
-        const def = getCardDef(card.defId);
-
-        // V5: Variable Cost Logic (Glory)
-        let base = def.cost;
-        if (def.variableCostType === 'vp_token') {
-            const threshold = def.variableCostParam || 0;
-            if (p.vpTokens >= threshold) base -= 1;
-        }
-
-        const cost = Math.max(0, base - costReduction);
-        if (p.hand.length - 1 >= cost) return true;
-    }
-    return false;
-}
-
-function canBuildFarmFree(p: PlayerState): boolean {
-    return p.hand.some(c => !isConsumable(c) && getCardDef(c.defId).tags.includes('farm'));
-}
-
-function canDualConstruct(p: PlayerState): boolean {
-    const costGroups: Record<number, number> = {};
-    const buildingCards = p.hand.filter(c => !isConsumable(c));
-    for (const c of buildingCards) {
-        const def = getCardDef(c.defId);
-        costGroups[def.cost] = (costGroups[def.cost] || 0) + 1;
-    }
-    for (const [costStr, count] of Object.entries(costGroups)) {
-        if (count >= 2) {
-            const cost = parseInt(costStr);
-            if (p.hand.length - 2 >= cost) return true;
-        }
-    }
-    return false;
-}
-
-function canPlaceOnBuildingWP(G: GameState, p: PlayerState, defId: string): boolean {
-    switch (defId) {
-        case 'factory': return p.hand.length >= 2;
-        case 'auto_factory': return p.hand.length >= 3;
-        case 'restaurant': return p.hand.length >= 1 && G.household >= 15;
-        case 'coffee_shop': return G.household >= 5;
-        case 'construction_co': return canBuildAnything(p, 1);
-        case 'pioneer': return canBuildFarmFree(p);
-        case 'general_contractor': return canBuildAnything(p, 0);
-        case 'dual_construction': return canDualConstruct(p);
-
-        // Glory matching game.ts
-        case 'gl_steam_factory': return p.hand.length >= 2;
-        case 'gl_locomotive_factory': return p.hand.length >= 3;
-        case 'gl_theater': return p.hand.length >= 2;
-        case 'gl_colonist': return canBuildAnything(p, 0);
-        case 'gl_skyscraper': return canBuildAnything(p, 0);
-        case 'gl_modernism_construction': return canBuildAnything(p, 0);
-        case 'gl_teleporter': return canBuildAnything(p, 99);
-
-        default: return true;
-    }
 }
 
 function parseSellEffect(se: string): { count: number; amount: number } | null {
@@ -493,9 +422,9 @@ export function decideCPUMove(
         case 'discard':
             return decideDiscardPhase(G, playerID, difficulty);
         case 'payday':
-            return decidePaydayPhase(G);
+            return decidePaydayPhase(G, playerID);
         case 'cleanup':
-            return decideCleanupPhase(G);
+            return decideCleanupPhase(G, playerID, difficulty);
         case 'designOffice':
             return decideDesignOfficePhase(G, playerID, difficulty);
         case 'dualConstruction':
@@ -535,7 +464,9 @@ function decideWorkPhase(
     for (const wp of validPublic) {
         const priority = difficulty === 'heuristic'
             ? evaluatePublicWorkplace(G, pid, wp)
-            : Math.random() * 10;
+            : difficulty === 'strategic'
+                ? strategicEvalWorkplace(G, pid, wp)
+                : Math.random() * 10;
         allMoves.push({
             action: { moveName: 'placeWorker', args: [wp.id] },
             priority,
@@ -546,7 +477,9 @@ function decideWorkPhase(
         const def = getCardDef(b.card.defId);
         const priority = difficulty === 'heuristic'
             ? evaluateBuildingWorkplace(G, pid, def.id)
-            : Math.random() * 10;
+            : difficulty === 'strategic'
+                ? strategicEvalBuilding(G, pid, def.id)
+                : Math.random() * 10;
         allMoves.push({
             action: { moveName: 'placeWorkerOnBuilding', args: [b.card.uid] },
             priority,
@@ -580,7 +513,15 @@ function getValidPublicWorkplaces(G: GameState, pid: string): Workplace[] {
             if (G.household < sellInfo.amount) return false;
         }
 
-        if (wp.fromBuildingDefId && !canPlaceOnBuildingWP(G, p, wp.fromBuildingDefId)) return false;
+        if (wp.fromBuildingDefId && !canPlaceOnBuilding(G, p, wp.fromBuildingDefId)) return false;
+
+        let workerCost = 1;
+        if (wp.fromBuildingDefId) {
+            const def = getCardDef(wp.fromBuildingDefId);
+            if (def.workerReq) workerCost = def.workerReq;
+        }
+        if (p.availableWorkers < workerCost) return false;
+
         return true;
     });
 }
@@ -597,7 +538,7 @@ function getValidBuildingPlacements(G: GameState, pid: string) {
         if (p.availableWorkers < req) return false;
 
         if (def.unsellable && b.card.defId !== 'slash_burn') return false;
-        if (!canPlaceOnBuildingWP(G, p, b.card.defId)) return false;
+        if (!canPlaceOnBuilding(G, p, b.card.defId)) return false;
         return true;
     });
 }
@@ -981,11 +922,6 @@ function evaluateBuildingWorkplace(G: GameState, pid: string, defId: string): nu
         case 'gl_theater': return baseScore + 65;
 
         // Glory Special
-        case 'gl_automaton': {
-            // Hire Immediate
-            if (p.workers >= p.maxWorkers) return 0;
-            return baseScore + 100; // Very high priority
-        }
         case 'gl_relic': return baseScore + 20; // 2 VP tokens (~6.6 VP)
         case 'gl_studio': return baseScore + 40; // Draw 1 + Token
 
@@ -1121,13 +1057,29 @@ function decideBuildPhase(
         const card = p.hand[i];
         if (isConsumable(card)) continue;
         const def = getCardDef(card.defId);
-        const cost = Math.max(0, def.cost - costReduction);
-        if (p.hand.length - 1 >= cost) {
+        const cost = getConstructionCost(p, card.defId, costReduction);
+
+        // 建設可否の判定（モダニズム特例）
+        let canBuild = false;
+        if (bs.action === 'gl_modernism_construction') {
+            let totalValue = 0;
+            for (const h of p.hand) {
+                if (h.uid === card.uid) continue;
+                totalValue += isConsumable(h) ? 2 : 1;
+            }
+            canBuild = totalValue >= cost;
+        } else {
+            canBuild = (p.hand.length - 1 >= cost);
+        }
+
+        if (canBuild) {
             if (bs.action === 'pioneer' && !def.tags.includes('farm')) continue;
 
             const score = difficulty === 'heuristic'
                 ? evaluateCardForBuilding(G, pid, def)
-                : Math.random() * 100;
+                : difficulty === 'strategic'
+                    ? strategicEvalCardForBuild(G, pid, def)
+                    : Math.random() * 100;
             buildableIndices.push({ index: i, score });
         }
     }
@@ -1316,39 +1268,100 @@ function decideDiscardPhase(
     if (!ds) return null;
 
     const p = G.players[pid];
-    const count = ds.count;
+    const targetCount = ds.count;
+    const isModernism = ds.reason.includes('モダニズム');
 
+    // 選択可能なカードを集める（除外カードを除く）
     const selectableIndices: number[] = [];
     for (let i = 0; i < p.hand.length; i++) {
         if (ds.excludeCardUid && p.hand[i].uid === ds.excludeCardUid) continue;
         selectableIndices.push(i);
     }
 
-    if (selectableIndices.length < count) return null;
+    // 現在の選択済みカードのカウント合計を計算（モダニズムは消費財2、建物1）
+    // dsはnull確認済みなのでそのまま利用可能だが、内部関数のスコープのためにキャプチャする
+    const localDs = ds;
+    function calcCurrentCount(): number {
+        if (!isModernism) return localDs.selectedIndices.length;
+        let total = 0;
+        for (const i of localDs.selectedIndices) {
+            if (i < p.hand.length && isConsumable(p.hand[i])) total += 2;
+            else total += 1;
+        }
+        return total;
+    }
 
-    let selectedIndices: number[];
-
-    if (difficulty === 'random') {
-        selectedIndices = shuffle(selectableIndices).slice(0, count);
+    // モダニズムの場合、選択可能なカードの合計コスト値を確認
+    // 手札が全部消費財でもtotalValue >= targetCountなら選択可能
+    if (isModernism) {
+        let maxPossible = 0;
+        for (const i of selectableIndices) {
+            maxPossible += isConsumable(p.hand[i]) ? 2 : 1;
+        }
+        if (maxPossible < targetCount) {
+            // どうしても払えない場合はキャンセル（建設フェーズへのロールバック）
+            return { moveName: 'confirmDiscard', args: [] };
+        }
     } else {
-        const scored = selectableIndices.map(i => ({
-            index: i,
-            value: evaluateCardRetainValue(p.hand[i], G, pid),
-        }));
-        scored.sort((a, b) => a.value - b.value);
-        selectedIndices = scored.slice(0, count).map(s => s.index);
+        if (selectableIndices.length < targetCount) {
+            // 手札不足（通常は発生しないが安全策）
+            return { moveName: 'confirmDiscard', args: [] };
+        }
     }
 
-    const toToggle = selectedIndices.filter(i => !ds.selectedIndices.includes(i));
-    const toUntoggle = ds.selectedIndices.filter(i => !selectedIndices.includes(i));
+    const currentCount = calcCurrentCount();
 
-    if (toUntoggle.length > 0) {
-        return { moveName: 'toggleDiscard', args: [toUntoggle[0]] };
-    }
-    if (toToggle.length > 0) {
-        return { moveName: 'toggleDiscard', args: [toToggle[0]] };
+    // ---- ここからは「理想の選択リスト」と現在の選択リストを同期させる1ステップ処理 ----
+
+    // 理想の選択リストを最初から作り直す：捨てるカードをスコアが低い順に選ぶ
+    function computeIdealSelection(): number[] {
+        if (!isModernism) {
+            // 通常の場合: 保持価値が低い順にtargetCount枚を選択
+            const scored = selectableIndices.map(i => ({
+                index: i,
+                value: difficulty === 'strategic'
+                    ? strategicEvalRetainValue(p.hand[i], G, pid)
+                    : evaluateCardRetainValue(p.hand[i], G, pid),
+            }));
+            scored.sort((a, b) => a.value - b.value);
+            return scored.slice(0, targetCount).map(s => s.index);
+        } else {
+            // モダニズムの場合: 消費財1枚=2カウント分として必要合計数に達する選択
+            const scored = selectableIndices.map(i => ({
+                index: i,
+                value: difficulty === 'strategic'
+                    ? strategicEvalRetainValue(p.hand[i], G, pid)
+                    : evaluateCardRetainValue(p.hand[i], G, pid),
+                worth: isConsumable(p.hand[i]) ? 2 : 1,
+            }));
+            scored.sort((a, b) => a.value - b.value);
+            const selected: number[] = [];
+            let total = 0;
+            for (const s of scored) {
+                if (total >= targetCount) break;
+                selected.push(s.index);
+                total += s.worth;
+            }
+            return selected;
+        }
     }
 
+    const idealSelection = computeIdealSelection();
+
+    // 現在の選択と理想の選択を同期（1アクションずつ修正）
+    // まず「外すべきカード」（現在選択中だが理想外）を外す
+    const toDeselect = ds.selectedIndices.filter(i => !idealSelection.includes(i));
+    if (toDeselect.length > 0) {
+        return { moveName: 'toggleDiscard', args: [toDeselect[0]] };
+    }
+
+    // 次に「追加すべきカード」（理想に入っているが未選択）を追加
+    const toSelect = idealSelection.filter(i => !ds.selectedIndices.includes(i));
+    if (toSelect.length > 0) {
+        return { moveName: 'toggleDiscard', args: [toSelect[0]] };
+    }
+
+    // 選択が理想と一致したら確定
     return { moveName: 'confirmDiscard', args: [] };
 }
 
@@ -1409,34 +1422,38 @@ function evaluateCardRetainValue(card: Card, G: GameState, pid: string): number 
 //   売却優先2: 低コスト建物（再建設容易）
 //   売却禁止: 建設系・金策系（公共化で他人を有利にする）
 // ============================================================
-function decidePaydayPhase(G: GameState): CPUAction | null {
+function decidePaydayPhase(G: GameState, activePid: string): CPUAction | null {
     const ps = G.paydayState;
     if (!ps) return null;
 
-    const pid = String(ps.currentPlayerIndex);
+    // playerStatesから自分の状態を取得
+    const pps = ps.playerStates[activePid];
+    if (!pps || pps.confirmed) return null; // 既に確認済みならスキップ
+
+    const pid = activePid;
     const p = G.players[pid];
     const remainingRounds = 9 - G.round;
 
     // 既にお金で払える場合（建物売却不要）
-    if (p.money >= ps.totalWage) {
+    if (p.money >= pps.totalWage) {
         // 売却選択なし＆お金で払える → confirmPayday でOK
-        if (ps.selectedBuildingIndices.length === 0) {
+        if (pps.selectedBuildingIndices.length === 0) {
             return { moveName: 'confirmPayday', args: [] };
         }
         // 既に建物を選択してしまっている場合は解除
-        return { moveName: 'togglePaydaySell', args: [ps.selectedBuildingIndices[0]] };
+        return { moveName: 'togglePaydaySell', args: [pps.selectedBuildingIndices[0]] };
     }
 
     // 選択済み売却額を計算
-    const selectedVPs = ps.selectedBuildingIndices.map(bi => getCardDef(p.buildings[bi].card.defId).vp);
+    const selectedVPs = pps.selectedBuildingIndices.map(bi => getCardDef(p.buildings[bi].card.defId).vp);
     const totalFunds = p.money + selectedVPs.reduce((sum, vp) => sum + vp, 0);
 
-    if (totalFunds >= ps.totalWage) {
+    if (totalFunds >= pps.totalWage) {
         // 過剰売却チェック（game.tsに合わせて全選択でも1つ除いて払えるなら過剰）
         if (selectedVPs.length > 0) {
             const minVP = Math.min(...selectedVPs);
-            if ((totalFunds - minVP) >= ps.totalWage) {
-                const minIdx = ps.selectedBuildingIndices.find(bi => getCardDef(p.buildings[bi].card.defId).vp === minVP);
+            if ((totalFunds - minVP) >= pps.totalWage) {
+                const minIdx = pps.selectedBuildingIndices.find(bi => getCardDef(p.buildings[bi].card.defId).vp === minVP);
                 if (minIdx !== undefined) {
                     return { moveName: 'togglePaydaySell', args: [minIdx] };
                 }
@@ -1444,7 +1461,7 @@ function decidePaydayPhase(G: GameState): CPUAction | null {
         }
         // ★修正: 建物を選んでいる場合は confirmPaydaySell、
         // 選択が空（過剰チェックで全解除された）の場合はお金で払えるので confirmPayday
-        if (ps.selectedBuildingIndices.length > 0) {
+        if (pps.selectedBuildingIndices.length > 0) {
             return { moveName: 'confirmPaydaySell', args: [] };
         }
         return { moveName: 'confirmPayday', args: [] };
@@ -1455,7 +1472,7 @@ function decidePaydayPhase(G: GameState): CPUAction | null {
         .map((b, i) => {
             const def = getCardDef(b.card.defId);
             if (def.unsellable) return null;
-            if (ps.selectedBuildingIndices.includes(i)) return null;
+            if (pps.selectedBuildingIndices.includes(i)) return null;
 
             const category = getCardCategory(def.id);
             const danger = SELL_DANGER[def.id] || 3;
@@ -1492,7 +1509,7 @@ function decidePaydayPhase(G: GameState): CPUAction | null {
     // ★ユーザー指摘: 資金不足時の売却は「任意」ではなく「強制」
     // つまり、払えないなら売れるものを売って払わなければならない
     // 選択肢があるのは「どれを売るか」だけ
-    const deficit = ps.totalWage - totalFunds;
+    const deficit = pps.totalWage - totalFunds;
 
     if (deficit > 0) {
         // 資金不足: 強制的に売却候補（一番安いもの）を選択
@@ -1503,7 +1520,7 @@ function decidePaydayPhase(G: GameState): CPUAction | null {
 
         // 売るものがない場合
         // 既に選択された売却候補があるなら、それを確定して少しでも負債を減らす
-        if (ps.selectedBuildingIndices.length > 0) {
+        if (pps.selectedBuildingIndices.length > 0) {
             return { moveName: 'confirmPaydaySell', args: [] };
         }
 
@@ -1514,10 +1531,10 @@ function decidePaydayPhase(G: GameState): CPUAction | null {
     // V4: 借金戦略 (Aggressive Debt)
     // 資金は足りているが、あえて払わない戦略の検討（終盤のみ）
     // 未払いペナルティ(-3VP/枚) < 守る建物のVP ならば、あえて払わない
-    if (remainingRounds <= 1 && totalFunds >= ps.totalWage) {
+    if (remainingRounds <= 1 && totalFunds >= pps.totalWage) {
         // 現在選択されている売却対象の中に、高VPのものが含まれているか？
         // 含まれているなら、それを「売らない」ようにチェックを外す
-        for (const bi of ps.selectedBuildingIndices) {
+        for (const bi of pps.selectedBuildingIndices) {
             const b = p.buildings[bi];
             const def = getCardDef(b.card.defId);
             // 損益分岐点: 建物VP > 3 (未払いペナルティ)
@@ -1538,17 +1555,21 @@ function decidePaydayPhase(G: GameState): CPUAction | null {
 // ============================================================
 // Cleanup Phase: 精算（手札超過分を捨てる）
 // ============================================================
-function decideCleanupPhase(G: GameState): CPUAction | null {
+function decideCleanupPhase(G: GameState, activePid: string, difficulty: AIDifficulty = 'heuristic'): CPUAction | null {
     const cs = G.cleanupState;
     if (!cs) return null;
 
-    const pid = String(cs.currentPlayerIndex);
+    // playerStatesから自分の状態を取得
+    const cps = cs.playerStates[activePid];
+    if (!cps || cps.confirmed) return null; // 既に確認済みならスキップ
+
+    const pid = activePid;
     const p = G.players[pid];
 
-    if (cs.selectedIndices.length < cs.excessCount) {
+    if (cps.selectedIndices.length < cps.excessCount) {
         const scored = p.hand
-            .map((card, i) => ({ index: i, value: evaluateCardRetainValue(card, G, pid) }))
-            .filter(x => !cs.selectedIndices.includes(x.index))
+            .map((card, i) => ({ index: i, value: difficulty === 'strategic' ? strategicEvalRetainValue(card, G, pid) : evaluateCardRetainValue(card, G, pid) }))
+            .filter(x => !cps.selectedIndices.includes(x.index))
             .sort((a, b) => a.value - b.value);
 
         if (scored.length > 0) {
@@ -1556,7 +1577,7 @@ function decideCleanupPhase(G: GameState): CPUAction | null {
         }
     }
 
-    if (cs.selectedIndices.length === cs.excessCount) {
+    if (cps.selectedIndices.length === cps.excessCount) {
         return { moveName: 'confirmDiscard', args: [] };
     }
 
@@ -1592,7 +1613,9 @@ function decideDesignOfficePhase(
             score = hasAgriCoop ? 15 : 3;
         } else {
             const def = getCardDef(card.defId);
-            score = evaluateCardForBuilding(G, pid, def);
+            score = difficulty === 'strategic'
+                ? strategicEvalCardForBuild(G, pid, def)
+                : evaluateCardForBuilding(G, pid, def);
         }
         if (score > bestScore) {
             bestScore = score;
@@ -1649,6 +1672,11 @@ function decideDualConstructionPhase(
                     score = s1 + s2;
                     // 同じカード2枚の場合はペナルティ
                     if (def1.id === def2.id) score -= 10;
+                } else if (difficulty === 'strategic') {
+                    const s1 = strategicEvalCardForBuild(G, pid, def1);
+                    const s2 = strategicEvalCardForBuild(G, pid, def2);
+                    score = s1 + s2;
+                    if (def1.id === def2.id) score -= 15;
                 } else {
                     score = Math.random() * 100;
                 }
@@ -1724,3 +1752,693 @@ function decideSkyscraperChoicePhase(G: GameState, pid: string, difficulty: AIDi
     // 建設フェーズと同じ
     return decideBuildPhase(G, pid, difficulty);
 }
+
+// ============================================================
+// ============================================================
+// STRATEGIC AI — エンジン複利型CPU（新難易度）
+// 設計思想:
+//   1. 序盤はエンジン系（農場/工場）最優先 → 使い回しで複利スケール
+//   2. カード価値はラウンド×リソース状態で動的に変化
+//   3. 建設→使用→資金→建設の複利サイクルを加速
+//   4. 公共化リスク（給料不足→盤面流出）を考慮
+// ============================================================
+// ============================================================
+
+// ──────────────────────────────────────
+// ヘルパー: 現在利用可能な最高売却レート（1消費財あたりの$）
+// ──────────────────────────────────────
+function getBestSellRate(G: GameState): number {
+    let best = 0;
+    for (const wp of G.publicWorkplaces) {
+        const si = parseSellEffect(wp.specialEffect);
+        if (si && G.household >= si.amount) {
+            const rate = si.amount / si.count; // $6/枚が基本
+            if (rate > best) best = rate;
+        }
+    }
+    return best;
+}
+
+// ──────────────────────────────────────
+// タイミング依存の価値倍率
+// 0.0〜2.0 のスケール
+//   >1.0 = このタイミングで価値が高い
+//   <1.0 = このタイミングで価値が低い
+// ──────────────────────────────────────
+function getTimingMultiplier(defId: string, round: number): number {
+    const category = getCardCategory(defId);
+    const remainingRounds = 9 - round;
+
+    switch (category) {
+        case 'production': // 農場系: 早いほど強い（使い回し回数）
+        case 'draw':       // 工場系: 早いほど強い
+            return Math.min(2.0, 0.5 + remainingRounds * 0.2);
+        // R1→2.0, R5→1.3, R8→0.7
+
+        case 'pure_vp':    // 邸宅系: いつでも一定
+            return 1.0;
+
+        case 'bonus':      // 不動産屋系: 終盤ほど条件達成しやすい
+            return Math.min(2.0, 0.3 + (9 - remainingRounds) * 0.25);
+        // R1→0.3, R5→1.3, R8→2.0
+
+        case 'income':     // 金策系: 中盤が最も強い
+            return remainingRounds >= 4 ? 1.5 : (remainingRounds >= 2 ? 1.2 : 0.8);
+
+        case 'construction': // 建設系: 序〜中盤が強い
+            return remainingRounds >= 5 ? 1.8 : (remainingRounds >= 3 ? 1.3 : 0.6);
+
+        case 'utility':    // 社宅/倉庫: 早いほど強い
+            return Math.min(1.8, 0.4 + remainingRounds * 0.2);
+
+        default:
+            return 1.0;
+    }
+}
+
+// ──────────────────────────────────────
+// エンジン連鎖価値: カードを使った先に何が起きるか
+// 「消費財→売却→資金→建設」「カード引く→建設候補→建設」等の二次効果
+// ──────────────────────────────────────
+function getEngineChainValue(G: GameState, pid: string, defId: string): number {
+    const remainingRounds = Math.max(0, 9 - G.round);
+    const p = G.players[pid];
+    const sellRate = getBestSellRate(G);
+
+    // 建物の使用回数推定（ワーカー数と残りラウンドの少ないほう）
+    // ワーカー全部は使えないので、控えめに見積もる
+    const estimatedUses = Math.min(remainingRounds, Math.max(1, p.workers - 1));
+
+    switch (defId) {
+        // ── 農場系: 消費財生産 → 売却で現金 → 建設資金 ──
+        case 'farm':
+        case 'gl_village':
+            // 消費財2枚/回 → 各$6で売却 → 1回$12の現金
+            return estimatedUses * 2 * (sellRate > 0 ? sellRate : 3) * 1.3;
+
+        case 'large_farm':
+        case 'gl_cotton_farm':
+            return estimatedUses * 3 * (sellRate > 0 ? sellRate : 3) * 1.3;
+
+        case 'gl_poultry_farm':
+            return estimatedUses * 2.5 * (sellRate > 0 ? sellRate : 3) * 1.2;
+
+        case 'orchard':
+            // 可変: 手札少ないほど効果大 → 平均2枚として計算
+            return estimatedUses * 2 * (sellRate > 0 ? sellRate : 3) * 1.1;
+
+        case 'slash_burn':
+            // 1回限りだが5枚 → 爆発的
+            return 5 * (sellRate > 0 ? sellRate : 4) * 1.5;
+
+        case 'gl_greenhouse':
+            // ワーカー2体必要だが消費財4枚
+            return estimatedUses * 4 * (sellRate > 0 ? sellRate : 3) * 0.8; // 2ワーカーコスト考慮
+
+        // ── ドロー系: カード引く → 建設候補 → 建設 → 建物増 ──
+        case 'steel_mill':
+        case 'gl_refinery':
+            // 3枚引く → 建設候補が3枚増える → 高VP建物にアクセス
+            return estimatedUses * 3 * 6 * 1.2;
+
+        case 'chemical_plant':
+            // 2枚引く（手札0なら4枚）
+            return estimatedUses * (p.hand.length <= 1 ? 4 : 2) * 6 * 1.1;
+
+        case 'factory':
+        case 'gl_steam_factory':
+            // 実質+2枚（2捨て4引く）
+            return estimatedUses * 2 * 5 * 1.0;
+
+        case 'auto_factory':
+        case 'gl_locomotive_factory':
+            // 実質+4枚（3捨て7引く）
+            return estimatedUses * 4 * 5 * 1.2;
+
+        case 'gl_coal_mine':
+            // 5枚引く（ワーカー2体）
+            return estimatedUses * 5 * 5 * 0.8;
+
+        case 'design_office':
+            // 5枚から1枚選択 → 質は高いが量は1枚
+            return estimatedUses * 1 * 8 * 1.0;
+
+        case 'gl_studio':
+            // 1枚引く + VPトークン1枚
+            return estimatedUses * (5 + 3.3) * 1.0;
+
+        // ── 建設系: 建物を建てる → アクションスロット増加 ──
+        case 'construction_co':
+            // コスト-1建設 → 建物1棟追加 → 以降毎Rアクション+1
+            return estimatedUses * 15 * 1.3;
+
+        case 'general_contractor':
+            // 建設 + 2枚引く → 建物+手札同時に増える
+            return estimatedUses * 20 * 1.2;
+
+        case 'pioneer':
+            return estimatedUses * 12 * 1.0;
+
+        case 'dual_construction':
+            // 2棟同時建設 → アクション+2
+            return estimatedUses * 25 * 1.1;
+
+        case 'gl_colonist':
+            return estimatedUses * 12 * 1.0;
+
+        case 'gl_skyscraper':
+            return estimatedUses * 14 * 1.0;
+
+        case 'gl_modernism_construction':
+            return estimatedUses * 18 * 1.0;
+
+        case 'gl_teleporter':
+            // 無料建設 → 最強
+            return estimatedUses * 30 * 1.0;
+
+        // ── 金策系: 直接現金 → 建設資金として即使える ──
+        case 'coffee_shop':
+            return estimatedUses * 5 * 0.8;
+
+        case 'restaurant':
+            return estimatedUses * 12 * 1.0; // $15だがカード1枚犠牲
+
+        case 'gl_game_cafe':
+            return estimatedUses * 7 * 0.9;
+
+        case 'gl_museum':
+            return estimatedUses * 10 * 0.9;
+
+        case 'gl_theater':
+            return estimatedUses * 15 * 0.9; // $20だがカード2枚犠牲
+
+        // ── ユーティリティ系 ──
+        case 'gl_automaton':
+            // ロボットワーカー = 以降毎R追加アクション（給料不要）
+            return remainingRounds * 12;
+
+        case 'warehouse':
+            // 手札上限+4 → 消費財を溜め込める → 大型売却に活きる
+            return remainingRounds * 4;
+
+        case 'company_housing':
+            // ワーカー上限+1 → 追加ワーカーの恩恵
+            return remainingRounds > 3 ? 15 : 5;
+
+        case 'gl_relic':
+            return 6.6; // VPトークン2枚 ≈ 6.6VP
+
+        // ── 純VP/ボーナス系: 連鎖なし ──
+        default:
+            return 0;
+    }
+}
+
+// ──────────────────────────────────────
+// 公共化リスク: 建物を持つことで給料日に売却→公共化されるリスク
+// 高スコア = 建てるのが危険（売却時に他プレイヤーを利する）
+// ──────────────────────────────────────
+function getPublicizationRisk(G: GameState, pid: string, defId: string): number {
+    const p = G.players[pid];
+    const def = getCardDef(defId);
+
+    // 売却不可な建物は公共化されない
+    if (def.unsellable) return 0;
+
+    const danger = SELL_DANGER[defId] || 3;
+    const wage = getWagePerWorker(G.round);
+    // ロボットワーカーは給料不要
+    const payingWorkers = Math.max(0, p.workers - p.robotWorkers);
+    const totalWage = wage * payingWorkers;
+    const paymentMargin = p.money - totalWage;
+
+    // 消費財の潜在売却額を加味
+    const consumables = p.hand.filter(c => isConsumable(c)).length;
+    const sellRate = getBestSellRate(G);
+    const potentialIncome = Math.min(consumables, 3) * sellRate;
+    const effectiveMargin = paymentMargin + potentialIncome;
+
+    // 余裕がないほど公共化リスク大
+    if (effectiveMargin < 0) {
+        return danger * 3; // 売却される可能性が非常に高い
+    }
+    if (effectiveMargin < totalWage) {
+        return danger * 1.5; // やや危険
+    }
+    return danger * 0.3; // 余裕あり → リスク低い
+}
+
+// ──────────────────────────────────────
+// Strategic: 公共職場のスコアリング
+// ──────────────────────────────────────
+function strategicEvalWorkplace(G: GameState, pid: string, wp: Workplace): number {
+    const p = G.players[pid];
+    const round = G.round;
+    const remainingRounds = 9 - round;
+    const consumableCount = p.hand.filter(c => isConsumable(c)).length;
+    const wage = getWagePerWorker(round);
+    const payingWorkers = Math.max(0, p.workers - p.robotWorkers);
+    const totalWage = wage * payingWorkers;
+    const moneyShortfall = totalWage - p.money;
+    const isLastWorker = p.availableWorkers === 1;
+
+    // ── 売却系 ──
+    const sellInfo = parseSellEffect(wp.specialEffect);
+    if (sellInfo) {
+        if (G.household < sellInfo.amount) return -10;
+        if (p.hand.length < sellInfo.count) return -10;
+
+        const canPayWithConsumables = consumableCount >= sellInfo.count;
+        const efficiency = sellInfo.amount / sellInfo.count; // $/枚
+
+        // より高効率の売却が可能なら低効率売却を抑制
+        const betterAvailable = G.publicWorkplaces.some(other => {
+            if (other.id === wp.id) return false;
+            const otherSell = parseSellEffect(other.specialEffect);
+            if (!otherSell || otherSell.amount <= sellInfo.amount) return false;
+            if (G.household < otherSell.amount) return false;
+            if (!other.multipleAllowed && other.workers.length > 0) return false;
+            return consumableCount >= otherSell.count;
+        });
+
+        let score = sellInfo.amount; // ベース = 獲得金額
+
+        // 給料が払えない → 金策最優先
+        if (moneyShortfall > 0 && canPayWithConsumables) {
+            score += 50;
+        }
+
+        // 消費財以外を犠牲にする場合は価値低下
+        if (!canPayWithConsumables) {
+            score -= 15;
+        }
+
+        // より良い売却があるなら抑制
+        if (betterAvailable) score -= 20;
+
+        // 終盤は売却の価値が上がる（最後の換金チャンス）
+        if (remainingRounds <= 2) score += 10;
+
+        return score;
+    }
+
+    // ── ワーカー増員系 ──
+    switch (wp.specialEffect) {
+        case 'hire_worker':
+        case 'expand4':
+        case 'expand5':
+        case 'hire_immediate': {
+            if (wp.specialEffect === 'hire_worker' && p.workers >= p.maxWorkers) return -10;
+            if (wp.specialEffect === 'expand4' && p.workers >= 4) return -10;
+            if (wp.specialEffect === 'expand5' && p.workers >= 5) return -10;
+            if (wp.specialEffect === 'hire_immediate' && p.workers >= p.maxWorkers) return -10;
+
+            // 安全チェック
+            if (!isSafeToHire(G, pid) && round > 1) return -5;
+
+            // ラストワーカーで給料不足なら金策を優先
+            if (isLastWorker && moneyShortfall > 0) return 5;
+
+            // ★エンジン複利の核心: ワーカー増員は残りラウンドで価値が劇的に変わる
+            // 各ワーカーは残りラウンド分のアクションを生む
+            const actionValue = remainingRounds * 12; // 1アクションあたり≈12VP相当
+            const futureWageCost = (() => {
+                let cost = 0;
+                for (let r = round + 1; r <= 9; r++) cost += getWagePerWorker(r);
+                return cost;
+            })();
+
+            const netValue = actionValue - futureWageCost;
+
+            // R1〜3: ワーカー増員は超高価値
+            if (round <= 2 && p.workers <= 2) return Math.max(netValue, 120);
+            if (round <= 3 && p.workers <= 2) return Math.max(netValue, 100);
+            if (round <= 4 && p.workers <= 3) return Math.max(netValue, 80);
+
+            // R5以降: netValueが正なら検討、負なら避ける
+            if (netValue > 20) return netValue;
+            if (netValue > 0) return netValue * 0.5;
+            return -5;
+        }
+
+        // ── スタートプレイヤー争奪 ──
+        case 'start_player_draw': {
+            let score = 15; // カード1枚引く基本値
+
+            // 次Rに増員系 → スタP争奪が重要
+            const nextRound = round + 1;
+            if (nextRound === 4 && p.workers < 4) score += 30;
+            else if (nextRound === 6 && p.workers < 5) score += 25;
+            else if (nextRound === 8) score += 15;
+            else if ([2, 3, 5, 7, 9].includes(nextRound)) score += 5;
+
+            // 手札少ない時のリカバリ
+            if (p.hand.length <= 1) score += 20;
+
+            return score;
+        }
+
+        // ── 鉱山（カード1枚引く）──
+        case 'draw1': {
+            // Strategic: 鉱山は最弱行動。他に選択肢がない時だけ
+            if (p.hand.length === 0) return 15;
+            if (p.hand.length <= 1) return 8;
+            return -5; // 手札2枚以上で鉱山に行くのは避ける
+        }
+
+        // ── 遺跡（Glory）──
+        case 'ruins': {
+            let score = 10 + 3.3; // 消費財1枚($6) + VPトークン1枚(3.3VP)
+            if (moneyShortfall > 0) score += 10;
+            return score;
+        }
+
+        // ── 建設（大工）──
+        case 'build': {
+            if (!canBuildAnything(p, 0)) return -10;
+            const bestBuildScore = strategicEvalBuildOpportunity(G, pid, 0, 0);
+            // 賃金不足時は建設より金策を優先（ただし完全には切らない）
+            if (moneyShortfall > 0 && isLastWorker) return Math.min(bestBuildScore, 20);
+            return bestBuildScore;
+        }
+    }
+
+    // ── 建物由来の公共職場 ──
+    if (wp.fromBuildingDefId) {
+        return strategicEvalBuilding(G, pid, wp.fromBuildingDefId);
+    }
+
+    return 0; // デフォルト
+}
+
+// ──────────────────────────────────────
+// Strategic: 自社建物配置スコアリング
+// ──────────────────────────────────────
+function strategicEvalBuilding(G: GameState, pid: string, defId: string): number {
+    const p = G.players[pid];
+    const round = G.round;
+    const remainingRounds = 9 - round;
+    const wage = getWagePerWorker(round);
+    const payingWorkers = Math.max(0, p.workers - p.robotWorkers);
+    const totalWage = wage * payingWorkers;
+    const moneyShortfall = totalWage - p.money;
+    const consumableCount = p.hand.filter(c => isConsumable(c)).length;
+    const sellRate = getBestSellRate(G);
+
+    const def = getCardDef(defId);
+    const category = getCardCategory(defId);
+    const timing = getTimingMultiplier(defId, round);
+
+    // コストボーナス（高コスト建物のアクションは基本的に強力）
+    let baseScore = def.cost * 8;
+
+    // 金策が急務で金策系でない場合はペナルティ
+    if (moneyShortfall > 0 && category !== 'income' && category !== 'production') {
+        baseScore = Math.min(baseScore, 15);
+    }
+
+    // カテゴリ×タイミングに基づくスコア
+    switch (defId) {
+        // ── 生産系 ──
+        case 'farm':
+        case 'gl_village': {
+            // 消費財2枚生産。売れる場があるなら高スコア
+            let score = 12 * timing;
+            if (sellRate > 0) score += sellRate * 2; // 売却レート考慮
+            if (moneyShortfall > 0 && sellRate > 0) score += 20; // 金策緊急ブースト
+            return Math.max(score, baseScore);
+        }
+        case 'large_farm':
+        case 'gl_cotton_farm': {
+            let score = 18 * timing;
+            if (sellRate > 0) score += sellRate * 3;
+            if (moneyShortfall > 0 && sellRate > 0) score += 25;
+            return Math.max(score, baseScore);
+        }
+        case 'gl_poultry_farm': {
+            const isOdd = p.hand.length % 2 !== 0;
+            let score = (isOdd ? 18 : 12) * timing;
+            if (sellRate > 0) score += sellRate * (isOdd ? 3 : 2);
+            return Math.max(score, baseScore);
+        }
+        case 'orchard': {
+            const gain = Math.max(0, 4 - p.hand.length);
+            if (gain <= 0) return -5;
+            let score = gain * 6 * timing;
+            return Math.max(score, baseScore);
+        }
+        case 'slash_burn': {
+            let score = 30 * timing;
+            if (sellRate > 0) score += sellRate * 5;
+            return Math.max(score, baseScore + 30);
+        }
+        case 'gl_greenhouse': {
+            let score = 24 * timing * 0.7; // ワーカー2体コスト考慮
+            return Math.max(score, baseScore);
+        }
+
+        // ── ドロー系 ──
+        case 'steel_mill':
+        case 'gl_refinery':
+            return Math.max(15 * timing + baseScore, baseScore + 30);
+
+        case 'factory':
+        case 'gl_steam_factory':
+            if (p.hand.length < 2) return -5;
+            return Math.max(10 * timing + baseScore, baseScore + 20);
+
+        case 'auto_factory':
+        case 'gl_locomotive_factory':
+            if (p.hand.length < 3) return -5;
+            return Math.max(18 * timing + baseScore, baseScore + 35);
+
+        case 'chemical_plant':
+            return Math.max((p.hand.length === 0 ? 20 : 10) * timing + baseScore, baseScore + 25);
+
+        case 'design_office':
+            return Math.max(8 * timing + baseScore, baseScore + 15);
+
+        case 'gl_coal_mine':
+            return Math.max(25 * timing * 0.7 + baseScore, baseScore + 35); // 2ワーカー
+
+        case 'gl_studio':
+            return Math.max(8.3 * timing + baseScore, baseScore + 15);
+
+        // ── 金策系 ──
+        case 'coffee_shop': {
+            if (G.household < 5) return -5;
+            let score = 5 * timing;
+            if (moneyShortfall > 0) score += 30;
+            return Math.max(score, baseScore);
+        }
+        case 'restaurant': {
+            if (G.household < 15 || p.hand.length < 1) return -5;
+            let score = 15 * timing;
+            if (moneyShortfall > 0) score += 35;
+            return Math.max(score, baseScore + 20);
+        }
+        case 'gl_game_cafe': {
+            if (G.household < 5) return -5;
+            let score = 7 * timing;
+            if (moneyShortfall > 0) score += 20;
+            return Math.max(score, baseScore);
+        }
+        case 'gl_museum': {
+            if (G.household < 7) return -5;
+            const amount = p.hand.length === 5 ? 14 : 7;
+            let score = amount * timing;
+            if (moneyShortfall > 0) score += 20;
+            return Math.max(score, baseScore);
+        }
+        case 'gl_theater': {
+            if (G.household < 20 || p.hand.length < 2) return -5;
+            let score = 20 * timing;
+            if (moneyShortfall > 0) score += 30;
+            return Math.max(score, baseScore + 15);
+        }
+
+        // ── 建設系 ──
+        case 'construction_co':
+            return strategicEvalBuildOpportunity(G, pid, 1, 0) + 10;
+
+        case 'pioneer':
+            return canBuildFarmFree(p) ? 60 * timing : -5;
+
+        case 'general_contractor':
+            return strategicEvalBuildOpportunity(G, pid, 0, 2) + 15;
+
+        case 'dual_construction':
+            if (!canDualConstruct(p)) return -5;
+            return 70 * timing;
+
+        case 'gl_colonist':
+            return strategicEvalBuildOpportunity(G, pid, 0, 0) + 8;
+
+        case 'gl_skyscraper':
+            return strategicEvalBuildOpportunity(G, pid, 0, 0) + 10;
+
+        case 'gl_modernism_construction':
+            return strategicEvalBuildOpportunity(G, pid, 0, 0) + 15;
+
+        case 'gl_teleporter':
+            return strategicEvalBuildOpportunity(G, pid, 99, 0) + 30;
+
+        // ── ユーティリティ ──
+        case 'gl_relic':
+            return 6.6 + baseScore;
+
+        case 'gl_automaton':
+            return remainingRounds * 12 + baseScore;
+
+        case 'mansion':
+        case 'gl_monument':
+            return 0; // 効果なし
+
+        default:
+            return baseScore;
+    }
+}
+
+// ──────────────────────────────────────
+// Strategic: 建設機会の総合スコア
+// ──────────────────────────────────────
+function strategicEvalBuildOpportunity(G: GameState, pid: string, costReduction: number, drawAfter: number): number {
+    const p = G.players[pid];
+    let bestScore = -10;
+    for (const card of p.hand) {
+        if (isConsumable(card)) continue;
+        const def = getCardDef(card.defId);
+        const cost = getConstructionCost(p, card.defId, costReduction);
+        if (p.hand.length - 1 >= cost) {
+            const score = strategicEvalCardForBuild(G, pid, def);
+            if (score > bestScore) bestScore = score;
+        }
+    }
+    if (bestScore <= -10) return -10;
+    const drawBonus = drawAfter > 0 ? drawAfter * 5 : 0;
+    return bestScore + drawBonus;
+}
+
+// ──────────────────────────────────────
+// Strategic: 建設対象カードの評価
+// ★核心: タイミング×エンジン連鎖×公共化リスクの統合評価
+// ──────────────────────────────────────
+function strategicEvalCardForBuild(G: GameState, pid: string, def: typeof CARD_DEFS[0]): number {
+    const p = G.players[pid];
+    const round = G.round;
+    const remainingRounds = 9 - round;
+
+    // ── ベース: VP ──
+    let score = def.vp;
+
+    // ── タイミング倍率 ──
+    const timing = getTimingMultiplier(def.id, round);
+
+    // ── エンジン連鎖価値（複利の核心）──
+    const chainValue = getEngineChainValue(G, pid, def.id);
+    score += chainValue * timing;
+
+    // ── 公共化リスク（建てても売却で流出するリスク）──
+    const pubRisk = getPublicizationRisk(G, pid, def.id);
+    score -= pubRisk;
+
+    // ── コスト効率: 捨てる手札枚数に対するリターン ──
+    const cost = getConstructionCost(p, def.id, 0);
+    const avgHandValue = 8; // 手札1枚の平均価値
+    score -= cost * avgHandValue * 0.3; // コスト分の損失（全額ではなく30%で計算）
+
+    // ── カテゴリ別の特殊評価 ──
+    const category = getCardCategory(def.id);
+
+    // 序盤にエンジン系は最優先
+    if (round <= 3 && (category === 'production' || category === 'draw')) {
+        score += 30;
+        // 初農場は絶対
+        if (def.tags.includes('farm') && !p.buildings.some(b => getCardDef(b.card.defId).tags.includes('farm'))) {
+            score += 40;
+        }
+    }
+
+    // 序盤に純VP/ボーナスは避ける（エンジンを優先）
+    if (round <= 4 && (category === 'pure_vp' || category === 'bonus')) {
+        score -= 40;
+    }
+
+    // 終盤はVPの高さが直結
+    if (remainingRounds <= 2) {
+        score += def.vp * 1.5; // VP追加ウェイト
+        // エンジン系の価値が低下（使い回す時間がない）
+        if (category === 'production' || category === 'draw') {
+            score -= 15;
+        }
+    }
+
+    // ── ボーナスVP期待値 ──
+    const bonusGain = estimateBonusGainIfBuilt(G, pid, def.id);
+    score += bonusGain * timing; // タイミングも加味
+
+    // ── 個別カード補正 ──
+    // 機械人形: 給料不要ワーカー＝超強力
+    if (def.id === 'gl_automaton') score += remainingRounds * 10;
+    // 浄火の神殿: 条件（唯一の売却不可）をチェック
+    if (def.id === 'gl_temple_of_purification') {
+        const unsellables = p.buildings.filter(b => getCardDef(b.card.defId).unsellable);
+        if (unsellables.length === 0) score += 30; // 条件達成可能
+        else score -= 50; // 条件不達
+    }
+
+    // ── 同カード既設済みペナルティ ──
+    const existing = p.buildings.filter(b => b.card.defId === def.id).length;
+    if (existing > 0) score -= 15 * existing;
+
+    return score;
+}
+
+// ──────────────────────────────────────
+// Strategic: 手札保持価値（低い = 捨てて良い）
+// ──────────────────────────────────────
+function strategicEvalRetainValue(card: Card, G: GameState, pid: string): number {
+    const p = G.players[pid];
+    const round = G.round;
+    const remainingRounds = 9 - round;
+
+    // 消費財
+    if (isConsumable(card)) {
+        // 農協があるなら消費財=3VP相当（保持価値UP）
+        if (p.buildings.some(b => b.card.defId === 'agri_coop')) return 10;
+        // 収穫祭があるなら消費財温存
+        if (p.buildings.some(b => b.card.defId === 'gl_harvest_festival')) return 12;
+        // 売却用脇のは保持だが、建設コストにもなる
+        return 2;
+    }
+
+    const def = getCardDef(card.defId);
+
+    // タイミングで保持価値が変わる
+    const timing = getTimingMultiplier(def.id, round);
+    let value = def.vp * timing;
+
+    // エンジン連鎖価値を考慮（将来使い回せるカードは価値が高い）
+    const chainValue = getEngineChainValue(G, pid, def.id);
+    value += chainValue * 0.3; // 全額ではなく影響30%
+
+    // 建設可能なら保持価値UP
+    const cost = getConstructionCost(p, def.id, 0);
+    if (p.hand.length - 1 >= cost) value += 8;
+
+    // 既に同じ建物があるなら価値DOWN
+    if (p.buildings.some(b => b.card.defId === def.id)) value -= 12;
+
+    // 序盤に高コスト純VP → 今はまだ使えない → 価値DOWN
+    if (round <= 3 && def.cost >= 4 && getCardCategory(def.id) === 'pure_vp') {
+        value -= 10;
+    }
+
+    // ボーナス系は終盤に向けて価値UP
+    if (getCardCategory(def.id) === 'bonus') {
+        value += remainingRounds <= 3 ? 15 : 5;
+    }
+
+    return value;
+}
+

@@ -14,6 +14,7 @@ export interface CardDef {
     unsellable: boolean;
     consumeOnUse: boolean;
     effectText: string;
+    image?: string; // カード画像パス（public/cards/以下）
     // Glory Expansion
     workerReq?: number; // 複数ワーカー配置 (default: 1)
     variableCostType?: 'vp_token' | 'hand_odd' | 'hand_zero';
@@ -61,16 +62,35 @@ export interface BuildSelectState {
     action: string; // 'build','construction_co','pioneer','general_contractor','dual_construction'
 }
 
-/** 給料日状態 */
-export interface PaydayState {
-    currentPlayerIndex: number;
-    wagePerWorker: number;
+/** 給料日 個別プレイヤー状態 */
+export interface PaydayPlayerState {
     totalWage: number;
+    needsSelling: boolean;       // 売却操作が必要か
     selectedBuildingIndices: number[]; // 売却選択中の建物インデックス
+    confirmed: boolean;          // 操作完了したか
 }
 
-/** 精算状態 */
+/** 給料日状態（全プレイヤー同時処理） */
+export interface PaydayState {
+    wagePerWorker: number;
+    playerStates: { [pid: string]: PaydayPlayerState };
+    // 後方互換用: 現在操作表示用に残すが、同時処理では複数プレイヤーが操作中
+    currentPlayerIndex: number;
+    totalWage: number;
+    selectedBuildingIndices: number[];
+}
+
+/** 精算 個別プレイヤー状態 */
+export interface CleanupPlayerState {
+    excessCount: number;
+    selectedIndices: number[];
+    confirmed: boolean;          // 操作完了したか
+}
+
+/** 精算状態（全プレイヤー同時処理） */
 export interface CleanupState {
+    playerStates: { [pid: string]: CleanupPlayerState };
+    // 後方互換用
     currentPlayerIndex: number;
     excessCount: number;
     selectedIndices: number[];
@@ -134,6 +154,26 @@ export interface GameState {
     log: { text: string; round: number }[]; // ゲームログ
 
     finalScores: { playerIndex: number; score: number; breakdown: ScoreBreakdown }[] | null;
+
+    /** P2P（オンライン）モードかどうか */
+    isOnline: boolean;
+
+    /** 統計データ（グラフ描画用） */
+    stats?: GameStats;
+}
+
+export interface PlayerRoundStat {
+    round: number;
+    money: number;
+    workers: number;
+    buildingCount: number;
+    unpaidDebts: number;
+    vpTokens: number;
+    currentVP: number;
+}
+
+export interface GameStats {
+    players: Record<string, PlayerRoundStat[]>;
 }
 
 export interface ScoreBreakdown {
@@ -147,4 +187,24 @@ export interface ScoreBreakdown {
     rawDebts: number;        // 元の未払い賃金枚数
     exemptedDebts: number;   // 法律事務所による免除枚数
     hasLawOffice: boolean;   // 法律事務所を所持しているか
+}
+
+// ============================================================
+// boardgame.io moves の型定義（Board.tsx サブコンポーネント用）
+// ============================================================
+export interface GameMoves {
+    placeWorker: (workplaceId: string) => void;
+    placeWorkerOnBuilding: (cardUid: string) => void;
+    selectBuildCard: (cardIndex: number) => void;
+    toggleDiscard: (cardIndex: number) => void;
+    confirmDiscard: () => void;
+    cancelAction: () => void;
+    selectDesignOfficeCard: (cardIndex: number) => void;
+    toggleDualCard: (cardIndex: number) => void;
+    confirmDualConstruction: () => void;
+    togglePaydaySell: (buildingIndex: number) => void;
+    confirmPaydaySell: () => void;
+    confirmPayday: () => void;
+    selectVillageOption: (option: 'draw_consumable' | 'draw_building') => void;
+    debug_setState: (payload: any) => void;
 }
