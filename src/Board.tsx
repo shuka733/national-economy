@@ -741,31 +741,6 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
         };
     }, [G, curPid, cpuConfig, moves, showCpuSettings, playerID, drawAnimTick]);
 
-    // ゲーム終了
-    if (G.phase === 'gameEnd' && G.finalScores) return <GameOver G={G} />;
-
-    // P2P: 自分のターンでない場合のモーダル系は「待機中」表示
-    if (isOnline && isModalPhase && !isMyTurn) {
-        const phaseLabels: Record<string, string> = {
-            payday: '💰 給料日の処理',
-            cleanup: '🗑️ 手札整理',
-            discard: '🃏 カード選択',
-            build: '🔨 建設',
-            designOffice: '🔍 設計事務所',
-            dualConstruction: '🏗️ 二胡市建設',
-        };
-        return (
-            <div className="game-bg" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', padding: 16 }}>
-                <div className="glass-card animate-slide-up" style={{ padding: 40, maxWidth: 420, width: '100%', textAlign: 'center' }}>
-                    <div style={{ fontSize: 48, marginBottom: 16, animation: 'pulse 2s ease-in-out infinite' }}>⏳</div>
-                    <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--gold)', marginBottom: 8 }}>P{G.activePlayer + 1} が操作中...</h2>
-                    <p style={{ color: 'var(--text-secondary)', marginBottom: 4 }}>{phaseLabels[G.phase] || G.phase}を行っています</p>
-                    <p style={{ color: 'var(--text-dim)', fontSize: 12, marginTop: 16 }}>しばらくお待ちください</p>
-                </div>
-            </div>
-        );
-    }
-
     // ===== ①②③ ポップアップ廃止: payday/cleanup/discard はメインボード上でインライン操作 =====
     // 給料日（建物売却）: メインボードの建物カードから直接選択
     const isPaydayPhase = G.phase === 'payday' && G.paydayState;
@@ -783,12 +758,6 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
 
     // 捨てカード選択: メインボードの手札から直接選択
     const isDiscardPhase = rawG.phase === 'discard' && rawG.discardState;
-
-    // 設計事務所モーダル（rawGで判定: ドロー1_下完了後に表示するためアニメーション中は非表示）
-    if (rawG.phase === 'designOffice' && rawG.designOfficeState && !drawAnimRef.current) return <DesignOfficeUI G={rawG} moves={moves} onBeforeSelect={() => prepareDrawDetection(0, true)} />;
-
-    // 二胡市建設モーダル
-    if (G.phase === 'dualConstruction' && G.dualConstructionState) return <DualConstructionUI G={G} moves={moves} pid={curPid} />;
 
     // ホットシートでカレントプレイヤー = 自分
     const myIdx = parseInt(myPid);
@@ -842,6 +811,39 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
             document.removeEventListener('pointercancel', onCancel);
         };
     }, []);
+
+    // ====== 早期return: 全てのフック呼び出しの後に配置（Reactフックルール準拠） ======
+
+    // ゲーム終了
+    if (G.phase === 'gameEnd' && G.finalScores) return <GameOver G={G} />;
+
+    // P2P: 自分のターンでない場合のモーダル系は「待機中」表示
+    if (isOnline && isModalPhase && !isMyTurn) {
+        const phaseLabels: Record<string, string> = {
+            payday: '💰 給料日の処理',
+            cleanup: '🗑️ 手札整理',
+            discard: '🃏 カード選択',
+            build: '🔨 建設',
+            designOffice: '🔍 設計事務所',
+            dualConstruction: '🏗️ 二胡市建設',
+        };
+        return (
+            <div className="game-bg" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', padding: 16 }}>
+                <div className="glass-card animate-slide-up" style={{ padding: 40, maxWidth: 420, width: '100%', textAlign: 'center' }}>
+                    <div style={{ fontSize: 48, marginBottom: 16, animation: 'pulse 2s ease-in-out infinite' }}>⏳</div>
+                    <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--gold)', marginBottom: 8 }}>P{G.activePlayer + 1} が操作中...</h2>
+                    <p style={{ color: 'var(--text-secondary)', marginBottom: 4 }}>{phaseLabels[G.phase] || G.phase}を行っています</p>
+                    <p style={{ color: 'var(--text-dim)', fontSize: 12, marginTop: 16 }}>しばらくお待ちください</p>
+                </div>
+            </div>
+        );
+    }
+
+    // 設計事務所モーダル（rawGで判定: ドロー1_下完了後に表示するためアニメーション中は非表示）
+    if (rawG.phase === 'designOffice' && rawG.designOfficeState && !drawAnimRef.current) return <DesignOfficeUI G={rawG} moves={moves} onBeforeSelect={() => prepareDrawDetection(0, true)} />;
+
+    // 二胡市建設モーダル
+    if (G.phase === 'dualConstruction' && G.dualConstructionState) return <DualConstructionUI G={G} moves={moves} pid={curPid} />;
 
     // 対戦相手（自分以外）
     const opponents = Array.from({ length: ctx.numPlayers }, (_, i) => i)
