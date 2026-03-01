@@ -38,12 +38,24 @@
   --glow-teal: 0 0 15px rgba(45, 212, 191, 0.2);
 
   /* カードタグ色 */
-  --tag-farm: #86efac;
-  --tag-farm-bg: rgba(34, 197, 94, 0.15);
-  --tag-factory: #93c5fd;
-  --tag-factory-bg: rgba(59, 130, 246, 0.15);
-  --tag-lock: #fbbf24;
-  --tag-lock-bg: rgba(251, 191, 36, 0.12);
+  --tag-farm: #d4fce0;
+  --tag-farm-bg: rgba(34, 197, 94, 0.5);
+  --tag-factory: #dbeafe;
+  --tag-factory-bg: rgba(59, 130, 246, 0.5);
+  --tag-lock: #fef3c7;
+  --tag-lock-bg: rgba(251, 191, 36, 0.5);
+
+  /* カード画像ベース色統一（暗い青緑） */
+  --card-image-overlay: #4a6670;
+
+  /* alpha付きアクセントカラー（インラインスタイルの定数化用） */
+  --teal-15: rgba(45, 212, 191, 0.15);
+  --teal-40: rgba(45, 212, 191, 0.4);
+  --teal-60: rgba(45, 212, 191, 0.6);
+  --gold-15: rgba(212, 168, 83, 0.15);
+  --gold-40: rgba(212, 168, 83, 0.4);
+  --gold-60: rgba(212, 168, 83, 0.6);
+  --red-30: rgba(248, 113, 113, 0.3);
 }
 
 /* --- ベースリセット --- */
@@ -61,10 +73,22 @@ body {
 }
 
 /* --- スクロールバー --- */
-::-webkit-scrollbar { width: 5px; }
-::-webkit-scrollbar-track { background: var(--bg-primary); }
-::-webkit-scrollbar-thumb { background: var(--bg-elevated); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--gold-dim); }
+::-webkit-scrollbar {
+  width: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--bg-elevated);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--gold-dim);
+}
 
 /* --- 背景テクスチャ（産業革命風） --- */
 .game-bg {
@@ -171,6 +195,68 @@ body {
 
 .workplace-card.workplace-sold {
   border-left: 3px solid var(--green);
+}
+
+/* --- 職場カード内テキスト（Board.tsx 頻出インラインスタイルの共通化） --- */
+.z-above {
+  position: relative;
+  z-index: 1;
+}
+
+.wp-title {
+  font-weight: 700;
+  font-size: 8px;
+  position: relative;
+  z-index: 1;
+}
+
+.wp-title-available {
+  color: var(--teal);
+}
+
+.wp-title-disabled {
+  color: var(--text-dim);
+}
+
+.wp-effect {
+  font-size: 7px;
+  color: var(--text-dim);
+  margin-top: 1px;
+  line-height: 1.2;
+  position: relative;
+  z-index: 1;
+}
+
+.wp-multiple {
+  font-size: 6px;
+  color: var(--purple);
+  position: relative;
+  z-index: 1;
+}
+
+.wp-workers {
+  margin-top: 2px;
+  display: flex;
+  gap: 1px;
+  flex-wrap: wrap;
+  position: relative;
+  z-index: 1;
+}
+
+.card-name {
+  font-weight: 700;
+  font-size: 9px;
+  line-height: 1.2;
+  position: relative;
+  z-index: 1;
+}
+
+.card-cost-vp {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 2px;
+  position: relative;
+  z-index: 1;
 }
 
 /* --- タグバッジ --- */
@@ -361,23 +447,47 @@ body {
 
 /* --- アニメーション --- */
 @keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
 @keyframes slideUp {
-  from { opacity: 0; transform: translateY(20px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes pulse-gold {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(212, 168, 83, 0.4); }
-  50% { box-shadow: 0 0 0 6px rgba(212, 168, 83, 0); }
+
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(212, 168, 83, 0.4);
+  }
+
+  50% {
+    box-shadow: 0 0 0 6px rgba(212, 168, 83, 0);
+  }
 }
 
 @keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
+  0% {
+    background-position: -200% 0;
+  }
+
+  100% {
+    background-position: 200% 0;
+  }
 }
 
 .animate-fade-in {
@@ -390,6 +500,43 @@ body {
 
 .animate-pulse-gold {
   animation: pulse-gold 2s ease-in-out infinite;
+}
+
+/* ワーカー配置リップルエフェクト */
+@keyframes ripple-expand {
+  0% {
+    transform: scale(0.3);
+    opacity: 0.8;
+  }
+
+  100% {
+    transform: scale(2.5);
+    opacity: 0;
+  }
+}
+
+@keyframes ripple-flash {
+  0% {
+    opacity: 0.6;
+    transform: scale(0.5);
+  }
+
+  100% {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+}
+
+@keyframes resource-float {
+  0% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-40px);
+  }
 }
 
 /* --- ゲームオーバー --- */
@@ -436,4 +583,1161 @@ body {
 .log-entry-action {
   color: var(--text-secondary);
   padding-left: 8px;
+}
+
+/* ============================================================
+   ポンチ絵ベース レイアウト（横長固定・アスペクト比スケーリング）
+   ============================================================ */
+
+/* --- アスペクト比固定ラッパー --- */
+.game-layout {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-deep);
+}
+
+/* game-scaler: CSS-onlyのアスペクト比固定スケーリング。
+   JSのtransform:scaleに依存しないため、フェーズ遷移でReactが
+   コンポーネントを再マウントしても常に正しいサイズで表示される。
+   16:9アスペクト比を維持しつつ、ビューポートに収まる最大サイズを使用。 */
+.game-scaler {
+  /* ビューポートの横幅ベースで16:9を維持 */
+  --scaler-h: min(100vh, calc(100vw * 9 / 16));
+  width: min(100vw, calc(100vh * 16 / 9));
+  height: var(--scaler-h);
+  display: grid;
+  /* ポンチ絵準拠: ヘッダー auto / 上段(相手+公共) 75fr / 下段(自分の場) 25fr */
+  /* minmax(0, fr) でコンテンツによる行高さの膨張を防止 */
+  grid-template-rows: auto minmax(0, 75fr) minmax(0, 25fr);
+  gap: 2px;
+  padding: 2px 4px;
+  overflow: hidden;
+  /* 手札カードサイズ: 下段25%の高さを基準 */
+  --card-h: calc((var(--scaler-h) - 28px) * 0.25 * 0.84 - 30px);
+  --card-w: calc(var(--card-h) * 63 / 88);
+  /* 公共の場カードサイズ: 面積50% = 各辺 √0.5 ≈ 71% */
+  --pub-card-h: calc(var(--card-h) * 0.71);
+  --pub-card-w: calc(var(--card-w) * 0.71);
+}
+
+/* --- ヘッダー --- */
+.game-header {
+  background: linear-gradient(180deg, var(--bg-secondary) 0%, transparent 100%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+/* --- メインエリア: 左列(相手)+右列(公共の場) --- */
+/* ポンチ絵準拠: 35% / 65% の2カラム */
+.game-main-area {
+  display: grid;
+  grid-template-columns: 35fr 65fr;
+  gap: 2px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ============================================================
+   左列: 相手プレイヤーエリア
+   ============================================================ */
+.area-opponents {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  overflow-y: auto;
+  padding-right: 2px;
+  /* デバッグ: エリア境界線 */
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+}
+
+
+
+/* ターン表示バー */
+.turn-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  font-size: 11px;
+}
+
+/* --- 相手カード --- */
+.opponent-card {
+  background: var(--bg-secondary);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 4px 6px;
+  transition: all 0.3s;
+  position: relative;
+  overflow: hidden;
+}
+
+.opponent-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--gold-dim), transparent);
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.opponent-card-active {
+  border-color: rgba(45, 212, 191, 0.4);
+  background: linear-gradient(145deg, rgba(20, 78, 74, 0.3) 0%, var(--bg-secondary) 100%);
+}
+
+.opponent-card-active::before {
+  opacity: 1;
+  background: linear-gradient(90deg, transparent, var(--teal), transparent);
+}
+
+.opponent-card-inactive {
+  opacity: 0.65;
+}
+
+.opponent-card-inactive:hover {
+  opacity: 0.85;
+}
+
+.opponent-stats {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 3px;
+}
+
+.opponent-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* 相手の手札（ミニ扇形） */
+.opponent-hand-fan {
+  display: flex;
+  position: relative;
+  height: 36px;
+  margin-bottom: 2px;
+}
+
+/* 相手の手札カード: 比率 63:88 で統一 */
+.opponent-hand-card {
+  width: 22px;
+  aspect-ratio: 63 / 88;
+  border-radius: 3px;
+  background: linear-gradient(170deg, #1e2240 0%, #14182a 100%);
+  border: 1px solid rgba(96, 165, 250, 0.2);
+  position: relative;
+  transition: transform 0.2s;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  flex-shrink: 0;
+}
+
+/* 相手の建物行（水平スクロール） */
+.opponent-buildings-scroll {
+  display: flex;
+  gap: 3px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+}
+
+.opponent-buildings-scroll::-webkit-scrollbar {
+  height: 2px;
+}
+
+.opponent-buildings-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 1px;
+}
+
+.opponent-building-card {
+  min-width: 52px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(170deg, rgba(30, 34, 53, 0.9) 0%, rgba(22, 25, 40, 0.95) 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 3px;
+  font-size: 7px;
+  font-weight: 600;
+  color: var(--text-dim);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.opponent-building-card.used {
+  opacity: 0.4;
+}
+
+/* ============================================================
+   右列: 公共の場（中央デッキ + 職場 + 売却建物）
+   ============================================================ */
+/* デッキ列 + 職場を左端基準・エッジ揃えで配置 */
+.area-public {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 12px;
+}
+
+/* --- 家計ボックス: 固定高 --- */
+.household-box {
+  height: 40px;
+  min-height: 40px;
+  flex-shrink: 0;
+  background: linear-gradient(145deg, rgba(45, 212, 191, 0.08) 0%, rgba(30, 34, 53, 0.9) 100%);
+  border: 1px solid rgba(45, 212, 191, 0.25);
+  border-radius: 8px;
+  padding: 4px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: relative;
+  overflow: hidden;
+  backdrop-filter: blur(8px);
+}
+
+.household-box::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(45, 212, 191, 0.05), transparent);
+  animation: shimmer 4s ease-in-out infinite;
+  background-size: 200% 100%;
+}
+
+.household-box.wage-pressure {
+  border-color: rgba(248, 113, 113, 0.4);
+  background: linear-gradient(145deg, rgba(220, 38, 38, 0.1) 0%, rgba(30, 34, 53, 0.9) 100%);
+}
+
+.household-box.wage-pressure::after {
+  background: linear-gradient(90deg, transparent, rgba(248, 113, 113, 0.08), transparent);
+}
+
+/* --- デッキ列 + 職場の横並びエリア --- */
+.public-cards-area {
+  display: flex;
+  flex: 1;
+  gap: 12px;
+  min-height: 0;
+  overflow-y: auto;
+  align-items: flex-start;
+}
+
+/* --- デッキ列（左縦列） --- */
+.deck-column {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  padding: 4px;
+}
+
+/* --- デッキカード共通: 公共カードサイズ(50%面積) --- */
+.deck-card {
+  position: relative;
+  width: var(--pub-card-w);
+  height: var(--pub-card-h);
+  perspective: 600px;
+  flex-shrink: 0;
+}
+
+/* デッキ厚み: 2枚以上で表示 */
+.deck-card.has-depth::before,
+.deck-card.has-depth::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.deck-card.has-depth::before {
+  transform: rotate(-2deg) translateY(3px);
+  background: rgba(20, 24, 40, 0.9);
+  z-index: 0;
+}
+
+.deck-card.has-depth::after {
+  transform: rotate(1.5deg) translateY(1.5px);
+  background: rgba(25, 29, 48, 0.9);
+  z-index: 1;
+}
+
+/* 1枚の時は厚みなし */
+.deck-card.single-card::before,
+.deck-card.single-card::after {
+  display: none;
+}
+
+/* 0枚の時は丸ごと非表示 */
+.deck-card.empty-deck {
+  visibility: hidden;
+}
+
+.deck-top-face {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  border-radius: 5px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border: 1.5px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.5);
+  transition: transform 0.3s, box-shadow 0.3s;
+}
+
+.deck-top-face:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6);
+}
+
+/* ラウンドカードデッキ */
+.deck-round .deck-top-face {
+  background: linear-gradient(160deg, #1a2a35 0%, #0f1a2a 100%);
+  border-color: rgba(96, 165, 250, 0.25);
+}
+
+/* ラウンドカード 3Dフリップ */
+.round-card-flipper {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  z-index: 2;
+  transform-style: preserve-3d;
+  transition: transform 0.8s ease-in-out;
+}
+
+.round-card-flipper.flipping {
+  transform: rotateY(180deg);
+}
+
+.round-card-front,
+.round-card-back {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.round-card-back {
+  transform: rotateY(180deg);
+  background: linear-gradient(160deg, #0f2a1a 0%, #0a1f15 100%) !important;
+  border-color: rgba(45, 212, 191, 0.3) !important;
+}
+
+/* ラウンド追加職場: デッキ→グリッド移動アニメーション */
+.workplace-card.round-entering {
+  position: relative;
+  z-index: 100;
+  transition: none;
+}
+
+.workplace-card.round-entering.round-settled {
+  transition: transform 0.6s ease-out, opacity 0.3s ease-out;
+  transform: none !important;
+}
+
+/* 消費財デッキ */
+.deck-consumable .deck-top-face {
+  background: linear-gradient(160deg, #3d3820 0%, #2d2a10 100%);
+  border-color: rgba(212, 168, 83, 0.3);
+}
+
+/* 建物カードデッキ */
+.deck-building .deck-top-face {
+  background: linear-gradient(160deg, #1e2440 0%, #2a3058 50%, #1e2440 100%);
+  border-color: rgba(96, 165, 250, 0.2);
+}
+
+/* 捨て札デッキ */
+.deck-discard .deck-top-face {
+  background: linear-gradient(160deg, #2a2a2a 0%, #1a1a20 100%);
+  border-color: rgba(168, 162, 158, 0.2);
+}
+
+.deck-count {
+  font-size: 16px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.deck-label {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: var(--text-dim);
+}
+
+/* 建物デッキ枚数ポップアップ: ホバー/長押し時に表示 */
+.deck-count-popup {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(30, 34, 53, 0.95);
+  border: 1px solid rgba(96, 165, 250, 0.4);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--blue);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+  z-index: 10;
+}
+
+.deck-card:hover .deck-count-popup,
+.deck-card:active .deck-count-popup {
+  opacity: 1;
+}
+
+/* --- 職場エリア（初期配置 + ラウンド追加 + 売却） --- */
+.workplaces-area {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+/* 初期配置 + ラウンド追加を横並びにするレイアウト */
+.workplaces-layout {
+  display: flex;
+  gap: 20px;
+  /* デッキ列↔建物列と同じ余白 */
+  align-items: flex-start;
+}
+
+/* 初期配置エリア: 4列×2行 */
+.initial-workplaces-grid {
+  display: grid;
+  grid-template-columns: repeat(4, var(--pub-card-w));
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+/* ラウンド追加エリア: 動的列数 (JSXでgridTemplateColumns指定) */
+.round-workplaces-grid {
+  display: grid;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+/* 空セル（遺跡なし時やラウンド未追加時のプレースホルダー） */
+.workplace-empty {
+  width: var(--pub-card-w);
+  height: var(--pub-card-h);
+}
+
+.workplaces-row-label {
+  font-size: 8px;
+  font-weight: 700;
+  color: var(--text-dim);
+  letter-spacing: 0.5px;
+  margin-bottom: 1px;
+}
+
+/* 職場カード: 公共カードサイズ(50%面積) */
+.workplace-card {
+  width: var(--pub-card-w);
+  height: var(--pub-card-h);
+  background: linear-gradient(145deg, rgba(20, 78, 74, 0.4) 0%, rgba(30, 34, 53, 0.8) 100%);
+  border: 1px solid rgba(45, 212, 191, 0.15);
+  border-radius: 5px;
+  padding: 3px 4px;
+  font-size: 8px;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  transition: all 0.2s;
+  overflow: hidden;
+}
+
+.workplace-card.workplace-available {
+  border-color: rgba(45, 212, 191, 0.4);
+  cursor: pointer;
+}
+
+.workplace-card.workplace-available:hover {
+  background: linear-gradient(145deg, rgba(20, 78, 74, 0.6) 0%, rgba(30, 34, 53, 0.9) 100%);
+  border-color: rgba(45, 212, 191, 0.6);
+  box-shadow: 0 0 12px rgba(45, 212, 191, 0.15);
+  transform: translateY(-1px);
+}
+
+.workplace-card.workplace-sold {
+  background: linear-gradient(145deg, rgba(34, 197, 94, 0.08) 0%, rgba(30, 34, 53, 0.8) 100%);
+  border-color: rgba(74, 222, 128, 0.15);
+}
+
+.worker-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0px 3px;
+  border-radius: 3px;
+  font-size: 7px;
+  font-weight: 700;
+  background: rgba(96, 165, 250, 0.2);
+  color: var(--blue);
+}
+
+/* --- 売却建物エリア（スクロール対応） --- */
+.sold-buildings-area {
+  overflow-y: auto;
+  max-height: 100%;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(74, 222, 128, 0.2) transparent;
+}
+
+.sold-buildings-area::-webkit-scrollbar {
+  width: 3px;
+}
+
+.sold-buildings-area::-webkit-scrollbar-thumb {
+  background: rgba(74, 222, 128, 0.2);
+  border-radius: 2px;
+}
+
+.sold-buildings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, var(--pub-card-w));
+  gap: 3px;
+}
+
+/* 売却建物カード: 公共職場カードと同じ固定サイズ */
+.sold-buildings-grid .hand-card {
+  width: var(--pub-card-w);
+  height: var(--pub-card-h);
+}
+
+/* ============================================================
+   下段: 自分の場
+   ============================================================ */
+/* 自分の場: 手札エリアは固定幅(30%)で、カード枚数で変わらない */
+.area-my-field {
+  display: grid;
+  grid-template-columns: 30% 1fr auto;
+  gap: 6px;
+  align-items: stretch;
+  padding: 4px 6px;
+  background: linear-gradient(0deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+  position: relative;
+  z-index: 70;
+  /* ドローカード(z:60)より上 → カードが自分の場の下に隠れる */
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+  /* コンテンツがはみ出してグリッド行を押し広げないように */
+  min-height: 0;
+}
+
+.area-my-field::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 10%;
+  right: 10%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--gold-dim), transparent);
+}
+
+/* --- ワーカーコマ + 手札 --- */
+.my-hand-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  /* グリッドセル内で構造がはみ出さないように */
+  overflow: visible;
+}
+
+/* ワーカーコマ行 */
+.worker-tokens {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.worker-token {
+  width: 22px;
+  height: 22px;
+  object-fit: contain;
+  transition: transform 0.15s, opacity 0.15s, filter 0.15s;
+  user-select: none;
+  touch-action: none;
+}
+
+.worker-token.draggable {
+  cursor: grab;
+}
+
+.worker-token.draggable:hover {
+  transform: scale(1.15);
+  filter: drop-shadow(0 2px 4px rgba(59, 130, 246, 0.5));
+}
+
+.worker-token.draggable:active {
+  cursor: grabbing;
+  transform: scale(1.05);
+}
+
+.worker-token.used {
+  opacity: 0.25;
+  filter: grayscale(1);
+  cursor: default;
+}
+
+/* ドラッグ中の元ミープル（半透明ゴースト化） */
+.worker-token.dragging {
+  opacity: 0.3;
+  filter: grayscale(0.5);
+  transform: scale(0.9);
+}
+
+/* ドラッグホバー時の建物/職場ハイライト */
+.building-card-in-field.worker-drag-hover,
+.workplace-card.worker-drag-hover {
+  outline: 2px solid var(--gold) !important;
+  box-shadow: 0 0 12px rgba(234, 179, 8, 0.5) !important;
+}
+
+/* ドラッグ中のゴーストミープル */
+.worker-drag-ghost {
+  position: fixed;
+  width: 36px;
+  height: 36px;
+  pointer-events: none;
+  z-index: 9999;
+  transform: translate(-50%, -50%);
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.4));
+  opacity: 0.85;
+}
+
+/* 公共職場のワーカーチップ内ミープルアイコン */
+.worker-chip-icon {
+  width: 10px;
+  height: 10px;
+  object-fit: contain;
+  margin-right: 1px;
+  vertical-align: middle;
+}
+
+/* 建物上の配置済みワーカーミープル */
+.worker-on-building-icon {
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
+  position: relative;
+  z-index: 1;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
+}
+
+/* 手札エリア: 自分の場エリア全幅を使い中央揃え */
+.hand-fan-container {
+  position: relative;
+  /* ワーカーコマ行(~26px) + gap(4px) + padding分を引いた残りの高さ */
+  height: calc(100% - 30px);
+  width: 100%;
+  overflow: visible;
+  /* ドロー2_上のtranslateYでカードが下にはみ出しても、スクロールバーが出ないようにする */
+}
+
+/* 手札行: 中央揃えはJS paddingLeftで制御。はみ出し防止 */
+.hand-fan {
+  position: relative;
+  height: 100%;
+  display: flex;
+  justify-content: flex-start;
+  align-items: flex-end;
+  padding: 0 8px;
+  overflow: hidden;
+}
+
+/* 個別カード: 自分の場の高さに合わせたサイズ */
+/* カード比率: 63:88。heightはコンテナ高さに合わせて自動調整 */
+.hand-card {
+  /* 面積70% = 各辺 √0.7 ≈ 84% */
+  height: 84%;
+  width: auto;
+  min-width: 0;
+  aspect-ratio: 63 / 88;
+  flex-shrink: 0;
+  border-radius: 6px;
+  border: 1.5px solid rgba(255, 255, 255, 0.1);
+  background: linear-gradient(170deg, rgba(30, 34, 53, 0.95) 0%, rgba(22, 25, 40, 0.98) 100%);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4), 0 4px 16px rgba(0, 0, 0, 0.25);
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.25s ease, border-color 0.2s ease, z-index 0s;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  overflow: hidden;
+  cursor: default;
+  user-select: none;
+  touch-action: none;
+}
+
+.hand-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 40%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, transparent 100%);
+  pointer-events: none;
+  border-radius: 6px 6px 0 0;
+}
+
+/* ホバー: 上にスライド（拡大なし、z-index上昇なし） */
+.hand-card:hover {
+  transform: translateY(-10px);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5), 0 8px 20px rgba(0, 0, 0, 0.3);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+/* 売却建物エリア: ホバーで上昇しない */
+.sold-buildings-grid .hand-card:hover {
+  transform: none;
+}
+
+/* 押下中: カードは上がったまま維持（長押しプレビュー対応） */
+.hand-card.hand-card-pressing,
+.hand-card.hand-card-pressing:hover {
+  transform: translateY(-10px) !important;
+}
+
+.hand-card.hand-card-playable {
+  cursor: grab;
+  border-color: rgba(212, 168, 83, 0.35);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4), 0 0 12px rgba(212, 168, 83, 0.15);
+  animation: card-glow-pulse 2s ease-in-out infinite;
+}
+
+@keyframes card-glow-pulse {
+
+  0%,
+  100% {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4), 0 0 12px rgba(212, 168, 83, 0.15);
+  }
+
+  50% {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4), 0 0 20px rgba(212, 168, 83, 0.3);
+  }
+}
+
+.hand-card.hand-card-playable:hover {
+  border-color: var(--gold);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5), 0 0 24px rgba(212, 168, 83, 0.35), var(--glow-gold);
+  animation: none;
+}
+
+.hand-card.hand-card-consumable {
+  background: linear-gradient(170deg, rgba(87, 83, 78, 1.0) 0%, rgba(50, 46, 42, 1.0) 100%);
+  border-color: rgba(168, 162, 158, 0.15);
+}
+
+.hand-card.hand-card-hidden {
+  background: linear-gradient(170deg, rgba(30, 30, 40, 0.7) 0%, rgba(20, 20, 30, 0.7) 100%);
+  border-color: rgba(100, 100, 120, 0.15);
+}
+
+/* --- 自分の建物（水平スクロール） --- */
+.my-buildings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+/* 建物エリア内インフォバー（オーバーレイ配置: 建物サイズに影響しない） */
+.buildings-info-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(30, 34, 53, 0.95);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  animation: slide-down-gentle 0.2s ease-out;
+  backdrop-filter: blur(4px);
+  height: 28px;
+}
+
+.my-buildings-scroll {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 3px;
+  align-items: flex-end;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(212, 168, 83, 0.2) transparent;
+  flex: 1;
+  min-height: 0;
+  flex-shrink: 0;
+}
+
+.my-buildings-scroll::-webkit-scrollbar {
+  height: 3px;
+}
+
+.my-buildings-scroll::-webkit-scrollbar-thumb {
+  background: rgba(212, 168, 83, 0.2);
+  border-radius: 2px;
+}
+
+/* 建物カード（手札と同じスプライト、重なりなし） */
+/* 高さを手札カードと統一: 手札コンテナは(100% - 30px)でカードは84% → 同じ計算を適用 */
+.building-card-in-field {
+  flex-shrink: 0 !important;
+  margin-left: 0 !important;
+  height: calc((100% - 30px) * 0.84);
+}
+
+.building-placed {
+  opacity: 0.45;
+  border-color: rgba(100, 100, 120, 0.4) !important;
+}
+
+/* my-building-card スタイルは廃止（hand-card + building-card-in-field に統合） */
+
+/* --- 自分のステータス --- */
+.my-status-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-end;
+  min-width: 100px;
+}
+
+/* ============================================================
+   共通部品
+   ============================================================ */
+
+/* stat-badge */
+.stat-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* section-header */
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  font-size: 11px;
+  color: var(--teal);
+  padding-bottom: 3px;
+  margin-bottom: 3px;
+  border-bottom: 1px solid rgba(45, 212, 191, 0.15);
+  letter-spacing: 0.5px;
+}
+
+/* インラインログ */
+.inline-log {
+  max-height: 80px;
+  overflow-y: auto;
+  padding: 4px 6px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.log-entry-round {
+  font-weight: 700;
+  color: var(--gold);
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.log-entry-phase {
+  color: var(--teal);
+  font-weight: 600;
+}
+
+.log-entry-action {
+  color: var(--text-secondary);
+  padding-left: 6px;
+}
+
+/* 建設キャンセルバー */
+.build-action-bar {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  padding: 4px;
+}
+
+/* モーダル系は従来と同じ */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease;
+}
+
+.modal-content {
+  background: var(--bg-primary);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  padding: 24px;
+  max-width: 700px;
+  width: 95%;
+  max-height: 85vh;
+  overflow-y: auto;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.5);
+  animation: slideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ============================================================
+   ドローエフェクト アニメーション
+   ============================================================ */
+
+/* デッキ→画面外: 下方向にスライドしてフェードアウト */
+@keyframes deckSlideDown {
+  0% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+
+  70% {
+    opacity: 1;
+  }
+
+  100% {
+    transform: translateY(calc(100vh - var(--start-y, 0px)));
+    opacity: 0;
+  }
+}
+
+/* 画面外→手札: 下から上にスライドして登場 */
+@keyframes handSlideUp {
+  0% {
+    transform: translateY(100vh);
+    opacity: 0;
+  }
+
+  10% {
+    opacity: 1;
+  }
+
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* ラウンドアナウンスオーバーレイ */
+.round-announce-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  pointer-events: none;
+  animation: round-announce-fade 1.5s ease-in-out forwards;
+}
+
+.round-announce-text {
+  font-size: 72px;
+  font-weight: 900;
+  color: var(--gold);
+  text-shadow: 0 0 40px rgba(212, 168, 83, 0.6), 0 0 80px rgba(212, 168, 83, 0.3), 0 4px 12px rgba(0, 0, 0, 0.8);
+  letter-spacing: 8px;
+  text-transform: uppercase;
+}
+
+@keyframes round-announce-fade {
+  0% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+
+  15% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  70% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  100% {
+    opacity: 0;
+    transform: scale(1.05);
+  }
+}
+
+/* 捨て札散らばりカード */
+.discard-scatter-card {
+  position: absolute;
+  inset: 2px;
+  border-radius: 6px;
+  background: var(--bg-card);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: discard-scatter-appear 0.3s ease-out backwards;
+}
+
+.discard-scatter-name {
+  font-size: 7px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-align: center;
+  position: relative;
+  z-index: 1;
+  line-height: 1.1;
+  padding: 2px;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+
+@keyframes discard-scatter-appear {
+  from {
+    opacity: 0;
+    transform: translateY(-5px) scale(0.9);
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+/* インラインインフォバー（精算/捨て札選択） */
+.inline-info-bar {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  right: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: rgba(30, 34, 53, 0.95);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+  animation: slide-down-gentle 0.2s ease-out;
+  backdrop-filter: blur(4px);
+  height: 28px;
+}
+
+@keyframes slide-down-gentle {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ============================================================
+   手札長押しプレビューオーバーレイ
+   ============================================================ */
+.card-preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fade-in-quick 0.15s ease-out;
+  cursor: pointer;
+}
+
+@keyframes fade-in-quick {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+.card-preview-card {
+  width: min(280px, 70vw);
+  max-height: 70vh;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--bg-primary);
+  border: 2px solid rgba(212, 168, 83, 0.3);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), 0 0 40px rgba(212, 168, 83, 0.1);
+  display: flex;
+  flex-direction: column;
+}
+
+.card-preview-image {
+  height: 60%;
+  min-height: 120px;
+  background: linear-gradient(135deg, rgba(30, 34, 53, 0.5), rgba(22, 25, 40, 0.8));
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.card-preview-info {
+  flex: 1;
+  padding: 12px 16px;
+  background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
+  display: flex;
+  flex-direction: column;
 }

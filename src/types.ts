@@ -14,6 +14,7 @@ export interface CardDef {
     unsellable: boolean;
     consumeOnUse: boolean;
     effectText: string;
+    image?: string; // カード画像パス（public/cards/以下）
     // Glory Expansion
     workerReq?: number; // 複数ワーカー配置 (default: 1)
     variableCostType?: 'vp_token' | 'hand_odd' | 'hand_zero';
@@ -186,4 +187,24 @@ export interface ScoreBreakdown {
     rawDebts: number;        // 元の未払い賃金枚数
     exemptedDebts: number;   // 法律事務所による免除枚数
     hasLawOffice: boolean;   // 法律事務所を所持しているか
+}
+
+// ============================================================
+// boardgame.io moves の型定義（Board.tsx サブコンポーネント用）
+// ============================================================
+export interface GameMoves {
+    placeWorker: (workplaceId: string) => void;
+    placeWorkerOnBuilding: (cardUid: string) => void;
+    selectBuildCard: (cardIndex: number) => void;
+    toggleDiscard: (cardIndex: number) => void;
+    confirmDiscard: () => void;
+    cancelAction: () => void;
+    selectDesignOfficeCard: (cardIndex: number) => void;
+    toggleDualCard: (cardIndex: number) => void;
+    confirmDualConstruction: () => void;
+    togglePaydaySell: (buildingIndex: number) => void;
+    confirmPaydaySell: () => void;
+    confirmPayday: () => void;
+    selectVillageOption: (option: 'draw_consumable' | 'draw_building') => void;
+    debug_setState: (payload: any) => void;
 }

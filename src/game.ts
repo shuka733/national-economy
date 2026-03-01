@@ -11,7 +11,7 @@ import { getCardDef, getDeckDefs, CONSUMABLE_DEF_ID } from './cards';
 // ============================================================
 let _uidCounter = 0;
 function uid(): string { return `c${_uidCounter++}`; }
-function isConsumable(c: Card): boolean { return c.defId === CONSUMABLE_DEF_ID; }
+export function isConsumable(c: Card): boolean { return c.defId === CONSUMABLE_DEF_ID; }
 
 /** ログ追加ヘルパー */
 function pushLog(G: GameState, text: string) {
@@ -71,7 +71,7 @@ function makeConsumable(): Card {
 }
 
 /** 賃金テーブル */
-function getWagePerWorker(round: number): number {
+export function getWagePerWorker(round: number): number {
     if (round <= 2) return 2;
     if (round <= 5) return 3;
     if (round <= 7) return 4;
@@ -121,7 +121,7 @@ export function getConstructionCost(p: PlayerState, defId: string, costReduction
 }
 
 /** 建設可能か（コスト削減込み） */
-function canBuildAnything(p: PlayerState, costReduction: number, isModernism: boolean = false): boolean {
+export function canBuildAnything(p: PlayerState, costReduction: number, isModernism: boolean = false): boolean {
     for (const card of p.hand) {
         if (isConsumable(card)) continue;
         const cost = getConstructionCost(p, card.defId, costReduction);
@@ -157,12 +157,12 @@ export function canBuildModernism(p: PlayerState): boolean {
 }
 
 /** 農園無料建設可能か */
-function canBuildFarmFree(p: PlayerState): boolean {
+export function canBuildFarmFree(p: PlayerState): boolean {
     return p.hand.some(c => !isConsumable(c) && getCardDef(c.defId).tags.includes('farm'));
 }
 
 /** 二胡市建設可能か */
-function canDualConstruct(p: PlayerState): boolean {
+export function canDualConstruct(p: PlayerState): boolean {
     const costGroups: Record<number, number> = {};
     const buildingCards = p.hand.filter(c => !isConsumable(c));
     for (const c of buildingCards) {
@@ -179,8 +179,8 @@ function canDualConstruct(p: PlayerState): boolean {
     return false;
 }
 
-/** 建物由来の職場に配置可能かチェック */
-function canPlaceOnBuildingWP(G: GameState, p: PlayerState, defId: string): boolean {
+/** 建物由来の職場に配置可能かチェック (Board.tsx / bots.ts から共有) */
+export function canPlaceOnBuilding(G: GameState, p: PlayerState, defId: string): boolean {
     switch (defId) {
         case 'factory': return p.hand.length >= 2;
         case 'auto_factory': return p.hand.length >= 3;
@@ -191,6 +191,11 @@ function canPlaceOnBuildingWP(G: GameState, p: PlayerState, defId: string): bool
         case 'general_contractor': return canBuildAnything(p, 0);
         case 'dual_construction': return canDualConstruct(p);
 
+        // unsellableだが配置効果がある建物
+        case 'slash_burn': return true;
+        case 'gl_relic': return true;
+        case 'gl_automaton': return p.workers < p.maxWorkers;
+
         // Glory
         case 'gl_steam_factory': return p.hand.length >= 2;
         case 'gl_locomotive_factory': return p.hand.length >= 3;
@@ -200,7 +205,8 @@ function canPlaceOnBuildingWP(G: GameState, p: PlayerState, defId: string): bool
         case 'gl_modernism_construction': return canBuildModernism(p);
         case 'gl_teleporter': return canBuildAnything(p, 99);
 
-        default: return true;
+        // unsellableでswitchに列挙なし → 配置不可（パッシブ効果のみ）
+        default: return !getCardDef(defId).unsellable;
     }
 }
 
@@ -225,6 +231,21 @@ function createInitialWorkplaces(numPlayers: number, version: GameVersion): Work
         wps.push({ ...wps[3], id: `carpenter_${i + 1} `, workers: [] });
     }
     return wps;
+}
+
+/** ラウンド番号から職場のIDと名前を取得するヘルパー (Board.tsx UIアニメーション用) */
+export function getRoundWorkplaceInfo(round: number): { id: string; name: string } | null {
+    const map: Record<number, { id: string; name: string }> = {
+        2: { id: 'stall', name: '露店' },
+        3: { id: 'market', name: '市場' },
+        4: { id: 'high_school', name: '高等学校' },
+        5: { id: 'supermarket', name: 'スーパーマーケット' },
+        6: { id: 'university', name: '大学' },
+        7: { id: 'dept_store', name: '百貨店' },
+        8: { id: 'vocational', name: '専門学校' },
+        9: { id: 'expo', name: '万博' },
+    };
+    return map[round] ?? null;
 }
 
 function getRoundWorkplace(round: number, numPlayers: number): Workplace | null {
@@ -825,7 +846,7 @@ export const NationalEconomy: Game<GameState> = {
                 if (p.hand.length < sellInfo.count) return INVALID_MOVE;
                 if (G.household < sellInfo.amount) return INVALID_MOVE;
             }
-            if (wp.fromBuildingDefId && !canPlaceOnBuildingWP(G, p, wp.fromBuildingDefId)) return INVALID_MOVE;
+            if (wp.fromBuildingDefId && !canPlaceOnBuilding(G, p, wp.fromBuildingDefId)) return INVALID_MOVE;
 
             // Multi-Worker Check
             const requiredWorkers = wp.specialEffect === 'ruins' ? 0 : 1; // Ruins takes 1? Usually 1.
@@ -871,7 +892,7 @@ export const NationalEconomy: Game<GameState> = {
             const workerCost = def.workerReq || 1;
             if (p.availableWorkers < workerCost) return INVALID_MOVE;
 
-            if (!canPlaceOnBuildingWP(G, p, defId)) return INVALID_MOVE;
+            if (!canPlaceOnBuilding(G, p, defId)) return INVALID_MOVE;
 
             slot.workerPlaced = true;
             p.availableWorkers -= workerCost;
@@ -1174,6 +1195,15 @@ export const NationalEconomy: Game<GameState> = {
                         slot.workerPlaced = false;
                         const def = getCardDef(action);
                         p.availableWorkers += def.workerReq || 1;
+                    } else {
+                        // 売却建物（公共エリア）のフォールバック
+                        for (const wp of G.publicWorkplaces) {
+                            if (wp.fromBuildingDefId === action && wp.workers.includes(parseInt(pid))) {
+                                wp.workers = wp.workers.filter(w => w !== parseInt(pid));
+                                p.availableWorkers++;
+                                break;
+                            }
+                        }
                     }
                 } else {
                     for (const wp of G.publicWorkplaces) {
@@ -1252,9 +1282,21 @@ export const NationalEconomy: Game<GameState> = {
                             break;
                         }
                     }
-                    for (const defId of ['construction_co', 'general_contractor']) {
+                    const allBuildDefIds = ['construction_co', 'pioneer', 'general_contractor', 'gl_colonist', 'gl_skyscraper', 'gl_modernism_construction', 'gl_teleporter'];
+                    let buildCostFound = false;
+                    for (const defId of allBuildDefIds) {
                         const slot = p.buildings.find(b => b.card.defId === defId && b.workerPlaced);
-                        if (slot) { slot.workerPlaced = false; p.availableWorkers++; break; }
+                        if (slot) { slot.workerPlaced = false; p.availableWorkers++; buildCostFound = true; break; }
+                    }
+                    // 売却建物（公共エリア）のフォールバック
+                    if (!buildCostFound) {
+                        for (const wp of G.publicWorkplaces) {
+                            if (wp.fromBuildingDefId && allBuildDefIds.includes(wp.fromBuildingDefId) && wp.workers.includes(parseInt(pid))) {
+                                wp.workers = wp.workers.filter(w => w !== parseInt(pid));
+                                p.availableWorkers++;
+                                break;
+                            }
+                        }
                     }
                 } else if (ds.callbackAction === 'dual_build_cost') {
                     G.dualConstructionState = null;
@@ -1428,8 +1470,14 @@ export const NationalEconomy: Game<GameState> = {
 
             const idx = pps.selectedBuildingIndices.indexOf(buildingIndex);
             if (idx >= 0) {
+                // トグルオフ: 常に許可
                 pps.selectedBuildingIndices.splice(idx, 1);
             } else {
+                // トグルオン: すでに賃金を賄えるなら追加禁止
+                const currentSellTotal = pps.selectedBuildingIndices.reduce(
+                    (sum, bi) => sum + getCardDef(p.buildings[bi].card.defId).vp, 0
+                );
+                if (p.money + currentSellTotal >= pps.totalWage) return INVALID_MOVE;
                 pps.selectedBuildingIndices.push(buildingIndex);
             }
         },
