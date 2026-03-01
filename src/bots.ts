@@ -13,7 +13,7 @@
 // ============================================================
 import type { GameState, PlayerState, Workplace, Card } from './types';
 import { getCardDef, CONSUMABLE_DEF_ID, CARD_DEFS } from './cards';
-import { getConstructionCost, canBuildModernism } from './game';
+import { getConstructionCost, canBuildModernism, isConsumable, getWagePerWorker, canBuildAnything, canBuildFarmFree, canDualConstruct, canPlaceOnBuilding } from './game';
 
 // ============================================================
 // 型定義
@@ -28,9 +28,9 @@ export interface CPUAction {
 // ============================================================
 // ユーティリティ
 // ============================================================
-function isConsumable(c: Card): boolean {
-    return c.defId === CONSUMABLE_DEF_ID;
-}
+// game.ts バリデーション関数は import で共有済み
+// isConsumable, getWagePerWorker, canBuildAnything, canBuildFarmFree,
+// canDualConstruct, canPlaceOnBuilding → game.ts から import
 
 function shuffle<T>(arr: T[]): T[] {
     const a = [...arr];
@@ -45,13 +45,6 @@ function pickRandom<T>(arr: T[]): T {
     return arr[Math.floor(Math.random() * arr.length)];
 }
 
-function getWagePerWorker(round: number): number {
-    if (round <= 2) return 2;
-    if (round <= 5) return 3;
-    if (round <= 7) return 4;
-    return 5;
-}
-
 /** 破産防止: 増員しても次ラウンドの賃金を払えるか判定 */
 function canAffordHire(G: GameState, pid: string): boolean {
     const p = G.players[pid];
@@ -63,64 +56,6 @@ function canAffordHire(G: GameState, pid: string): boolean {
         .reduce((sum, b) => sum + getCardDef(b.card.defId).vp, 0);
     const totalAssets = p.money + sellableValue;
     return totalAssets >= futureTotalWage * 1.2;
-}
-
-// ============================================================
-// game.ts バリデーション関数の再実装（AI判断用）
-// ============================================================
-function canBuildAnything(p: PlayerState, costReduction: number): boolean {
-    for (const card of p.hand) {
-        if (isConsumable(card)) continue;
-        const cost = getConstructionCost(p, card.defId, costReduction);
-        if (p.hand.length - 1 >= cost) return true;
-    }
-    return false;
-}
-
-function canBuildFarmFree(p: PlayerState): boolean {
-    return p.hand.some(c => !isConsumable(c) && getCardDef(c.defId).tags.includes('farm'));
-}
-
-function canDualConstruct(p: PlayerState): boolean {
-    const costGroups: Record<number, number> = {};
-    const buildingCards = p.hand.filter(c => !isConsumable(c));
-    for (const c of buildingCards) {
-        const def = getCardDef(c.defId);
-        costGroups[def.cost] = (costGroups[def.cost] || 0) + 1;
-    }
-    for (const [costStr, count] of Object.entries(costGroups)) {
-        if (count >= 2) {
-            const cost = parseInt(costStr);
-            if (p.hand.length - 2 >= cost) return true;
-        }
-    }
-    return false;
-}
-
-function canPlaceOnBuildingWP(G: GameState, p: PlayerState, defId: string): boolean {
-    switch (defId) {
-        case 'factory': return p.hand.length >= 2;
-        case 'auto_factory': return p.hand.length >= 3;
-        case 'restaurant': return p.hand.length >= 1 && G.household >= 15;
-        case 'coffee_shop': return G.household >= 5;
-        case 'construction_co': return canBuildAnything(p, 1);
-        case 'pioneer': return canBuildFarmFree(p);
-        case 'general_contractor': return canBuildAnything(p, 0);
-        case 'dual_construction': return canDualConstruct(p);
-
-        // Glory matching game.ts
-        case 'gl_steam_factory': return p.hand.length >= 2;
-        case 'gl_locomotive_factory': return p.hand.length >= 3;
-        case 'gl_theater': return p.hand.length >= 2;
-        case 'gl_colonist': return canBuildAnything(p, 0);
-        case 'gl_skyscraper': return canBuildAnything(p, 0);
-        case 'gl_modernism_construction':
-            return canBuildModernism(p);
-
-        case 'gl_teleporter': return canBuildAnything(p, 99);
-
-        default: return true;
-    }
 }
 
 function parseSellEffect(se: string): { count: number; amount: number } | null {
@@ -578,7 +513,7 @@ function getValidPublicWorkplaces(G: GameState, pid: string): Workplace[] {
             if (G.household < sellInfo.amount) return false;
         }
 
-        if (wp.fromBuildingDefId && !canPlaceOnBuildingWP(G, p, wp.fromBuildingDefId)) return false;
+        if (wp.fromBuildingDefId && !canPlaceOnBuilding(G, p, wp.fromBuildingDefId)) return false;
 
         let workerCost = 1;
         if (wp.fromBuildingDefId) {
@@ -603,7 +538,7 @@ function getValidBuildingPlacements(G: GameState, pid: string) {
         if (p.availableWorkers < req) return false;
 
         if (def.unsellable && b.card.defId !== 'slash_burn') return false;
-        if (!canPlaceOnBuildingWP(G, p, b.card.defId)) return false;
+        if (!canPlaceOnBuilding(G, p, b.card.defId)) return false;
         return true;
     });
 }

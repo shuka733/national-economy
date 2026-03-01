@@ -15,6 +15,7 @@ export const BASE_CARD_DEFS: CardDef[] = [
         unsellable: false,
         consumeOnUse: false,
         effectText: '消費財を2枚引く',
+        image: '/cards/progress/prog_farm.png',
     },
     {
         id: 'slash_burn',
@@ -26,6 +27,7 @@ export const BASE_CARD_DEFS: CardDef[] = [
         unsellable: true,
         consumeOnUse: true,
         effectText: '消費財を5枚引く。使用後捨て札。',
+        image: '/cards/progress/prog_slash_burn.png',
     },
     {
         id: 'coffee_shop',
@@ -37,6 +39,7 @@ export const BASE_CARD_DEFS: CardDef[] = [
         unsellable: false,
         consumeOnUse: false,
         effectText: '家計から$5を得る',
+        image: '/cards/progress/prog_coffee_shop.png',
     },
     {
         id: 'design_office',
@@ -48,6 +51,7 @@ export const BASE_CARD_DEFS: CardDef[] = [
         unsellable: false,
         consumeOnUse: false,
         effectText: '山札から5枚公開し、1枚を手札に加え残りを捨てる',
+        image: '/cards/progress/prog_design_office.png',
     },
 
     // ===== コスト 2 =====
@@ -61,6 +65,7 @@ export const BASE_CARD_DEFS: CardDef[] = [
         unsellable: false,
         consumeOnUse: false,
         effectText: '手札2枚捨てて、4枚引く',
+        image: '/cards/progress/prog_factory.png',
     },
     {
         id: 'construction_co',
@@ -72,6 +77,7 @@ export const BASE_CARD_DEFS: CardDef[] = [
         unsellable: false,
         consumeOnUse: false,
         effectText: '建物を1つ作る（コスト-1）',
+        image: '/cards/progress/prog_construction_co.png',
     },
     {
         id: 'warehouse',
@@ -83,6 +89,7 @@ export const BASE_CARD_DEFS: CardDef[] = [
         unsellable: true,
         consumeOnUse: false,
         effectText: '手札上限+4',
+        image: '/cards/progress/prog_warehouse.png',
     },
     {
         id: 'law_office',
@@ -94,6 +101,7 @@ export const BASE_CARD_DEFS: CardDef[] = [
         unsellable: true,
         consumeOnUse: false,
         effectText: '終了時、負債トークン5枚までを免除',
+        image: '/cards/progress/prog_law_office.png',
     },
     {
         id: 'orchard',
@@ -105,6 +113,7 @@ export const BASE_CARD_DEFS: CardDef[] = [
         unsellable: false,
         consumeOnUse: false,
         effectText: '手札が4枚になるまで消費財を引く',
+        image: '/cards/progress/prog_orchard.png',
     },
     {
         id: 'company_housing',
@@ -116,6 +125,7 @@ export const BASE_CARD_DEFS: CardDef[] = [
         unsellable: true,
         consumeOnUse: false,
         effectText: '労働者上限+1',
+        image: '/cards/progress/prog_company_housing.png',
     },
 
     // ===== コスト 3 =====
@@ -129,6 +139,7 @@ export const BASE_CARD_DEFS: CardDef[] = [
         unsellable: true,
         consumeOnUse: false,
         effectText: '終了時、所有建物1つにつき+3VP',
+        image: '/cards/progress/prog_real_estate.png',
     },
     {
         id: 'pioneer',
@@ -140,6 +151,7 @@ export const BASE_CARD_DEFS: CardDef[] = [
         unsellable: false,
         consumeOnUse: false,
         effectText: '手札にある[※農園]マーク付き建物を1つ無料で建設する',
+        image: '/cards/progress/prog_pioneer.png',
     },
     {
         id: 'restaurant',
@@ -151,6 +163,7 @@ export const BASE_CARD_DEFS: CardDef[] = [
         unsellable: false,
         consumeOnUse: false,
         effectText: '手札1枚捨てて、家計から$15を得る',
+        image: '/cards/progress/prog_restaurant.png',
     },
     {
         id: 'large_farm',
@@ -162,6 +175,7 @@ export const BASE_CARD_DEFS: CardDef[] = [
         unsellable: false,
         consumeOnUse: false,
         effectText: '消費財を3枚引く',
+        image: '/cards/progress/prog_large_farm.png',
     },
     {
         id: 'agri_coop',
@@ -173,6 +187,7 @@ export const BASE_CARD_DEFS: CardDef[] = [
         unsellable: true,
         consumeOnUse: false,
         effectText: '終了時、手札の消費財1枚につき+3VP',
+        image: '/cards/progress/prog_agri_coop.png',
     },
 
     // ===== コスト 4 =====
@@ -186,6 +201,7 @@ export const BASE_CARD_DEFS: CardDef[] = [
         unsellable: false,
         consumeOnUse: false,
         effectText: '建物を1つ作り、その後カードを2枚引く',
+        image: '/cards/progress/prog_general_contractor.png',
     },
     {
         id: 'steel_mill',
@@ -197,6 +213,7 @@ export const BASE_CARD_DEFS: CardDef[] = [
         unsellable: false,
         consumeOnUse: false,
         effectText: 'カードを3枚引く',
+        image: '/cards/progress/prog_steel_mill.png',
     },
     {
         id: 'mansion',
@@ -208,6 +225,7 @@ export const BASE_CARD_DEFS: CardDef[] = [
         unsellable: true,
         consumeOnUse: false,
         effectText: '効果なし（VPのみ）',
+        image: '/cards/progress/prog_mansion.png',
     },
     {
         id: 'chemical_plant',
@@ -219,6 +237,7 @@ export const BASE_CARD_DEFS: CardDef[] = [
         unsellable: false,
         consumeOnUse: false,
         effectText: 'カードを2枚引く（手札0枚なら4枚引く）',
+        image: '/cards/progress/prog_chemical_plant.png',
     },
     {
         id: 'labor_union',
@@ -230,6 +249,7 @@ export const BASE_CARD_DEFS: CardDef[] = [
         unsellable: true,
         consumeOnUse: false,
         effectText: '終了時、労働者1人につき+6VP',
+        image: '/cards/progress/prog_labor_union.png',
     },
 
     // ===== コスト 5 =====
@@ -243,6 +263,7 @@ export const BASE_CARD_DEFS: CardDef[] = [
         unsellable: false,
         consumeOnUse: false,
         effectText: '手札3枚捨てて、7枚引く',
+        image: '/cards/progress/prog_auto_factory.png',
     },
     {
         id: 'headquarters',
@@ -254,6 +275,7 @@ export const BASE_CARD_DEFS: CardDef[] = [
         unsellable: true,
         consumeOnUse: false,
         effectText: '終了時、所有する[売却不可]マークにつき+6VP',
+        image: '/cards/progress/prog_headquarters.png',
     },
     {
         id: 'dual_construction',
@@ -265,6 +287,7 @@ export const BASE_CARD_DEFS: CardDef[] = [
         unsellable: false,
         consumeOnUse: false,
         effectText: '同じコストの建物を2つ同時に作る（コストは1つ分のみ支払う）',
+        image: '/cards/progress/prog_dual_construction.png',
     },
     {
         id: 'railroad',
@@ -276,5 +299,6 @@ export const BASE_CARD_DEFS: CardDef[] = [
         unsellable: true,
         consumeOnUse: false,
         effectText: '終了時、所有する[※工場]マークにつき+8VP',
+        image: '/cards/progress/prog_railroad.png',
     },
 ];

@@ -17,6 +17,7 @@ export const GLORY_CARD_DEFS: CardDef[] = [
         unsellable: true,
         consumeOnUse: false,
         effectText: 'VPトークン2枚を得る',
+        image: '/cards/glory/relic.png',
     },
 
     // ============================================================
@@ -32,6 +33,7 @@ export const GLORY_CARD_DEFS: CardDef[] = [
         unsellable: false,
         consumeOnUse: false,
         effectText: '消費財2枚引く OR 消費財2枚捨てて建物カード3枚引く',
+        image: '/cards/glory/rural_village.png',
     },
     {
         id: 'gl_colonist',
@@ -43,6 +45,7 @@ export const GLORY_CARD_DEFS: CardDef[] = [
         unsellable: false,
         consumeOnUse: false,
         effectText: '建物を1つ建てる。その後、消費財1枚引く',
+        image: '/cards/glory/colonial_group.png',
     },
     {
         id: 'gl_studio',
@@ -54,6 +57,7 @@ export const GLORY_CARD_DEFS: CardDef[] = [
         unsellable: false,
         consumeOnUse: false,
         effectText: '建物カード1枚引く＋VPトークン1枚を得る',
+        image: '/cards/glory/workshop.png',
     },
 
     // ============================================================
@@ -71,6 +75,7 @@ export const GLORY_CARD_DEFS: CardDef[] = [
         effectText: '手札2枚捨て→建物カード4枚引く',
         variableCostType: 'vp_token',
         variableCostParam: 2, // VPトークン2枚以上でコスト-1
+        image: '/cards/glory/steam_factory.png',
     },
     {
         id: 'gl_poultry_farm',
@@ -83,6 +88,7 @@ export const GLORY_CARD_DEFS: CardDef[] = [
         consumeOnUse: false,
         effectText: '消費財2枚引く（手札枚数が奇数なら3枚引く）',
         variableCostType: 'hand_odd', // 変動コストに使用するフィールドだが条件分岐用にも流用可能か？ -> effectTextで処理する
+        image: '/cards/glory/poultry_farm.png',
     },
     {
         id: 'gl_skyscraper',
@@ -94,6 +100,7 @@ export const GLORY_CARD_DEFS: CardDef[] = [
         unsellable: false,
         consumeOnUse: false,
         effectText: '建物を1つ建てる（その後手札が0枚なら建物カード2枚引く）',
+        image: '/cards/glory/skyscraper_construction.png',
     },
     {
         id: 'gl_game_cafe', // Game Cafe
@@ -105,6 +112,7 @@ export const GLORY_CARD_DEFS: CardDef[] = [
         unsellable: false,
         consumeOnUse: false,
         effectText: '家計から$5得る（ラウンド最後の行動なら$10得る）',
+        image: '/cards/glory/game_cafe.png',
     },
 
     // ============================================================
@@ -121,6 +129,7 @@ export const GLORY_CARD_DEFS: CardDef[] = [
         consumeOnUse: false,
         effectText: '消費財5枚引く（コスト: 労働者2体）',
         workerReq: 2,
+        image: '/cards/glory/cotton_plantation.png',
     },
     {
         id: 'gl_museum',
@@ -132,6 +141,7 @@ export const GLORY_CARD_DEFS: CardDef[] = [
         unsellable: false,
         consumeOnUse: false,
         effectText: '家計から$7得る（手札がちょうど5枚なら$14得る）',
+        image: '/cards/glory/art_museum.png',
     },
     {
         id: 'gl_monument',
@@ -143,6 +153,7 @@ export const GLORY_CARD_DEFS: CardDef[] = [
         unsellable: true,
         consumeOnUse: false,
         effectText: '効果なし（高得点）',
+        image: '/cards/glory/monument.png',
     },
     {
         id: 'gl_consumers_coop',
@@ -154,6 +165,7 @@ export const GLORY_CARD_DEFS: CardDef[] = [
         unsellable: true,
         consumeOnUse: false,
         effectText: '終了時、「農業」の資産価値合計が20以上で+18点',
+        image: '/cards/glory/consumer_union.png',
     },
 
     // ============================================================
@@ -169,6 +181,7 @@ export const GLORY_CARD_DEFS: CardDef[] = [
         unsellable: true,
         consumeOnUse: false,
         effectText: '機械人形コマを1つ得る',
+        image: '/cards/glory/automaton.png',
     },
     {
         id: 'gl_coal_mine',
@@ -181,6 +194,7 @@ export const GLORY_CARD_DEFS: CardDef[] = [
         consumeOnUse: false,
         effectText: '建物カード5枚引く（コスト: 労働者2体）',
         workerReq: 2,
+        image: '/cards/glory/coal_mine.png',
     },
     {
         id: 'gl_modernism_construction',
@@ -192,6 +206,7 @@ export const GLORY_CARD_DEFS: CardDef[] = [
         unsellable: false,
         consumeOnUse: false,
         effectText: '建物を1つ建てる（この建設で消費財は2枚分のコストになる）',
+        image: '/cards/glory/modernism_construction.png',
     },
     {
         id: 'gl_theater',
@@ -203,6 +218,7 @@ export const GLORY_CARD_DEFS: CardDef[] = [
         unsellable: false,
         consumeOnUse: false,
         effectText: '手札2枚捨てて、家計から$20得る',
+        image: '/cards/glory/theater.png',
     },
     {
         id: 'gl_guild_hall',
@@ -214,6 +230,7 @@ export const GLORY_CARD_DEFS: CardDef[] = [
         unsellable: true,
         consumeOnUse: false,
         effectText: '終了時、「農業」と「工業」両方所持で+20点',
+        image: '/cards/glory/guild_hall.png',
     },
     {
         id: 'gl_ivory_tower',
@@ -225,6 +242,7 @@ export const GLORY_CARD_DEFS: CardDef[] = [
         unsellable: true,
         consumeOnUse: false,
         effectText: '終了時、VPトークン7枚以上所持で+22点',
+        image: '/cards/glory/ivory_tower.png',
     },
 
     // ============================================================
@@ -242,6 +260,7 @@ export const GLORY_CARD_DEFS: CardDef[] = [
         effectText: '建物カード3枚引く',
         variableCostType: 'vp_token',
         variableCostParam: 3, // VPトークン3枚以上でコスト-2
+        image: '/cards/glory/smelter.png',
     },
     {
         id: 'gl_teleporter',
@@ -254,6 +273,7 @@ export const GLORY_CARD_DEFS: CardDef[] = [
         consumeOnUse: false,
         effectText: '建物を1つコスト無視(無料)で建てる（コスト: 労働者2体）',
         workerReq: 2,
+        image: '/cards/glory/transfer_device.png',
     },
     {
         id: 'gl_revolution_square',
@@ -265,6 +285,7 @@ export const GLORY_CARD_DEFS: CardDef[] = [
         unsellable: true,
         consumeOnUse: false,
         effectText: '終了時、人間の労働者が5人で+18点',
+        image: '/cards/glory/revolution_square.png',
     },
     {
         id: 'gl_harvest_festival',
@@ -276,6 +297,7 @@ export const GLORY_CARD_DEFS: CardDef[] = [
         unsellable: true,
         consumeOnUse: false,
         effectText: '終了時、手札に消費財が4枚以上あれば+26点',
+        image: '/cards/glory/harvest_festival.png',
     },
     {
         id: 'gl_tech_exhibition',
@@ -287,6 +309,7 @@ export const GLORY_CARD_DEFS: CardDef[] = [
         unsellable: true,
         consumeOnUse: false,
         effectText: '終了時、「工業」の資産価値合計が30以上で+24点',
+        image: '/cards/glory/technical_exhibition.png',
     },
 
     // ============================================================
@@ -304,6 +327,7 @@ export const GLORY_CARD_DEFS: CardDef[] = [
         effectText: '消費財4枚引く',
         variableCostType: 'vp_token',
         variableCostParam: 4, // VPトークン4枚以上でコスト-2
+        image: '/cards/glory/greenhouse.png',
     },
     {
         id: 'gl_temple_of_purification',
@@ -315,6 +339,7 @@ export const GLORY_CARD_DEFS: CardDef[] = [
         unsellable: true,
         consumeOnUse: false,
         effectText: '終了時、これが唯一の「売却不可」カードなら+30点',
+        image: '/cards/glory/temple_of_purification.png',
     },
 
     // ============================================================
@@ -332,5 +357,6 @@ export const GLORY_CARD_DEFS: CardDef[] = [
         effectText: '手札3枚捨て→建物カード7枚引く',
         variableCostType: 'vp_token',
         variableCostParam: 5, // VPトークン5枚以上でコスト-3
+        image: '/cards/glory/locomotive_factory.png',
     },
 ];

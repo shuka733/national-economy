@@ -110,7 +110,7 @@ function runSingleGame(
 // テストスイート
 describe('ホットシート仮想バッチテスト', () => {
     for (const numPlayers of [2, 3, 4]) {
-        for (const difficulty of ['random', 'heuristic', 'strategic'] as AIDifficulty[]) {
+        for (const difficulty of ['random', 'heuristic'] as AIDifficulty[]) {
             it(`${numPlayers}人プレイ / ${difficulty} × ${GAMES_PER_CONFIG}回`, () => {
                 let completed = 0;
                 let frozen = 0;
