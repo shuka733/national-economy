@@ -1004,62 +1004,73 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                         </div>
 
                         {/* 相手プレイヤー */}
-                        {opponents.map(i => {
-                            const pid = String(i);
-                            const p = G.players[pid];
-                            const active = pid === displayCurPid;
-                            const isCpu = cpuConfig?.enabled && cpuConfig.cpuPlayers.includes(pid);
-                            return (
-                                <div key={pid} className={`opponent-card ${active ? 'opponent-card-active' : 'opponent-card-inactive'}`}>
-                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 }}>
-                                        <span style={{ fontWeight: 700, fontSize: 10, color: active ? 'var(--teal)' : 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 3 }}>
-                                            {isCpu ? <IconRobot size={10} /> : <IconPlayer size={10} />}
-                                            P{i + 1}
-                                            {i === G.startPlayer && <span style={{ color: 'var(--orange)', fontSize: 8 }}>★</span>}
-                                        </span>
-                                        {/* ステータスバッジ */}
-                                        <div style={{ display: 'flex', gap: 3 }}>
-                                            <span className="stat-badge" style={{ fontSize: 8, padding: '1px 4px' }}>
-                                                <IconMoney size={8} color="var(--gold-light)" /><b style={{ color: 'var(--gold-light)' }}>${p.money}</b>
+                        <div className="opponents-container">
+                            {opponents.map(i => {
+                                const pid = String(i);
+                                const p = G.players[pid];
+                                const active = pid === displayCurPid;
+                                const isCpu = cpuConfig?.enabled && cpuConfig.cpuPlayers.includes(pid);
+                                return (
+                                    <div key={pid} className={`opponent-card ${active ? 'opponent-card-active' : 'opponent-card-inactive'}`}>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2, flexShrink: 0 }}>
+                                            <span style={{ fontWeight: 700, fontSize: 10, color: active ? 'var(--teal)' : 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 3 }}>
+                                                {isCpu ? <IconRobot size={10} /> : <IconPlayer size={10} />}
+                                                P{i + 1}
+                                                {i === G.startPlayer && <span style={{ color: 'var(--orange)', fontSize: 8 }}>★</span>}
                                             </span>
-                                            <span className="stat-badge" style={{ fontSize: 8, padding: '1px 4px' }}>
-                                                <IconWorker size={8} color="var(--blue)" /><b style={{ color: 'var(--blue)' }}>{p.availableWorkers}/{p.workers}</b>
-                                            </span>
-                                            {p.unpaidDebts > 0 && <span className="stat-badge" style={{ fontSize: 8, padding: '1px 4px', borderColor: 'rgba(248,113,113,0.3)' }}><b style={{ color: 'var(--red)' }}>Debt {p.unpaidDebts}</b></span>}
+                                            {/* ステータスバッジ */}
+                                            <div style={{ display: 'flex', gap: 3 }}>
+                                                <span className="stat-badge" style={{ fontSize: 8, padding: '1px 4px' }}>
+                                                    <IconMoney size={8} color="var(--gold-light)" /><b style={{ color: 'var(--gold-light)' }}>${p.money}</b>
+                                                </span>
+                                                <span className="stat-badge" style={{ fontSize: 8, padding: '1px 4px' }}>
+                                                    <IconWorker size={8} color="var(--blue)" /><b style={{ color: 'var(--blue)' }}>{p.availableWorkers}/{p.workers}</b>
+                                                </span>
+                                                {p.unpaidDebts > 0 && <span className="stat-badge" style={{ fontSize: 8, padding: '1px 4px', borderColor: 'rgba(248,113,113,0.3)' }}><b style={{ color: 'var(--red)' }}>Debt {p.unpaidDebts}</b></span>}
+                                            </div>
                                         </div>
-                                    </div>
 
-                                    {/* 手札（ミニ直線配置） */}
-                                    <div className="opponent-hand-fan" style={{ display: 'flex', justifyContent: 'center' }}>
-                                        {Array.from({ length: p.hand.length }).map((_, ci) => (
-                                            <div key={ci} className="opponent-hand-card" style={{
-                                                marginLeft: ci === 0 ? 0 : getCardOverlapMargin(p.hand.length, false),
-                                                zIndex: ci + 1,
-                                            }} />
-                                        ))}
-                                    </div>
-
-                                    {/* 建物（水平スクロール） */}
-                                    {p.buildings.length > 0 && (
-                                        <div className="opponent-buildings-scroll">
-                                            {p.buildings.map((b, bi) => {
-                                                const def = getCardDef(b.card.defId);
-                                                const color = def.tags.includes('farm') ? 'var(--green)' : def.tags.includes('factory') ? 'var(--orange)' : 'var(--blue)';
-                                                return (
-                                                    <div key={bi} className={`opponent-building-card ${b.workerPlaced ? 'used' : ''}`}
-                                                        style={{ borderColor: color }}
-                                                        title={`${def.name} (${def.vp}VP) ${def.effectText}`}>
-                                                        <span style={{ fontSize: 7, fontWeight: 700, color: b.workerPlaced ? 'var(--text-dim)' : 'var(--text-secondary)' }}>{def.name}</span>
-                                                        <span style={{ fontSize: 6, color: 'var(--gold-dim)' }}>{def.vp}VP</span>
-                                                        {b.workerPlaced && <IconWorker size={7} color="var(--blue)" />}
-                                                    </div>
-                                                );
-                                            })}
+                                        {/* 手札（ミニ直線配置） */}
+                                        <div className="opponent-hand-fan" style={{ display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
+                                            {Array.from({ length: p.hand.length }).map((_, ci) => (
+                                                <div key={ci} className="opponent-hand-card" style={{
+                                                    marginLeft: ci === 0 ? 0 : getCardOverlapMargin(p.hand.length, false),
+                                                    zIndex: ci + 1,
+                                                }} />
+                                            ))}
                                         </div>
-                                    )}
-                                </div>
-                            );
-                        })}
+
+                                        {/* 建物（カードスプライト・水平スクロール） */}
+                                        {p.buildings.length > 0 && (
+                                            <div className="opponent-buildings-scroll">
+                                                {p.buildings.map((b, bi) => {
+                                                    const def = getCardDef(b.card.defId);
+                                                    const borderColor = def.tags.includes('farm') ? 'rgba(74, 222, 128, 0.3)' : def.tags.includes('factory') ? 'rgba(251, 146, 60, 0.3)' : 'rgba(96, 165, 250, 0.15)';
+                                                    return (
+                                                        <div key={bi}
+                                                            onPointerDown={() => { startCardPreview(b.card.defId, 3000 + i * 100 + bi); }}
+                                                            onPointerUp={endPreview}
+                                                            onPointerLeave={endPreview}
+                                                            className={`opponent-building-sprite ${b.workerPlaced ? 'building-placed' : ''}`}
+                                                            style={{ borderColor }}>
+                                                            <CardBgImage defId={b.card.defId} />
+                                                            <div style={{ fontWeight: 700, fontSize: 8, lineHeight: 1.2, color: b.workerPlaced ? 'var(--text-dim)' : 'var(--text-primary)', position: 'relative', zIndex: 1 }}>{def.name}</div>
+                                                            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2, position: 'relative', zIndex: 1 }}>
+                                                                <span style={{ fontSize: 7, color: 'var(--text-dim)', fontWeight: 600 }}>C{def.cost}</span>
+                                                                <span style={{ fontSize: 7, color: 'var(--gold-dim)', fontWeight: 600 }}>{def.vp}VP</span>
+                                                            </div>
+                                                            <TagBadges defId={b.card.defId} />
+                                                            {def.effectText && <div style={{ fontSize: 6, color: 'var(--text-dim)', marginTop: 'auto', lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{def.effectText}</div>}
+                                                            {b.workerPlaced && <img src={getMeepleSrc(parseInt(pid))} className="worker-on-building-icon" alt="配置済み" />}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
 
                         {/* コンパクトログ */}
                         <div className="inline-log" style={{ marginTop: 'auto' }}>
@@ -1416,10 +1427,13 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                     < div className="my-hand-section" ref={handAreaRef} >
                         {/* ワーカーコマ */}
                         <div className="worker-tokens" >
-                            {
-                                Array.from({ length: myPlayer.workers }).map((_, i) => {
-                                    const isAvailable = i < myPlayer.availableWorkers;
-                                    const canDrag = isAvailable && G.phase === 'work' && canInteract && curPid === myPid;
+                            {/* ワーカーの使用済み状態はドローアニメーション凍結の影響を受けないよう、
+                                常にrawG（最新ステート）を参照する */}
+                            {(() => {
+                                const realMyPlayer = rawG.players[myPid];
+                                return Array.from({ length: realMyPlayer.workers }).map((_, i) => {
+                                    const isAvailable = i < realMyPlayer.availableWorkers;
+                                    const canDrag = isAvailable && rawG.phase === 'work' && canInteract && curPid === myPid;
                                     return (
                                         <img key={i}
                                             src={getMeepleSrc(parseInt(myPid))}
@@ -1433,8 +1447,8 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                             alt="worker"
                                         />
                                     );
-                                })
-                            }
+                                });
+                            })()}
                         </div >
 
                         {/* ① 精算インフォバー: 手札エリアの上 */}
