@@ -622,6 +622,25 @@ body {
   /* 公共の場カードサイズ: 面積50% = 各辺 √0.5 ≈ 71% */
   --pub-card-h: calc(var(--card-h) * 0.71);
   --pub-card-w: calc(var(--card-w) * 0.71);
+  /* フォントスケーリング: --scaler-hの1/64 (参照高さ576pxで9px) */
+  --fs: calc(var(--scaler-h) / 64);
+  /* よく使うフォントサイズのプリセット */
+  --fs-xs: calc(var(--fs) * 0.67);
+  /* 6px相当 */
+  --fs-sm: calc(var(--fs) * 0.78);
+  /* 7px相当 */
+  --fs-md: calc(var(--fs) * 0.89);
+  /* 8px相当 */
+  --fs-base: var(--fs);
+  /* 9px相当 */
+  --fs-lg: calc(var(--fs) * 1.11);
+  /* 10px相当 */
+  --fs-xl: calc(var(--fs) * 1.22);
+  /* 11px相当 */
+  --fs-2xl: calc(var(--fs) * 1.56);
+  /* 14px相当 */
+  --fs-3xl: calc(var(--fs) * 1.78);
+  /* 16px相当 */
 }
 
 /* --- ヘッダー --- */
@@ -672,7 +691,7 @@ body {
   padding: 4px 8px;
   border-radius: 6px;
   background: var(--bg-elevated);
-  font-size: 11px;
+  font-size: var(--fs-xl);
 }
 
 /* --- 相手カード: 常に3分割の1つ分の高さ --- */
@@ -731,7 +750,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  font-size: 9px;
+  font-size: var(--fs-base);
   font-weight: 600;
   padding: 1px 4px;
   border-radius: 3px;
@@ -1001,13 +1020,13 @@ body {
 }
 
 .deck-count {
-  font-size: 16px;
+  font-size: var(--fs-3xl);
   font-weight: 900;
   line-height: 1;
 }
 
 .deck-label {
-  font-size: 14px;
+  font-size: var(--fs-2xl);
   font-weight: 700;
   letter-spacing: 0.3px;
   color: var(--text-dim);
@@ -1023,7 +1042,7 @@ body {
   border: 1px solid rgba(96, 165, 250, 0.4);
   border-radius: 4px;
   padding: 2px 6px;
-  font-size: 9px;
+  font-size: var(--fs-base);
   font-weight: 700;
   color: var(--blue);
   white-space: nowrap;
@@ -1077,7 +1096,7 @@ body {
 }
 
 .workplaces-row-label {
-  font-size: 8px;
+  font-size: var(--fs-md);
   font-weight: 700;
   color: var(--text-dim);
   letter-spacing: 0.5px;
@@ -1092,7 +1111,7 @@ body {
   border: 1px solid rgba(45, 212, 191, 0.15);
   border-radius: 5px;
   padding: 3px 4px;
-  font-size: 8px;
+  font-size: var(--fs-md);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -1103,6 +1122,20 @@ body {
 .workplace-card.workplace-available {
   border-color: rgba(45, 212, 191, 0.4);
   cursor: pointer;
+  /* 配置可能な職場をティールグローで強調 */
+  animation: workplace-glow-pulse 2s ease-in-out infinite;
+}
+
+@keyframes workplace-glow-pulse {
+
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(45, 212, 191, 0.3);
+  }
+
+  50% {
+    box-shadow: 0 0 10px 2px rgba(45, 212, 191, 0.25);
+  }
 }
 
 .workplace-card.workplace-available:hover {
@@ -1110,6 +1143,14 @@ body {
   border-color: rgba(45, 212, 191, 0.6);
   box-shadow: 0 0 12px rgba(45, 212, 191, 0.15);
   transform: translateY(-1px);
+  animation: none;
+}
+
+/* 配置不可の職場カード: 暗転表示 */
+.workplace-card.game-card-disabled {
+  opacity: 0.5;
+  filter: brightness(0.7);
+  transition: opacity 0.3s, filter 0.3s;
 }
 
 .workplace-card.workplace-sold {
@@ -1122,7 +1163,7 @@ body {
   align-items: center;
   padding: 0px 3px;
   border-radius: 3px;
-  font-size: 7px;
+  font-size: var(--fs-sm);
   font-weight: 700;
   background: rgba(96, 165, 250, 0.2);
   color: var(--blue);
@@ -1233,6 +1274,26 @@ body {
   opacity: 0.25;
   filter: grayscale(1);
   cursor: default;
+}
+
+/* ワーカー配置可能時のパルスアニメーション: 利用可能なワーカーを目立たせる */
+.worker-token.worker-available-pulse {
+  animation: worker-pulse 1.5s ease-in-out infinite;
+  filter: drop-shadow(0 0 6px rgba(59, 130, 246, 0.6));
+}
+
+@keyframes worker-pulse {
+
+  0%,
+  100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 4px rgba(59, 130, 246, 0.4));
+  }
+
+  50% {
+    transform: scale(1.12);
+    filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.7));
+  }
 }
 
 /* ドラッグ中の元ミープル（半透明ゴースト化） */
@@ -1478,7 +1539,7 @@ body {
   border-radius: 5px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.06);
-  font-size: 10px;
+  font-size: var(--fs-lg);
   font-weight: 600;
 }
 
@@ -1488,7 +1549,7 @@ body {
   align-items: center;
   gap: 6px;
   font-weight: 700;
-  font-size: 11px;
+  font-size: var(--fs-xl);
   color: var(--teal);
   padding-bottom: 3px;
   margin-bottom: 3px;
@@ -1757,4 +1818,41 @@ body {
   background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
   display: flex;
   flex-direction: column;
+}
+
+/* ============================================================
+   小画面メディアクエリ
+   ============================================================ */
+
+/* 幅900px以下: padding/gap縮小で詰める */
+@media (max-width: 900px) {
+  .area-public {
+    gap: 8px;
+    padding: 2px 6px;
+  }
+
+  .workplaces-layout {
+    gap: 12px;
+  }
+
+  .area-my-field {
+    gap: 3px;
+    padding: 2px 4px;
+  }
+
+  .my-buildings-scroll {
+    gap: 4px;
+  }
+}
+
+/* 高さ500px以下: ヘッダーをさらにコンパクトに */
+@media (max-height: 500px) {
+  .game-header {
+    padding: 2px 6px;
+  }
+
+  .turn-bar {
+    padding: 2px 6px;
+    font-size: 9px;
+  }
 }

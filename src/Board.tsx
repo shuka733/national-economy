@@ -13,6 +13,7 @@ import { SoundSettings } from './SoundSettings';
 import { CPUSettings } from './CPUSettings';
 import { useAnimations } from './components/AnimationLayer';
 import { BgImageOverlay } from './components/BgImageOverlay';
+import './cpu-anim.css';
 // HandScene3D は現在未使用（ポンチ絵ベースのHTMLレイアウトに置換済み）
 import {
     IconMoney, IconWorker, IconHouse, IconDeck, IconDiscard, IconLog,
@@ -124,6 +125,10 @@ function computeCpuStateSignature(G: GameState, activePid: string): string {
 // ============================================================
 export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<GameState> & { cpuConfig?: CPUConfig }) {
     const [showDiscard, setShowDiscard] = useState(false);
+    // NPC手札表示トグル（pid → 表示中かどうか）
+    const [npcHandVisible, setNpcHandVisible] = useState<Record<string, boolean>>({});
+    // CPUミープル飛行アニメーション中フラグ（useEffect再発火防止用）
+    const cpuAnimInProgressRef = useRef(false);
     // 手札長押しプレビュー用
     // プレビューデータ型: カード or 公共職場
     type PreviewData =
@@ -182,6 +187,8 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     const prevRoundRef = useRef(rawG.round);
     const curPid = ctx.currentPlayer;
     const curIdx = parseInt(curPid);
+    // CPU対戦: 最後に手番だった人間プレイヤーIDを保持（CPUターン中のmyPid固定用）
+    const lastHumanPidRef = useRef(curPid);
 
     // プレイヤーごとのミープル色マッピング
     const PLAYER_COLORS = ['blue', 'green', 'yellow', 'purple'];
@@ -249,8 +256,17 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
 
     // ====== P2P対応 ======
     // playerIDがあればP2P（オンライン）モード、なければホットシート/CPU対戦
+    // CPU対戦モード: CPUターン中はmyPidを直前の人間プレイヤーに固定（手札丸見え防止）
+    // 全員CPUの場合は観戦モード → 従来通り手番プレイヤーに追従
+    const allCpu = !!(cpuConfig?.enabled && cpuConfig.cpuPlayers.length >= ctx.numPlayers);
+    const isCpuTurn = !!(cpuConfig?.enabled && !allCpu && cpuConfig.cpuPlayers.includes(curPid));
+    if (cpuConfig?.enabled && !cpuConfig.cpuPlayers.includes(curPid)) {
+        lastHumanPidRef.current = curPid; // 人間ターン時のみ更新
+    }
     // ドローアニメーション中はmyPidを前プレイヤーに固定（ホットシートで正しい手札を追跡するため）
-    const myPid = playerID ?? (drawAnimRef.current ? displayCurPid : curPid);
+    const myPid = playerID ?? (isCpuTurn
+        ? lastHumanPidRef.current
+        : (drawAnimRef.current ? displayCurPid : curPid));
     const isOnline = playerID !== null && playerID !== undefined;
 
     // モーダルフェーズ中の操作者判定
@@ -680,6 +696,8 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     const cpuMoveSignatureRef = useRef<string>('');
     // フォールバック: signatureが一定時間変わらない場合にリセットするためのタイマー
     const cpuStuckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // CPUミープル飛行完了待ちタイマー（cleanup用）
+    const cpuAnimTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     useEffect(() => {
         if (!cpuConfig?.enabled) return;
@@ -687,6 +705,8 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
         if (showCpuSettings) return; // 設定中は停止
         // ドローアニメーション中はCPU moveをブロック（Refで即時参照）
         if (drawAnimRef.current) return;
+        // ミープル飛行アニメーション中はmoveをブロック（二重発火防止）
+        if (cpuAnimInProgressRef.current) return;
 
         // CPU自動プレイ時の給料日・精算: 各CPUプレイヤーの未確認分を処理
         let activePid = curPid;
@@ -724,7 +744,76 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                 if (moveFn) {
                     // move発行前にsignatureを記録（P2P重複防止用）
                     cpuMoveSignatureRef.current = sig;
-                    moveFn(...action.args);
+
+                    // CPUワーカー配置: Web Animations APIでミープルが飛んでいくアニメーション
+                    if (action.moveName === 'placeWorker' || action.moveName === 'placeWorkerOnBuilding') {
+                        const targetEl = action.moveName === 'placeWorker'
+                            ? document.querySelector(`[data-workplace-id="${action.args[0]}"]`) as HTMLElement | null
+                            : document.querySelector(`[data-building-uid="${action.args[0]}"]`) as HTMLElement | null;
+                        // 開始位置: 利用可能なワーカートークンを掴む（なければプレイヤーエリアから）
+                        const workerToken = document.querySelector(`[data-player-id="${activePid}"] .worker-token:not(.used)`) as HTMLElement | null;
+                        const startEl = workerToken || document.querySelector(`[data-player-id="${activePid}"]`) as HTMLElement | null;
+
+                        if (targetEl && startEl) {
+                            const startRect = startEl.getBoundingClientRect();
+                            const targetRect = targetEl.getBoundingClientRect();
+                            const pidIdx = parseInt(activePid);
+
+                            // アニメーション中フラグON（useEffect再発火防止）
+                            cpuAnimInProgressRef.current = true;
+
+                            // DOM直接操作でミープル要素を作成（Reactを経由しない）
+                            const meeple = document.createElement('img');
+                            meeple.src = getMeepleSrc(pidIdx);
+                            meeple.style.cssText = 'position:fixed;left:0;top:0;width:32px;height:32px;z-index:300;pointer-events:none;border-radius:50%;';
+                            document.body.appendChild(meeple);
+
+                            const sx = startRect.left + startRect.width / 2 - 16;
+                            const sy = startRect.top + startRect.height / 2 - 16;
+                            const ex = targetRect.left + targetRect.width / 2 - 16;
+                            const ey = targetRect.top + targetRect.height / 2 - 16;
+
+                            // 持ち上げ時にclick SE
+                            soundManager.playSFX('click');
+
+                            // Web Animations API: GPUアクセラレーションで滑らか60FPS
+                            const anim = meeple.animate([
+                                {
+                                    transform: `translate(${sx}px, ${sy}px) scale(0.7)`,
+                                    filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))',
+                                },
+                                {
+                                    transform: `translate(${ex}px, ${ey}px) scale(1.1)`,
+                                    filter: 'drop-shadow(0 6px 16px rgba(0,0,0,0.5)) drop-shadow(0 0 12px rgba(59,130,246,0.4))',
+                                },
+                            ], {
+                                duration: 600,
+                                easing: 'cubic-bezier(0.34, 1.56, 0.64, 1)',
+                                fill: 'forwards',
+                            });
+
+                            anim.onfinish = () => {
+                                // 着地: リップル + move実行
+                                const rippleColor = action.moveName === 'placeWorker'
+                                    ? 'rgba(45, 212, 191, 0.6)'
+                                    : 'rgba(212, 168, 83, 0.6)';
+                                triggerRipple(
+                                    targetRect.left + targetRect.width / 2,
+                                    targetRect.top + targetRect.height / 2,
+                                    '', rippleColor
+                                );
+                                meeple.remove();
+                                cpuAnimInProgressRef.current = false;
+                                moveFn(...action.args);
+                            };
+                        } else {
+                            moveFn(...action.args);
+                        }
+                    } else {
+                        // その他のアクション: 即座実行
+                        soundManager.playSFX('click');
+                        moveFn(...action.args);
+                    }
                 }
             }
         }, delay);
@@ -900,6 +989,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                     alt=""
                 />
             )}
+            {/* CPUミープル飛行アニメーションはWeb Animations APIでDOM直接操作（React外） */}
             {/* 長押しプレビューオーバーレイ（カード / 公共職場） */}
             {previewData && (() => {
                 if (previewData.type === 'card') {
@@ -997,8 +1087,26 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                             {cpuConfig?.enabled && cpuConfig.cpuPlayers.includes(displayCurPid) ? <IconRobot size={12} /> : <IconPlayer size={12} />}
                             <span><b style={{ color: 'var(--gold-light)' }}>P{displayCurIdx + 1}</b> のターン</span>
                             {cpuConfig?.enabled && cpuConfig.cpuPlayers.includes(displayCurPid) && (
-                                <span style={{ marginLeft: 4, fontSize: 8, color: 'var(--text-dim)', background: 'rgba(160, 120, 48, 0.15)', padding: '1px 4px', borderRadius: 3, display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-                                    <span className="animate-pulse">●</span> Thinking…
+                                <span style={{
+                                    marginLeft: 4, fontSize: 8, color: 'var(--teal)',
+                                    background: 'linear-gradient(135deg, rgba(45, 212, 191, 0.12), rgba(96, 165, 250, 0.08))',
+                                    padding: '2px 6px', borderRadius: 4,
+                                    border: '1px solid rgba(45, 212, 191, 0.2)',
+                                    display: 'inline-flex', alignItems: 'center', gap: 3,
+                                }}>
+                                    <span style={{
+                                        display: 'inline-flex', gap: 2, alignItems: 'center',
+                                    }}>
+                                        {[0, 1, 2].map(i => (
+                                            <span key={i} style={{
+                                                width: 3, height: 3, borderRadius: '50%',
+                                                background: 'var(--teal)',
+                                                animation: `cpuThinkDot 1.2s ease-in-out ${i * 0.2}s infinite`,
+                                                opacity: 0.4,
+                                            }} />
+                                        ))}
+                                    </span>
+                                    <span style={{ letterSpacing: '0.5px' }}>Thinking</span>
                                 </span>
                             )}
                         </div>
@@ -1010,16 +1118,18 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                 const p = G.players[pid];
                                 const active = pid === displayCurPid;
                                 const isCpu = cpuConfig?.enabled && cpuConfig.cpuPlayers.includes(pid);
+                                const isNpcHandShown = !!(isCpu && npcHandVisible[pid]);
+                                // CPUミープル飛行アニメーション用: opponent-cardにプレイヤーIDを付与
                                 return (
-                                    <div key={pid} className={`opponent-card ${active ? 'opponent-card-active' : 'opponent-card-inactive'}`}>
+                                    <div key={pid} data-player-id={pid} className={`opponent-card ${active ? 'opponent-card-active' : 'opponent-card-inactive'}`}>
                                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2, flexShrink: 0 }}>
                                             <span style={{ fontWeight: 700, fontSize: 10, color: active ? 'var(--teal)' : 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 3 }}>
                                                 {isCpu ? <IconRobot size={10} /> : <IconPlayer size={10} />}
                                                 P{i + 1}
                                                 {i === G.startPlayer && <span style={{ color: 'var(--orange)', fontSize: 8 }}>★</span>}
                                             </span>
-                                            {/* ステータスバッジ */}
-                                            <div style={{ display: 'flex', gap: 3 }}>
+                                            {/* ステータスバッジ + NPC手札トグル */}
+                                            <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
                                                 <span className="stat-badge" style={{ fontSize: 8, padding: '1px 4px' }}>
                                                     <IconMoney size={8} color="var(--gold-light)" /><b style={{ color: 'var(--gold-light)' }}>${p.money}</b>
                                                 </span>
@@ -1027,17 +1137,63 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                     <IconWorker size={8} color="var(--blue)" /><b style={{ color: 'var(--blue)' }}>{p.availableWorkers}/{p.workers}</b>
                                                 </span>
                                                 {p.unpaidDebts > 0 && <span className="stat-badge" style={{ fontSize: 8, padding: '1px 4px', borderColor: 'rgba(248,113,113,0.3)' }}><b style={{ color: 'var(--red)' }}>Debt {p.unpaidDebts}</b></span>}
+                                                {/* NPC手札トグルボタン（CPUプレイヤーのみ表示） */}
+                                                {isCpu && (
+                                                    <button
+                                                        onClick={() => { soundManager.playSFX('click'); setNpcHandVisible(prev => ({ ...prev, [pid]: !prev[pid] })); }}
+                                                        title={isNpcHandShown ? 'NPC手札を隠す' : 'NPC手札を表示'}
+                                                        style={{
+                                                            background: isNpcHandShown ? 'rgba(45, 212, 191, 0.2)' : 'rgba(255, 255, 255, 0.05)',
+                                                            border: `1px solid ${isNpcHandShown ? 'rgba(45, 212, 191, 0.4)' : 'rgba(255, 255, 255, 0.1)'}`,
+                                                            borderRadius: 4,
+                                                            padding: '1px 4px',
+                                                            cursor: 'pointer',
+                                                            fontSize: 10,
+                                                            lineHeight: 1,
+                                                            transition: 'all 0.2s ease',
+                                                        }}
+                                                    >
+                                                        {isNpcHandShown ? '👁️' : '🙈'}
+                                                    </button>
+                                                )}
                                             </div>
                                         </div>
 
-                                        {/* 手札（ミニ直線配置） */}
+                                        {/* 手札（ミニ直線配置）: NPC手札トグルで表示切替 */}
                                         <div className="opponent-hand-fan" style={{ display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
-                                            {Array.from({ length: p.hand.length }).map((_, ci) => (
-                                                <div key={ci} className="opponent-hand-card" style={{
-                                                    marginLeft: ci === 0 ? 0 : getCardOverlapMargin(p.hand.length, false),
-                                                    zIndex: ci + 1,
-                                                }} />
-                                            ))}
+                                            {isNpcHandShown
+                                                ? p.hand.map((c, ci) => (
+                                                    <div key={c.uid}
+                                                        onPointerDown={() => { if (!isHidden(c)) startCardPreview(c.defId, 4000 + i * 100 + ci); }}
+                                                        onPointerUp={endPreview}
+                                                        onPointerLeave={endPreview}
+                                                        className="opponent-hand-card"
+                                                        style={{
+                                                            marginLeft: ci === 0 ? 0 : getCardOverlapMargin(p.hand.length, false),
+                                                            zIndex: ci + 1,
+                                                            background: isConsumable(c)
+                                                                ? 'linear-gradient(135deg, rgba(251,146,60,0.25), rgba(30,30,40,0.9))'
+                                                                : 'linear-gradient(135deg, rgba(45,212,191,0.2), rgba(30,30,40,0.9))',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            justifyContent: 'center',
+                                                            padding: '1px',
+                                                            overflow: 'hidden',
+                                                        }}>
+                                                        {!isHidden(c) && (
+                                                            <div style={{ fontSize: 6, fontWeight: 700, color: 'var(--text-primary)', textAlign: 'center', lineHeight: 1.1, wordBreak: 'break-all' }}>
+                                                                {cName(c.defId)}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                ))
+                                                : Array.from({ length: p.hand.length }).map((_, ci) => (
+                                                    <div key={ci} className="opponent-hand-card" style={{
+                                                        marginLeft: ci === 0 ? 0 : getCardOverlapMargin(p.hand.length, false),
+                                                        zIndex: ci + 1,
+                                                    }} />
+                                                ))
+                                            }
                                         </div>
 
                                         {/* 建物（カードスプライト・水平スクロール） */}
@@ -1048,6 +1204,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                     const borderColor = def.tags.includes('farm') ? 'rgba(74, 222, 128, 0.3)' : def.tags.includes('factory') ? 'rgba(251, 146, 60, 0.3)' : 'rgba(96, 165, 250, 0.15)';
                                                     return (
                                                         <div key={bi}
+                                                            data-building-uid={b.card.uid}
                                                             onPointerDown={() => { startCardPreview(b.card.defId, 3000 + i * 100 + bi); }}
                                                             onPointerUp={endPreview}
                                                             onPointerLeave={endPreview}
@@ -1074,14 +1231,14 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
 
                         {/* コンパクトログ */}
                         <div className="inline-log" style={{ marginTop: 'auto' }}>
-                            <div style={{ fontSize: 8, color: 'var(--text-dim)', fontWeight: 700, marginBottom: 2, display: 'flex', alignItems: 'center', gap: 3 }}>
-                                <IconLog size={8} /> LOG
-                                <button onClick={() => { soundManager.playSFX('click'); setShowLog(true); }} style={{ marginLeft: 'auto', fontSize: 7, color: 'var(--text-dim)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>全件</button>
+                            <div style={{ fontSize: 10, color: 'var(--text-dim)', fontWeight: 700, marginBottom: 2, display: 'flex', alignItems: 'center', gap: 3 }}>
+                                <IconLog size={10} /> LOG
+                                <button onClick={() => { soundManager.playSFX('click'); setShowLog(true); }} style={{ marginLeft: 'auto', fontSize: 9, color: 'var(--text-dim)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>全件</button>
                             </div>
                             {G.log.slice(-3).reverse().map((entry, i) => (
                                 <div key={G.log.length - i}
                                     className={`log-entry ${entry.text.startsWith('===') ? 'log-entry-round' : entry.text.startsWith('---') ? 'log-entry-phase' : 'log-entry-action'}`}
-                                    style={{ fontSize: 7 }}>
+                                    style={{ fontSize: 9 }}>
                                     {entry.text}
                                 </div>
                             ))}
@@ -1422,7 +1579,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                 </div >
 
                 {/* ====== 下段: 自分の場 ====== */}
-                < div className="area-my-field" >
+                < div className="area-my-field" data-player-id={myPid} >
                     {/* 左: ワーカーコマ + 手札 */}
                     < div className="my-hand-section" ref={handAreaRef} >
                         {/* ワーカーコマ */}
@@ -1437,7 +1594,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                     return (
                                         <img key={i}
                                             src={getMeepleSrc(parseInt(myPid))}
-                                            className={`worker-token ${!isAvailable ? 'used' : ''} ${canDrag ? 'draggable' : ''} ${workerDragRender?.workerIndex === i ? 'dragging' : ''}`}
+                                            className={`worker-token ${!isAvailable ? 'used' : ''} ${canDrag ? 'draggable worker-available-pulse' : ''} ${workerDragRender?.workerIndex === i ? 'dragging' : ''}`}
                                             onPointerDown={(e) => {
                                                 if (!canDrag) return;
                                                 e.preventDefault();
