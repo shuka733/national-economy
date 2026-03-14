@@ -6,6 +6,8 @@
 export const TIMING = {
     /** 長押しプレビューの判定閾値 */
     LONG_PRESS_MS: 300,
+    /** ホバープレビューの遅延（長押しより短く、すぐ反応する） */
+    HOVER_PREVIEW_MS: 150,
     /** ラウンドカードフリップの継続時間 */
     FLIP_DURATION_MS: 800,
     /** ラウンドアナウンス表示タイミング */
@@ -39,6 +41,19 @@ export const PREVIEW_OFFSET = {
     /** 売却建物 */
     SOLD_WP: 2300,
 } as const;
+
+/** フィーチャーフラグ（デフォルト値）— デバッグパネルで実行時に切替可能 */
+export const FEATURE_DEFAULTS = {
+    /** ホバーでプレビュー表示を有効にする */
+    HOVER_PREVIEW: true,
+    /** プレビュー時に背景を暗くする */
+    DARKEN_ON_PREVIEW: false,
+    /** ワーカーをクリックで配置する（ドラッグ不要モード） */
+    CLICK_PLACE_WORKER: true,
+} as const;
+
+/** フィーチャーフラグの型 */
+export type FeatureFlags = { [K in keyof typeof FEATURE_DEFAULTS]: boolean };
 
 /** レイアウト関連の定数 */
 export const LAYOUT = {

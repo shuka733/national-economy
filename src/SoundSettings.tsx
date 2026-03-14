@@ -29,7 +29,7 @@ export function SoundSettings({ onClose }: { onClose: () => void }) {
     return (
         <div className="modal-overlay animate-fade-in" style={{ zIndex: 9999 }}>
             <div className="modal-content animate-slide-up" style={{ width: 320, padding: 24, textAlign: 'center' }}>
-                <h3 style={{ margin: '0 0 20px', color: 'var(--gold)', fontSize: 18 }}>🔊 音量設定</h3>
+                <h3 style={{ margin: '0 0 20px', color: 'var(--gold)', fontSize: 'var(--fs-4xl)' }}>🔊 音量設定</h3>
 
                 {/* Mute Toggle */}
                 <div style={{ marginBottom: 24 }}>
@@ -40,7 +40,7 @@ export function SoundSettings({ onClose }: { onClose: () => void }) {
 
                 {/* BGM Slider */}
                 <div style={{ marginBottom: 20, textAlign: 'left' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: 12, color: 'var(--text-dim)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: 'var(--fs-xl2)', color: 'var(--text-dim)' }}>
                         <span>🎼 BGM</span>
                         <span>{Math.round(settings.bgmVolume * 100)}%</span>
                     </div>
@@ -56,7 +56,7 @@ export function SoundSettings({ onClose }: { onClose: () => void }) {
 
                 {/* SFX Slider */}
                 <div style={{ marginBottom: 24, textAlign: 'left' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: 12, color: 'var(--text-dim)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: 'var(--fs-xl2)', color: 'var(--text-dim)' }}>
                         <span>🔔 効果音</span>
                         <span>{Math.round(settings.sfxVolume * 100)}%</span>
                     </div>
@@ -72,6 +72,50 @@ export function SoundSettings({ onClose }: { onClose: () => void }) {
                     />
                 </div>
 
+                {/* BGM Track Selector */}
+                <div style={{ marginBottom: 20, textAlign: 'left' }}>
+                    <div style={{ fontSize: 'var(--fs-xl2)', color: 'var(--text-dim)', marginBottom: 8 }}>
+                        🎵 BGMトラック ({soundManager.bgmTracks.length}曲)
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 200, overflowY: 'auto', paddingRight: 4 }}>
+                        {soundManager.bgmTracks.map((track, idx) => {
+                            const isActive = soundManager.getCurrentBGMIndex() === idx;
+                            return (
+                                <button
+                                    key={track.id}
+                                    onClick={() => {
+                                        soundManager.playBGM(idx);
+                                        setSettings(soundManager.getSettings());
+                                    }}
+                                    className={`bgm-track-item ${isActive ? 'bgm-track-active' : ''}`}
+                                >
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                                        <span style={{ fontSize: 'var(--fs-2xl)', flexShrink: 0 }}>{isActive ? '▶️' : '🎵'}</span>
+                                        <div style={{ minWidth: 0 }}>
+                                            <span style={{
+                                                fontSize: 'var(--fs-xl)', color: isActive ? 'var(--gold)' : 'var(--text-secondary)',
+                                                fontWeight: isActive ? 700 : 400,
+                                                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'block',
+                                            }}>
+                                                {track.name}
+                                            </span>
+                                            <span style={{ fontSize: 'var(--fs-base)', color: 'var(--text-dim)' }}>
+                                                {track.category}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    {isActive && (
+                                        <div className="bgm-playing-indicator">
+                                            <span className="bgm-bar" style={{ animationDelay: '0s' }} />
+                                            <span className="bgm-bar" style={{ animationDelay: '0.2s' }} />
+                                            <span className="bgm-bar" style={{ animationDelay: '0.4s' }} />
+                                        </div>
+                                    )}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
 
                 <button onClick={() => { soundManager.playSFX('click'); onClose(); }} className="btn-ghost" style={{ width: '100%' }}>
                     完了
