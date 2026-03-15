@@ -80,6 +80,235 @@
   --sp-4: calc(var(--fs) * 0.89);  /* ~8px */
 }
 
+/* --- スチームパンクテーマ（暖色系オーバーライド） ---
+   使い方: document.documentElement.dataset.theme = 'steampunk' で有効化
+   解除:   delete document.documentElement.dataset.theme で元テーマに復帰 */
+[data-theme="steampunk"] {
+  /* ベースカラー: ダークブラウン系 */
+  --bg-deep: #1a1208;
+  --bg-primary: #241c10;
+  --bg-secondary: #2e2418;
+  --bg-card: #362a1c;
+  --bg-elevated: #3e3220;
+
+  /* テキスト: 暖色に合わせたウォームホワイト */
+  --text-primary: #f0e6d6;
+  --text-secondary: #b8a890;
+  --text-dim: #7a6b58;
+
+  /* エフェクト: 暖色ガラス */
+  --glass-bg: rgba(46, 36, 24, 0.85);
+  --glass-border: rgba(212, 168, 83, 0.15);
+  --glow-gold: 0 0 20px rgba(212, 168, 83, 0.4);
+  --glow-teal: 0 0 15px rgba(212, 168, 83, 0.2);
+
+  /* teal → 暖色系のアンバーに置き換え */
+  --teal: #d4a853;
+  --teal-dim: #6b5630;
+  --teal-15: rgba(212, 168, 83, 0.15);
+  --teal-40: rgba(212, 168, 83, 0.4);
+  --teal-60: rgba(212, 168, 83, 0.6);
+
+  /* カードタグ色: 暖色系に統一 */
+  --tag-farm: #c8b88a;           /* 農園: オリーブ → ウォームベージュ */
+  --tag-farm-bg: rgba(180, 150, 80, 0.35);
+  --tag-factory: #d4a060;        /* 工場: 青 → 銅色/ブロンズ */
+  --tag-factory-bg: rgba(200, 150, 60, 0.35);
+  --tag-lock: #e8c97a;
+  --tag-lock-bg: rgba(212, 168, 83, 0.35);
+
+  /* アクセントカラー: 暖色系に統一 */
+  --blue: #c8a060;    /* 青 → アンバー */
+  --green: #b8a060;   /* 緑 → オリーブゴールド */
+  --purple: #c8a070;  /* 紫 → ブロンズ */
+  --orange: #d4a050;  /* オレンジ → ゴールド寄り */
+  --red: #c87050;     /* 赤 → 渋い赤銅色 */
+  --red-30: rgba(200, 112, 80, 0.3);
+
+  /* カード画像ベース色: 暖色系 */
+  --card-image-overlay: #5a4a35;
+}
+
+/* ============================================================
+   スチームパンクテーマ — ゲーム画面オーバーライド
+   ============================================================ */
+
+/* ゲーム画面背景テクスチャ: しっかり見えるように */
+[data-theme="steampunk"] .game-scaler {
+  background:
+    linear-gradient(180deg, rgba(26, 18, 8, 0.55) 0%, rgba(20, 14, 6, 0.7) 100%),
+    url('/bg_game.png') center/cover no-repeat;
+}
+
+/* ヘッダーバー: リッチなゲームHUD */
+[data-theme="steampunk"] .game-header {
+  background: linear-gradient(180deg, rgba(46, 36, 24, 0.98) 0%, rgba(30, 22, 12, 0.95) 100%);
+  border-bottom: 2px solid rgba(212, 168, 83, 0.4);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5), inset 0 -1px 0 rgba(212, 168, 83, 0.1);
+}
+
+/* 相手エリア: しっかりしたパネルフレーム */
+[data-theme="steampunk"] .area-opponents {
+  border: 1px solid rgba(212, 168, 83, 0.25);
+  background: rgba(20, 14, 6, 0.6);
+  box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.3);
+}
+
+/* 相手カード: 革調 */
+[data-theme="steampunk"] .opponent-card {
+  background: linear-gradient(170deg, rgba(56, 44, 28, 0.9) 0%, rgba(36, 28, 16, 0.95) 100%);
+  border: 1px solid rgba(212, 168, 83, 0.2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="steampunk"] .opponent-card-active {
+  border-color: rgba(212, 168, 83, 0.5) !important;
+  background: linear-gradient(145deg, rgba(120, 94, 48, 0.35) 0%, rgba(46, 36, 24, 0.9) 100%);
+  box-shadow: 0 0 16px rgba(212, 168, 83, 0.15), inset 0 1px 0 rgba(212, 168, 83, 0.1);
+}
+
+/* 相手手札カード: ダークレザー */
+[data-theme="steampunk"] .opponent-hand-card {
+  background: linear-gradient(170deg, #3e3020 0%, #2a2010 100%) !important;
+  border-color: rgba(212, 168, 83, 0.25) !important;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+
+/* 相手の建物カード */
+[data-theme="steampunk"] .opponent-building-sprite {
+  background: linear-gradient(170deg, rgba(56, 44, 28, 0.95) 0%, rgba(30, 22, 12, 0.98) 100%);
+  border-color: rgba(212, 168, 83, 0.18);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+/* ステータスバッジ */
+[data-theme="steampunk"] .opponent-stat {
+  background: rgba(212, 168, 83, 0.08);
+  border: 1px solid rgba(212, 168, 83, 0.1);
+}
+
+/* ステータスバッジ共通 */
+[data-theme="steampunk"] .stat-badge {
+  border-color: rgba(212, 168, 83, 0.2);
+}
+
+/* 家計ボックス: ゴールドのリッチ枠 */
+[data-theme="steampunk"] .household-box {
+  background: linear-gradient(145deg, rgba(212, 168, 83, 0.12) 0%, rgba(36, 28, 16, 0.95) 100%);
+  border: 1.5px solid rgba(212, 168, 83, 0.4);
+  box-shadow: 0 0 12px rgba(212, 168, 83, 0.1), inset 0 0 8px rgba(212, 168, 83, 0.05);
+}
+
+[data-theme="steampunk"] .household-box::after {
+  background: linear-gradient(90deg, transparent, rgba(212, 168, 83, 0.08), transparent);
+}
+
+/* デッキカード: 暖色のリッチな見え方 */
+[data-theme="steampunk"] .deck-top-face {
+  border-color: rgba(212, 168, 83, 0.25);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.6), 0 0 4px rgba(212, 168, 83, 0.1);
+}
+
+[data-theme="steampunk"] .deck-card.has-depth::before {
+  background: rgba(30, 22, 12, 0.95);
+  border-color: rgba(212, 168, 83, 0.1);
+}
+
+[data-theme="steampunk"] .deck-card.has-depth::after {
+  background: rgba(36, 28, 16, 0.95);
+  border-color: rgba(212, 168, 83, 0.1);
+}
+
+/* ラウンドカードデッキ */
+[data-theme="steampunk"] .deck-round .deck-top-face {
+  background: linear-gradient(160deg, #3a2e1e 0%, #1a1208 100%);
+  border-color: rgba(212, 168, 83, 0.35);
+}
+
+/* 消費財デッキ */
+[data-theme="steampunk"] .deck-consumable .deck-top-face {
+  background: linear-gradient(160deg, #2e2418 0%, #1a1208 100%);
+  border-color: rgba(212, 168, 83, 0.2);
+}
+
+/* 建物デッキ */
+[data-theme="steampunk"] .deck-building .deck-top-face {
+  background: linear-gradient(160deg, #2e2418 0%, #1a1208 100%);
+  border-color: rgba(212, 168, 83, 0.2);
+}
+
+/* 公共エリア: うっすらパネル */
+[data-theme="steampunk"] .area-public {
+  background: rgba(20, 14, 6, 0.4);
+  border-color: rgba(212, 168, 83, 0.15);
+  box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.2);
+}
+
+/* ターンバー */
+[data-theme="steampunk"] .turn-bar {
+  background: rgba(46, 36, 24, 0.8);
+  border-color: rgba(212, 168, 83, 0.2);
+}
+
+/* ログパネル */
+[data-theme="steampunk"] .log-panel {
+  background: rgba(30, 22, 12, 0.9);
+  border: 1px solid rgba(212, 168, 83, 0.15);
+  box-shadow: inset 0 0 12px rgba(0, 0, 0, 0.3);
+}
+
+/* 下段（自分の場）: リッチな背景 */
+[data-theme="steampunk"] .my-buildings-section {
+  background: linear-gradient(0deg, rgba(30, 22, 12, 0.7) 0%, rgba(20, 14, 6, 0.4) 100%);
+  border-top: 1px solid rgba(212, 168, 83, 0.2);
+}
+
+/* 手札エリア */
+[data-theme="steampunk"] .hand-scroll-area {
+  background: rgba(20, 14, 6, 0.3);
+}
+
+/* インフォバー: ゲームUI風 */
+[data-theme="steampunk"] .inline-info-bar,
+[data-theme="steampunk"] .buildings-info-bar {
+  background: linear-gradient(90deg, rgba(46, 36, 24, 0.95), rgba(56, 44, 28, 0.95));
+  border-color: rgba(212, 168, 83, 0.3);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+/* カード共通: ゴールド枠 + リッチな影 */
+[data-theme="steampunk"] .card-sprite {
+  border-color: rgba(212, 168, 83, 0.2);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5), 0 0 2px rgba(212, 168, 83, 0.1);
+}
+
+[data-theme="steampunk"] .card-sprite:hover {
+  border-color: rgba(212, 168, 83, 0.5);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6), 0 0 8px rgba(212, 168, 83, 0.2);
+}
+
+/* 選択可能カード */
+[data-theme="steampunk"] .card-selectable {
+  border-color: rgba(212, 168, 83, 0.6) !important;
+  box-shadow: 0 0 16px rgba(212, 168, 83, 0.25), 0 0 4px rgba(212, 168, 83, 0.4) !important;
+}
+
+/* ワーカーコマ */
+[data-theme="steampunk"] .worker-pip {
+  box-shadow: 0 0 8px rgba(212, 168, 83, 0.4);
+}
+
+/* 賃金フェーズなどのモーダル系 */
+[data-theme="steampunk"] .payday-overlay {
+  background: rgba(20, 14, 6, 0.85);
+}
+
+/* ラウンド表示カード */
+[data-theme="steampunk"] .round-card-front,
+[data-theme="steampunk"] .round-card-back {
+  border-color: rgba(212, 168, 83, 0.25);
+}
+
 /* --- ベースリセット --- */
 body {
   margin: 0;
@@ -119,6 +348,155 @@ body {
     radial-gradient(ellipse at 80% 20%, rgba(45, 212, 191, 0.02) 0%, transparent 50%),
     linear-gradient(180deg, var(--bg-deep) 0%, var(--bg-primary) 100%);
   min-height: 100vh;
+}
+
+/* スチームパンクテーマ: タイトル画面背景 */
+[data-theme="steampunk"] .game-bg {
+  background:
+    linear-gradient(180deg, rgba(26, 18, 8, 0.7) 0%, rgba(26, 18, 8, 0.85) 100%),
+    url('/bg_title.png') center/cover no-repeat;
+}
+
+/* ============================================================
+   メインメニュー — ゲームUI風ボタン
+   ============================================================ */
+
+/* メニューアイテム: 真鍮プレート風 */
+.menu-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 14px 24px;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--fs-3xl);
+  font-weight: 700;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  text-align: center;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* 下のアクセントライン（ホバーで伸びる） */
+.menu-item::before {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--gold), transparent);
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 背景グロー（ホバーで出現） */
+.menu-item::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center,
+    rgba(212, 168, 83, 0.1) 0%,
+    rgba(212, 168, 83, 0.03) 50%,
+    transparent 100%);
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.menu-item:hover {
+  color: var(--gold-light);
+}
+
+.menu-item:hover::before {
+  width: 30%;
+}
+
+.menu-item:hover::after {
+  opacity: 1;
+}
+
+.menu-item:active {
+  transform: scale(0.98);
+}
+
+/* アイコン部分 */
+.menu-item .menu-icon {
+  position: relative;
+  z-index: 1;
+  opacity: 0.6;
+  transition: opacity 0.3s, transform 0.3s;
+}
+
+.menu-item:hover .menu-icon {
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+/* テキスト部分 */
+.menu-item .menu-label {
+  position: relative;
+  z-index: 1;
+}
+
+/* プライマリ（メインボタン）: 少し大きめ */
+.menu-item-primary {
+  font-size: var(--fs-4xl);
+  padding: 18px 24px;
+}
+
+.menu-item-primary::before {
+  background: linear-gradient(180deg, var(--gold-light), var(--gold));
+}
+
+.menu-item-primary:hover {
+  color: #fff;
+  text-shadow: 0 0 20px rgba(212, 168, 83, 0.5);
+}
+
+/* セカンダリ */
+.menu-item-secondary {
+  font-size: var(--fs-2xl);
+  color: var(--text-secondary);
+}
+
+/* DEVメニュー（控えめ） */
+.menu-item-dev {
+  font-size: var(--fs-xl2);
+  color: var(--text-dim);
+  padding: 10px 24px;
+}
+
+.menu-item-dev::before {
+  background: linear-gradient(180deg, var(--text-dim), rgba(107, 114, 128, 0.3));
+}
+
+/* セパレータ（歯車デコレーション付きの水平線） */
+.menu-separator {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 24px;
+  opacity: 0.3;
+}
+
+.menu-separator-line {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--gold-dim), transparent);
+}
+
+.menu-separator-dot {
+  width: 6px;
+  height: 6px;
+  border: 1px solid var(--gold-dim);
+  border-radius: 50%;
+  transform: rotate(45deg);
 }
 
 /* --- ガラスカード --- */
@@ -286,26 +664,46 @@ body {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-1);
-  padding: var(--sp-1) var(--sp-3);
-  border-radius: var(--sp-2);
-  font-size: var(--fs-base);
-  font-weight: 700;
-  letter-spacing: 0.5px;
+  padding: 1px var(--sp-2);
+  border-radius: 3px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  opacity: 0.7;
+  border: 1px solid transparent;
 }
 
 .tag-farm {
   color: var(--tag-farm);
-  background: var(--tag-farm-bg);
+  border-color: var(--tag-farm-bg);
+  background: none;
 }
 
 .tag-factory {
   color: var(--tag-factory);
-  background: var(--tag-factory-bg);
+  border-color: var(--tag-factory-bg);
+  background: none;
 }
 
 .tag-lock {
   color: var(--tag-lock);
-  background: var(--tag-lock-bg);
+  border-color: var(--tag-lock-bg);
+  background: none;
+}
+
+/* スチームパンク時: さらに統一感 */
+[data-theme="steampunk"] .tag-badge {
+  opacity: 0.55;
+  border-color: rgba(212, 168, 83, 0.2);
+  color: var(--text-secondary);
+}
+
+[data-theme="steampunk"] .tag-farm,
+[data-theme="steampunk"] .tag-factory,
+[data-theme="steampunk"] .tag-lock {
+  color: var(--text-secondary);
+  border-color: rgba(212, 168, 83, 0.15);
+  background: none;
 }
 
 /* --- ステータスバッジ --- */
@@ -622,6 +1020,13 @@ body {
   background: var(--bg-deep);
 }
 
+/* スチームパンクテーマ: ゲーム画面背景 */
+[data-theme="steampunk"] .game-layout {
+  background:
+    linear-gradient(180deg, rgba(26, 18, 8, 0.85) 0%, rgba(26, 18, 8, 0.92) 100%),
+    url('/bg_game.png') center/cover no-repeat;
+}
+
 /* game-scaler: CSS-onlyのアスペクト比固定スケーリング。
    JSのtransform:scaleに依存しないため、フェーズ遷移でReactが
    コンポーネントを再マウントしても常に正しいサイズで表示される。
@@ -877,13 +1282,13 @@ body {
 
 /* --- 家計ボックス: 固定高 --- */
 .household-box {
-  height: 40px;
-  min-height: 40px;
+  height: auto;
+  min-height: 36px;
   flex-shrink: 0;
   background: linear-gradient(145deg, rgba(45, 212, 191, 0.08) 0%, rgba(30, 34, 53, 0.9) 100%);
   border: 1px solid rgba(45, 212, 191, 0.25);
   border-radius: 8px;
-  padding: 4px 10px;
+  padding: 6px 10px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -927,6 +1332,8 @@ body {
   gap: 8px;
   align-items: center;
   padding: 4px;
+  position: relative;
+  z-index: 0;
 }
 
 /* --- デッキカード共通: 公共カードサイズ(50%面積) --- */
@@ -1234,14 +1641,18 @@ body {
 
 /* --- 売却建物エリア（スクロール対応） --- */
 .sold-buildings-area {
-  overflow-y: auto;
+  overflow: auto;
   max-height: 100%;
   scrollbar-width: thin;
   scrollbar-color: rgba(74, 222, 128, 0.2) transparent;
+  position: relative;
+  z-index: 2;
+  padding-top: 8px;
 }
 
 .sold-buildings-area::-webkit-scrollbar {
   width: 3px;
+  height: 3px;
 }
 
 .sold-buildings-area::-webkit-scrollbar-thumb {
@@ -1250,8 +1661,8 @@ body {
 }
 
 .sold-buildings-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, var(--pub-card-w));
+  display: flex;
+  flex-wrap: wrap;
   gap: 3px;
 }
 
@@ -1259,6 +1670,7 @@ body {
 .sold-buildings-grid .hand-card {
   width: var(--pub-card-w);
   height: var(--pub-card-h);
+  flex-shrink: 0;
 }
 
 /* ============================================================
@@ -1442,7 +1854,8 @@ body {
   justify-content: flex-start;
   align-items: flex-end;
   padding: 0 8px;
-  overflow: hidden;
+  overflow: visible;
+  clip-path: inset(-12px 0 0 0);  /* 上方向12pxだけ許容、他はクリップ */
 }
 
 /* 個別カード: 自分の場の高さに合わせたサイズ */
@@ -1491,6 +1904,15 @@ body {
 /* 売却建物エリア: ホバーで上昇しない */
 .sold-buildings-grid .hand-card:hover {
   transform: none;
+}
+
+/* 売却建物エリア: playableで上昇OK（z-index差で解決）、scaleは無効 */
+.sold-buildings-grid .hand-card.hand-card-playable {
+  transform: translateY(-3px);
+}
+
+.sold-buildings-grid .hand-card.hand-card-playable:hover {
+  transform: translateY(-5px);
 }
 
 /* 押下中: カードは上がったまま維持（長押しプレビュー対応） */

@@ -131,7 +131,7 @@ function CardPreview({ card, showImage }: { card: CardDef; showImage: boolean })
             {showImage && (
                 <div style={{
                     width: '100%',
-                    aspectRatio: '2/3',
+                    aspectRatio: '63/88',
                     background: hasImage ? 'transparent' : 'rgba(255,255,255,0.03)',
                     display: 'flex',
                     alignItems: 'center',
@@ -382,7 +382,7 @@ export function DevCardGallery({ onBack }: { onBack: () => void }) {
                                     <div style={{
                                         display: 'grid',
                                         gridTemplateColumns: showImage
-                                            ? 'repeat(auto-fill, minmax(160px, 1fr))'
+                                            ? 'repeat(auto-fill, minmax(220px, 1fr))'
                                             : 'repeat(auto-fill, minmax(220px, 1fr))',
                                         gap: 12,
                                     }}>
@@ -398,7 +398,7 @@ export function DevCardGallery({ onBack }: { onBack: () => void }) {
                     <div style={{
                         display: 'grid',
                         gridTemplateColumns: showImage
-                            ? 'repeat(auto-fill, minmax(160px, 1fr))'
+                            ? 'repeat(auto-fill, minmax(220px, 1fr))'
                             : 'repeat(auto-fill, minmax(220px, 1fr))',
                         gap: 12,
                     }}>

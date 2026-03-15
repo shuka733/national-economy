@@ -2,3 +2,4 @@ node_modules/
 dist/
 *.local
 playtest_notes.md
+public/audio/pokemon_bgm/full_audio.mp3

@@ -751,7 +751,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
             rect.left + rect.width / 2,
             rect.top + rect.height / 2,
             '',
-            'rgba(45, 212, 191, 0.6)'
+            'var(--teal-60)'
         );
         // ドロー検知準備（move前の状態保存）
         prepareDrawDetection();
@@ -767,7 +767,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
             rect.left + rect.width / 2,
             rect.top + rect.height / 2,
             '',
-            'rgba(212, 168, 83, 0.6)'
+            'var(--gold-60)'
         );
         // ドロー検知準備（move前の状態保存）
         prepareDrawDetection();
@@ -906,7 +906,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                 },
                                 {
                                     transform: `translate(${ex}px, ${ey}px) scale(1.1)`,
-                                    filter: 'drop-shadow(0 6px 16px rgba(0,0,0,0.5)) drop-shadow(0 0 12px rgba(59,130,246,0.4))',
+                                    filter: 'drop-shadow(0 6px 16px rgba(0,0,0,0.5)) drop-shadow(0 0 12px var(--teal-40))',
                                 },
                             ], {
                                 duration: 600,
@@ -917,8 +917,8 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                             anim.onfinish = () => {
                                 // 着地: リップル + move実行
                                 const rippleColor = action.moveName === 'placeWorker'
-                                    ? 'rgba(45, 212, 191, 0.6)'
-                                    : 'rgba(212, 168, 83, 0.6)';
+                                    ? 'var(--teal-60)'
+                                    : 'var(--gold-60)';
                                 triggerRipple(
                                     targetRect.left + targetRect.width / 2,
                                     targetRect.top + targetRect.height / 2,
@@ -1158,14 +1158,12 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                         <span style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-dim)', fontWeight: 500 }}>{tagLabel}</span>
                                     </div>
                                     {/* スタッツ行: コスト / VP */}
-                                    <div style={{ display: 'flex', gap: 'var(--sp-4)', marginBottom: 'var(--sp-3)' }}>
+                                    <div style={{ display: 'flex', gap: 'var(--sp-4)', marginBottom: 'var(--sp-3)', alignItems: 'center' }}>
                                         <span className="card-preview-stat">
-                                            <span style={{ color: 'var(--text-dim)' }}>コスト</span>
-                                            <b style={{ color: 'var(--gold-light)', fontSize: 'var(--fs-3xl)' }}>C{pDef.cost}</b>
+                                            <span style={{ color: 'var(--gold-light)', fontSize: 'var(--fs-3xl)', fontWeight: 800 }}>C{pDef.cost}</span>
                                         </span>
                                         <span className="card-preview-stat">
-                                            <span style={{ color: 'var(--text-dim)' }}>得点</span>
-                                            <b style={{ color: 'var(--gold-light)', fontSize: 'var(--fs-3xl)' }}>{pDef.vp}VP</b>
+                                            <span style={{ color: 'var(--gold-light)', fontSize: 'var(--fs-3xl)', fontWeight: 800 }}>{pDef.vp}VP</span>
                                         </span>
                                     </div>
                                     {/* セパレーター */}
@@ -1182,7 +1180,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                             {pDef.tags.includes('farm') && <span className="tag-badge tag-farm"><TagFarm size={"calc(var(--fs) * 1.33)"} /> 農園</span>}
                                             {pDef.tags.includes('factory') && <span className="tag-badge tag-factory"><TagFactory size={"calc(var(--fs) * 1.33)"} /> 工場</span>}
                                             {pDef.unsellable && <span className="tag-badge tag-lock"><TagLock size={"calc(var(--fs) * 1.33)"} /> 売却不可</span>}
-                                            {pDef.consumeOnUse && <span className="tag-badge" style={{ color: '#f87171', background: 'rgba(239,68,68,0.15)' }}>🔥 使い捨て</span>}
+                                            {pDef.consumeOnUse && <span className="tag-badge" style={{ color: 'var(--red)', background: 'var(--red-15)' }}>🔥 使い捨て</span>}
                                         </div>
                                     )}
                                 </div>
@@ -1241,7 +1239,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                     <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
                         <span className="stat-badge"><span style={{ color: 'var(--text-dim)', fontSize: 'var(--fs-md)', fontWeight: 700 }}>ROUND</span><b style={{ color: 'var(--blue)', fontSize: 'var(--fs-xl2)' }}>{G.round}</b><span style={{ color: 'var(--text-dim)' }}>/9</span></span>
                         <span className="stat-badge"><IconDeck size={"calc(var(--fs) * 1.11)"} color="var(--purple)" /><b style={{ color: 'var(--purple)', fontSize: 'var(--fs-lg)' }}>{G.deck.length}</b></span>
-                        <button onClick={() => { soundManager.playSFX('click'); setShowDiscard(!showDiscard); }} className="stat-badge" style={{ cursor: 'pointer', border: '1px solid rgba(251, 146, 60, 0.15)' }}>
+                        <button onClick={() => { soundManager.playSFX('click'); setShowDiscard(!showDiscard); }} className="stat-badge" style={{ cursor: 'pointer', border: '1px solid var(--glass-border)' }}>
                             <IconDiscard size={"calc(var(--fs) * 1.11)"} color="var(--orange)" /><b style={{ color: 'var(--orange)', fontSize: 'var(--fs-lg)' }}>{G.discard.length}</b>
                         </button>
                         <button onClick={() => { soundManager.playSFX('click'); setShowLog(!showLog); }} className="stat-badge" style={{ cursor: 'pointer', border: '1px solid rgba(99, 102, 241, 0.15)' }}>
@@ -1282,9 +1280,9 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                             {cpuConfig?.enabled && cpuConfig.cpuPlayers.includes(displayCurPid) && (
                                 <span style={{
                                     marginLeft: 4, fontSize: 'var(--fs-md)', color: 'var(--teal)',
-                                    background: 'linear-gradient(135deg, rgba(45, 212, 191, 0.12), rgba(96, 165, 250, 0.08))',
+                                    background: 'linear-gradient(135deg, var(--teal-15), rgba(96, 165, 250, 0.08))',
                                     padding: '2px 6px', borderRadius: 4,
-                                    border: '1px solid rgba(45, 212, 191, 0.2)',
+                                    border: '1px solid var(--teal-15)',
                                     display: 'inline-flex', alignItems: 'center', gap: 3,
                                 }}>
                                     <span style={{
@@ -1329,15 +1327,15 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                 <span className="stat-badge" style={{ fontSize: 'var(--fs-md)', padding: '1px 4px' }}>
                                                     <IconWorker size={"calc(var(--fs) * 0.89)"} color="var(--blue)" /><b style={{ color: 'var(--blue)' }}>{p.availableWorkers}/{p.workers}</b>
                                                 </span>
-                                                {p.unpaidDebts > 0 && <span className="stat-badge" style={{ fontSize: 'var(--fs-md)', padding: '1px 4px', borderColor: 'rgba(248,113,113,0.3)' }}><b style={{ color: 'var(--red)' }}>Debt {p.unpaidDebts}</b></span>}
+                                                {p.unpaidDebts > 0 && <span className="stat-badge" style={{ fontSize: 'var(--fs-md)', padding: '1px 4px', borderColor: 'var(--red-30)' }}><b style={{ color: 'var(--red)' }}>Debt {p.unpaidDebts}</b></span>}
                                                 {/* NPC手札トグルボタン（CPUプレイヤーのみ表示） */}
                                                 {isCpu && (
                                                     <button
                                                         onClick={() => { soundManager.playSFX('click'); setNpcHandVisible(prev => ({ ...prev, [pid]: !prev[pid] })); }}
                                                         title={isNpcHandShown ? 'NPC手札を隠す' : 'NPC手札を表示'}
                                                         style={{
-                                                            background: isNpcHandShown ? 'rgba(45, 212, 191, 0.2)' : 'rgba(255, 255, 255, 0.05)',
-                                                            border: `1px solid ${isNpcHandShown ? 'rgba(45, 212, 191, 0.4)' : 'rgba(255, 255, 255, 0.1)'}`,
+                                                            background: isNpcHandShown ? 'var(--teal-15)' : 'var(--glass-bg)',
+                                                            border: `1px solid ${isNpcHandShown ? 'var(--teal-40)' : 'var(--glass-border)'}`,
                                                             borderRadius: 4,
                                                             padding: '1px 4px',
                                                             cursor: 'pointer',
@@ -1366,8 +1364,8 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                             marginLeft: ci === 0 ? 0 : getCardOverlapMargin(p.hand.length, false),
                                                             zIndex: ci + 1,
                                                             background: isConsumable(c)
-                                                                ? 'linear-gradient(135deg, rgba(251,146,60,0.25), rgba(30,30,40,0.9))'
-                                                                : 'linear-gradient(135deg, rgba(45,212,191,0.2), rgba(30,30,40,0.9))',
+                                                                ? 'linear-gradient(135deg, rgba(251,146,60,0.25), var(--bg-secondary))'
+                                                                : 'linear-gradient(135deg, var(--teal-15), rgba(30,30,40,0.9))',
                                                             display: 'flex',
                                                             alignItems: 'center',
                                                             justifyContent: 'center',
@@ -1395,7 +1393,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                             <div className="opponent-buildings-scroll">
                                                 {p.buildings.map((b, bi) => {
                                                     const def = getCardDef(b.card.defId);
-                                                    const borderColor = def.tags.includes('farm') ? 'rgba(74, 222, 128, 0.3)' : def.tags.includes('factory') ? 'rgba(251, 146, 60, 0.3)' : 'rgba(96, 165, 250, 0.15)';
+                                                    const borderColor = def.tags.includes('farm') ? 'var(--tag-farm-bg)' : def.tags.includes('factory') ? 'var(--tag-factory-bg)' : 'var(--glass-border)';
                                                     return (
                                                         <div key={bi}
                                                             data-building-uid={b.card.uid}
@@ -1441,7 +1439,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                     </div>
 
                     {/* ==== 右列: 公共の場 ==== */}
-                    <div className="area-public" style={{ border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: 4 }}>
+                    <div className="area-public" style={{ border: '1px solid var(--glass-border)', borderRadius: 4 }}>
                         {/* 家計 */}
                         <div className={`household-box ${wagePressure ? 'wage-pressure' : ''}`}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8, zIndex: 1 }}>
@@ -1729,7 +1727,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
 
                                 {/* 売却建物 */}
                                 {soldWorkplaces.length > 0 && (
-                                    <div>
+                                    <div style={{ position: 'relative', zIndex: 3 }}>
                                         <div className="workplaces-row-label" style={{ color: 'var(--green)' }}>
                                             <IconHouse size={"calc(var(--fs) * 0.89)"} color="var(--green)" /> 売却建物
                                         </div>
@@ -1748,7 +1746,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                             onPointerEnter={(e) => { startHoverWorkplacePreview(wp, 2300 + soldWorkplaces.indexOf(wp), e); }}
                                                             className={`hand-card building-card-in-field ${ok ? 'hand-card-playable' : ''} ${!ok && wp.workers.length > 0 ? 'building-placed' : ''} ${workerDragRender?.hoveredUid === wp.id ? 'worker-drag-hover' : ''}`}
                                                             style={{
-                                                                borderColor: ok ? 'rgba(45, 212, 191, 0.4)' : 'rgba(45, 212, 191, 0.15)',
+                                                                borderColor: ok ? 'var(--teal-40)' : 'var(--teal-15)',
                                                             }}>
                                                             {wp.fromBuildingDefId && <CardBgImage defId={wp.fromBuildingDefId} />}
                                                             <div style={{ fontWeight: 700, fontSize: 'var(--fs-base)', lineHeight: 1.2, color: ok ? 'var(--text-primary)' : 'var(--text-dim)', position: 'relative', zIndex: 1 }}>
@@ -1964,7 +1962,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                             const selectedStyle = isSelected
                                                 ? { transform: 'translateY(-10px)' }
                                                 : isExcluded
-                                                    ? { borderColor: 'rgba(212, 168, 83, 0.4)', opacity: 0.6 }
+                                                    ? { borderColor: 'var(--gold-40)', opacity: 0.6 }
                                                     : {};
 
                                             return (
@@ -2079,7 +2077,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                 const isPaydaySellable = needsPaydaySelling && !def.unsellable;
                                 const isPaydaySelected = needsPaydaySelling && (paydayPlayerState?.selectedBuildingIndices ?? []).includes(bi);
                                 const color = isPaydaySelected ? 'var(--red)'
-                                    : (canActivate || isPaydaySellable) ? 'rgba(45, 212, 191, 0.4)' : 'rgba(45, 212, 191, 0.15)';
+                                    : (canActivate || isPaydaySellable) ? 'var(--teal-40)' : 'var(--teal-15)';
                                 return (
                                     <div key={`${b.card.defId}-${bi}`}
                                         data-building-uid={b.card.uid}
@@ -2107,7 +2105,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                         className={`hand-card building-card-in-field ${canActivate || isPaydaySellable ? 'hand-card-playable' : ''} ${b.workerPlaced && !isPaydayPhase ? 'building-placed' : ''} ${workerDragRender?.hoveredUid === b.card.uid && canActivate ? 'worker-drag-hover' : ''}`}
                                         style={{
                                             borderColor: color,
-                                            ...(isPaydaySelected ? { boxShadow: '0 0 12px rgba(248, 113, 113, 0.3)' } : {}),
+                                            ...(isPaydaySelected ? { boxShadow: '0 0 12px var(--red-30)' } : {}),
                                             ...(needsPaydaySelling && def.unsellable ? { opacity: 0.5 } : {}),
                                         }}
                                         title={`${def.name} (${def.vp}VP) ${def.effectText}`}>
@@ -2139,7 +2137,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                         </span>
                         {
                             myPlayer.unpaidDebts > 0 && (
-                                <span className="stat-badge" style={{ fontSize: 'var(--fs-base)', padding: '2px 6px', borderColor: 'rgba(248,113,113,0.3)' }}>
+                                <span className="stat-badge" style={{ fontSize: 'var(--fs-base)', padding: '2px 6px', borderColor: 'var(--red-30)' }}>
                                     <b style={{ color: 'var(--red)' }}>Debt {myPlayer.unpaidDebts}</b>
                                 </span>
                             )
@@ -2280,7 +2278,7 @@ function DesignOfficeUI({ G, moves, onBeforeSelect }: { G: GameState; moves: any
                                     ...(isSelected ? {
                                         borderColor: 'var(--teal)',
                                         transform: 'translateY(-10px)',
-                                        boxShadow: '0 0 12px rgba(45, 212, 191, 0.4)',
+                                        boxShadow: '0 0 12px var(--teal-40)',
                                     } : {}),
                                 }}>
                                 <CardBgImage defId={c.defId} />
@@ -2434,8 +2432,8 @@ function DiscardUI({ G, moves, pid, onBeforeConfirm }: { G: GameState; moves: an
                                 className={`game-card ${excluded ? '' : 'game-card-clickable'}`}
                                 style={{
                                     minWidth: 100,
-                                    ...(excluded ? { borderColor: 'rgba(212, 168, 83, 0.3)', background: 'rgba(212, 168, 83, 0.08)', opacity: 0.6, cursor: 'not-allowed' } : {}),
-                                    ...(selected ? { borderColor: 'var(--red)', boxShadow: '0 0 15px rgba(248, 113, 113, 0.2)' } : {}),
+                                    ...(excluded ? { borderColor: 'var(--gold-40)', background: 'var(--gold-15)', opacity: 0.6, cursor: 'not-allowed' } : {}),
+                                    ...(selected ? { borderColor: 'var(--red)', boxShadow: '0 0 15px var(--red-30)' } : {}),
                                 }}>
                                 <div style={{ fontWeight: 700, fontSize: 'var(--fs-xl2)' }}>{cName(c.defId)}</div>
                                 {excluded && <div style={{ fontSize: 'var(--fs-base)', color: 'var(--gold)' }}>建設対象</div>}
@@ -2613,7 +2611,7 @@ function CleanupUI({ G, moves, myPid, isOnline }: { G: GameState; moves: any; my
                                 className={`game-card game-card-clickable`}
                                 style={{
                                     minWidth: 90,
-                                    ...(selected ? { borderColor: 'var(--red)', boxShadow: '0 0 15px rgba(248, 113, 113, 0.2)' } : {}),
+                                    ...(selected ? { borderColor: 'var(--red)', boxShadow: '0 0 15px var(--red-30)' } : {}),
                                 }}>
                                 <div style={{ fontWeight: 700, fontSize: 'var(--fs-xl2)' }}>{cName(c.defId)}</div>
                                 {!isConsumable(c) && <div style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-dim)' }}>C{getCardDef(c.defId).cost}/{getCardDef(c.defId).vp}VP</div>}
@@ -2713,7 +2711,7 @@ function GameOver({ G }: { G: GameState }) {
                     return (
                         <div key={s.playerIndex} className="glass-card" style={{
                             marginBottom: 12, padding: 16,
-                            ...(i === 0 ? { borderColor: 'rgba(212, 168, 83, 0.3)', boxShadow: 'var(--glow-gold)' } : {}),
+                            ...(i === 0 ? { borderColor: 'var(--gold-40)', boxShadow: 'var(--glow-gold)' } : {}),
                         }}>
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
