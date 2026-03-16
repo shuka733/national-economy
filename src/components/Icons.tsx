@@ -202,3 +202,101 @@ export const LogoFactory: React.FC<IconProps> = (props) => (
         <path d="M85 9v-5" />
     </DefaultIcon>
 );
+
+// --- メニュー用アイコン（絵文字置き換え用） ---
+
+/** 🎮 ゲームパッド */
+export const IconGamepad: React.FC<IconProps> = (props) => (
+    <DefaultIcon {...props}>
+        <rect x="2" y="6" width="20" height="12" rx="2" />
+        <line x1="6" y1="12" x2="10" y2="12" />
+        <line x1="8" y1="10" x2="8" y2="14" />
+        <circle cx="15" cy="10" r="1" fill="currentColor" stroke="none" />
+        <circle cx="18" cy="12" r="1" fill="currentColor" stroke="none" />
+    </DefaultIcon>
+);
+
+/** 🌐 地球 */
+export const IconGlobe: React.FC<IconProps> = (props) => (
+    <DefaultIcon {...props}>
+        <circle cx="12" cy="12" r="10" />
+        <line x1="2" y1="12" x2="22" y2="12" />
+        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+    </DefaultIcon>
+);
+
+/** 🛠 レンチ */
+export const IconWrench: React.FC<IconProps> = (props) => (
+    <DefaultIcon {...props}>
+        <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+    </DefaultIcon>
+);
+
+/** 🏠 家 */
+export const IconHome: React.FC<IconProps> = (props) => (
+    <DefaultIcon {...props}>
+        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+        <polyline points="9 22 9 12 15 12 15 22" />
+    </DefaultIcon>
+);
+
+/** 🔗 リンク */
+export const IconLink: React.FC<IconProps> = (props) => (
+    <DefaultIcon {...props}>
+        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+    </DefaultIcon>
+);
+
+/** 🎲 サイコロ */
+export const IconDice: React.FC<IconProps> = (props) => (
+    <DefaultIcon {...props}>
+        <rect x="2" y="2" width="20" height="20" rx="2" />
+        <circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none" />
+        <circle cx="16" cy="8" r="1.5" fill="currentColor" stroke="none" />
+        <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
+        <circle cx="8" cy="16" r="1.5" fill="currentColor" stroke="none" />
+        <circle cx="16" cy="16" r="1.5" fill="currentColor" stroke="none" />
+    </DefaultIcon>
+);
+
+/** 🚀 ロケット */
+export const IconRocket: React.FC<IconProps> = (props) => (
+    <DefaultIcon {...props}>
+        <path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z" />
+        <path d="M12 15l-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z" />
+        <path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0" />
+        <path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5" />
+    </DefaultIcon>
+);
+
+/** 📋 クリップボード */
+export const IconClipboard: React.FC<IconProps> = (props) => (
+    <DefaultIcon {...props}>
+        <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+        <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+    </DefaultIcon>
+);
+
+/** ⚙️ 歯車（メニュー用） */
+export const IconGear: React.FC<IconProps> = (props) => (
+    <DefaultIcon {...props}>
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </DefaultIcon>
+);
+
+/** 🌊 波（デフォルトテーマ） */
+export const IconWave: React.FC<IconProps> = (props) => (
+    <DefaultIcon {...props}>
+        <path d="M2 12c2-3 4-3 6 0s4 3 6 0 4-3 6 0" />
+        <path d="M2 18c2-3 4-3 6 0s4 3 6 0 4-3 6 0" />
+    </DefaultIcon>
+);
+
+/** ✅ チェックマーク */
+export const IconCheck: React.FC<IconProps> = (props) => (
+    <DefaultIcon {...props}>
+        <polyline points="20 6 9 17 4 12" />
+    </DefaultIcon>
+);

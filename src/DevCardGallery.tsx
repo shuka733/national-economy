@@ -91,7 +91,7 @@ function TagBadge({ tag }: { tag: string }) {
     const style = colorMap[tag] ?? { bg: 'rgba(148, 163, 184, 0.1)', color: 'var(--text-dim)' };
     return (
         <span style={{
-            fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4,
+            fontSize: 'var(--fs-base)', fontWeight: 700, padding: '1px 5px', borderRadius: 4,
             background: style.bg, color: style.color, border: `1px solid ${style.color}40`,
             textTransform: 'uppercase' as const, letterSpacing: '0.5px',
         }}>
@@ -131,7 +131,7 @@ function CardPreview({ card, showImage }: { card: CardDef; showImage: boolean })
             {showImage && (
                 <div style={{
                     width: '100%',
-                    aspectRatio: '2/3',
+                    aspectRatio: '63/88',
                     background: hasImage ? 'transparent' : 'rgba(255,255,255,0.03)',
                     display: 'flex',
                     alignItems: 'center',
@@ -154,7 +154,7 @@ function CardPreview({ card, showImage }: { card: CardDef; showImage: boolean })
                             }}
                         />
                     ) : (
-                        <span style={{ color: 'rgba(255,255,255,0.15)', fontSize: 10, textAlign: 'center', padding: 8 }}>
+                        <span style={{ color: 'rgba(255,255,255,0.15)', fontSize: 'var(--fs-lg)', textAlign: 'center', padding: 8 }}>
                             {card.id}<br />⚠️ 画像未設定
                         </span>
                     )}
@@ -164,25 +164,25 @@ function CardPreview({ card, showImage }: { card: CardDef; showImage: boolean })
             {/* カード情報 */}
             <div style={{ padding: '10px 10px 12px', flex: 1 }}>
                 {/* カード名 */}
-                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4, lineHeight: 1.2 }}>
+                <div style={{ fontSize: 'var(--fs-xl3)', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4, lineHeight: 1.2 }}>
                     {card.name}
                 </div>
 
                 {/* コスト・VP */}
                 <div style={{ display: 'flex', gap: 8, marginBottom: 6, alignItems: 'center' }}>
                     <span style={{
-                        fontSize: 11, fontWeight: 700, padding: '1px 6px', borderRadius: 4,
+                        fontSize: 'var(--fs-xl)', fontWeight: 700, padding: '1px 6px', borderRadius: 4,
                         background: 'rgba(252, 194, 0, 0.15)', color: 'var(--gold)',
                     }}>
                         💰 {card.cost}
                     </span>
                     <span style={{
-                        fontSize: 11, fontWeight: 700, padding: '1px 6px', borderRadius: 4,
+                        fontSize: 'var(--fs-xl)', fontWeight: 700, padding: '1px 6px', borderRadius: 4,
                         background: 'rgba(99, 102, 241, 0.15)', color: '#818cf8',
                     }}>
                         🏆 {card.vp}VP
                     </span>
-                    <span style={{ fontSize: 10, color: 'var(--text-dim)' }}>
+                    <span style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-dim)' }}>
                         ×{card.copies}
                     </span>
                 </div>
@@ -197,12 +197,12 @@ function CardPreview({ card, showImage }: { card: CardDef; showImage: boolean })
                 {/* 特殊フラグ */}
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' as const, marginBottom: 6 }}>
                     {card.unsellable && (
-                        <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 4, background: 'rgba(239, 68, 68, 0.1)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
+                        <span style={{ fontSize: 'var(--fs-base)', padding: '1px 5px', borderRadius: 4, background: 'rgba(239, 68, 68, 0.1)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
                             売却不可
                         </span>
                     )}
                     {card.consumeOnUse && (
-                        <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 4, background: 'rgba(251, 146, 60, 0.1)', color: '#fb923c', border: '1px solid rgba(251, 146, 60, 0.3)' }}>
+                        <span style={{ fontSize: 'var(--fs-base)', padding: '1px 5px', borderRadius: 4, background: 'rgba(251, 146, 60, 0.1)', color: '#fb923c', border: '1px solid rgba(251, 146, 60, 0.3)' }}>
                             使い捨て
                         </span>
                     )}
@@ -210,14 +210,14 @@ function CardPreview({ card, showImage }: { card: CardDef; showImage: boolean })
 
                 {/* 効果テキスト */}
                 <div style={{
-                    fontSize: 10, color: 'var(--text-secondary)', lineHeight: 1.4,
+                    fontSize: 'var(--fs-lg)', color: 'var(--text-secondary)', lineHeight: 1.4,
                     borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: 6, marginTop: 4,
                 }}>
                     {card.effectText}
                 </div>
 
                 {/* カードID（開発者用） */}
-                <div style={{ marginTop: 6, fontSize: 9, color: 'rgba(255,255,255,0.2)', fontFamily: 'monospace' }}>
+                <div style={{ marginTop: 6, fontSize: 'var(--fs-base)', color: 'rgba(255,255,255,0.2)', fontFamily: 'monospace' }}>
                     ID: {card.id}
                 </div>
             </div>
@@ -269,7 +269,7 @@ export function DevCardGallery({ onBack }: { onBack: () => void }) {
     const tabStyle = (active: boolean, color: string) => ({
         padding: '6px 16px',
         borderRadius: 8,
-        fontSize: 12,
+        fontSize: 'var(--fs-xl2)',
         fontWeight: 700 as const,
         cursor: 'pointer' as const,
         border: active ? `1px solid ${color}80` : '1px solid rgba(255,255,255,0.1)',
@@ -287,16 +287,16 @@ export function DevCardGallery({ onBack }: { onBack: () => void }) {
                         <button onClick={onBack} style={{
                             background: 'none', border: '1px solid rgba(255,255,255,0.15)',
                             color: 'var(--text-dim)', cursor: 'pointer',
-                            fontSize: 12, padding: '5px 12px', borderRadius: 8,
+                            fontSize: 'var(--fs-xl2)', padding: '5px 12px', borderRadius: 8,
                             transition: 'all 0.15s',
                         }}>
                             ← 戻る
                         </button>
                         <div>
-                            <h1 style={{ fontSize: 18, fontWeight: 900, color: 'var(--gold)', margin: 0 }}>
+                            <h1 style={{ fontSize: 'var(--fs-4xl)', fontWeight: 900, color: 'var(--gold)', margin: 0 }}>
                                 🛠️ DEV — カードギャラリー
                             </h1>
-                            <p style={{ fontSize: 10, color: 'var(--text-dim)', margin: '2px 0 0' }}>
+                            <p style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-dim)', margin: '2px 0 0' }}>
                                 開発者ビュー / {cards.length} 枚表示中
                             </p>
                         </div>
@@ -306,13 +306,13 @@ export function DevCardGallery({ onBack }: { onBack: () => void }) {
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                         <button onClick={() => setShowImage(!showImage)} style={{
                             ...tabStyle(showImage, '#60a5fa'),
-                            fontSize: 11,
+                            fontSize: 'var(--fs-xl)',
                         }}>
                             {showImage ? '🖼️ 画像ON' : '🖼️ 画像OFF'}
                         </button>
                         <button onClick={() => setSortByCost(!sortByCost)} style={{
                             ...tabStyle(sortByCost, '#a78bfa'),
-                            fontSize: 11,
+                            fontSize: 'var(--fs-xl)',
                         }}>
                             {sortByCost ? '⬆️ コスト順' : '📋 元順'}
                         </button>
@@ -343,7 +343,7 @@ export function DevCardGallery({ onBack }: { onBack: () => void }) {
                             background: 'rgba(255,255,255,0.05)',
                             border: '1px solid rgba(255,255,255,0.15)',
                             borderRadius: 8, color: 'var(--text-primary)',
-                            padding: '6px 12px', fontSize: 12,
+                            padding: '6px 12px', fontSize: 'var(--fs-xl2)',
                             outline: 'none',
                         }}
                     />
@@ -367,7 +367,7 @@ export function DevCardGallery({ onBack }: { onBack: () => void }) {
                                         marginBottom: 12,
                                     }}>
                                         <span style={{
-                                            fontSize: 16, fontWeight: 900,
+                                            fontSize: 'var(--fs-3xl)', fontWeight: 900,
                                             color: 'var(--gold)',
                                             background: 'rgba(252,194,0,0.1)',
                                             border: '1px solid rgba(252,194,0,0.3)',
@@ -375,14 +375,14 @@ export function DevCardGallery({ onBack }: { onBack: () => void }) {
                                         }}>
                                             💰 コスト {cost}
                                         </span>
-                                        <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+                                        <span style={{ fontSize: 'var(--fs-xl)', color: 'var(--text-dim)' }}>
                                             {group.length}枚
                                         </span>
                                     </div>
                                     <div style={{
                                         display: 'grid',
                                         gridTemplateColumns: showImage
-                                            ? 'repeat(auto-fill, minmax(160px, 1fr))'
+                                            ? 'repeat(auto-fill, minmax(220px, 1fr))'
                                             : 'repeat(auto-fill, minmax(220px, 1fr))',
                                         gap: 12,
                                     }}>
@@ -398,7 +398,7 @@ export function DevCardGallery({ onBack }: { onBack: () => void }) {
                     <div style={{
                         display: 'grid',
                         gridTemplateColumns: showImage
-                            ? 'repeat(auto-fill, minmax(160px, 1fr))'
+                            ? 'repeat(auto-fill, minmax(220px, 1fr))'
                             : 'repeat(auto-fill, minmax(220px, 1fr))',
                         gap: 12,
                     }}>
@@ -411,14 +411,14 @@ export function DevCardGallery({ onBack }: { onBack: () => void }) {
                 {/* 検索結果ゼロ */}
                 {cards.length === 0 && (
                     <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-dim)' }}>
-                        <div style={{ fontSize: 40, marginBottom: 12 }}>🔍</div>
+                        <div style={{ fontSize: 'var(--fs-icon)', marginBottom: 12 }}>🔍</div>
                         <p>「{searchText}」に一致するカードが見つかりませんでした</p>
                     </div>
                 )}
 
                 {/* フッター */}
                 <div style={{ textAlign: 'center', marginTop: 40, paddingBottom: 32 }}>
-                    <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.15)' }}>
+                    <p style={{ fontSize: 'var(--fs-lg)', color: 'rgba(255,255,255,0.15)' }}>
                         🛠️ Developer Only — このメニューはプロダクションビルドでも表示されます（必要に応じて非表示化してください）
                     </p>
                 </div>

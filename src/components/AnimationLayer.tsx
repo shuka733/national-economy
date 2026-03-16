@@ -50,7 +50,7 @@ function RippleEffect({ ripple }: { ripple: RippleAnimation }) {
             {ripple.label && (
                 <div style={{
                     position: 'absolute', left: '50%', top: -10,
-                    transform: 'translateX(-50%)', fontSize: 14, fontWeight: 900,
+                    transform: 'translateX(-50%)', fontSize: 'var(--fs-2xl)', fontWeight: 900,
                     color: ripple.color, textShadow: `0 0 8px ${ripple.color}`,
                     animation: 'resource-float 0.8s ease-out forwards', whiteSpace: 'nowrap',
                 }}>{ripple.label}</div>
@@ -154,7 +154,7 @@ function FlyingCardElement({ card, onComplete }: { card: FlyingCard; onComplete:
             opacity: 0,
         }}>
             <span style={{
-                fontSize: 14,
+                fontSize: 'var(--fs-2xl)',
                 fontWeight: 700,
                 color: 'var(--text-dim)',
                 textAlign: 'center',

@@ -6,6 +6,10 @@
     <title>ナショナルエコノミー</title>
   </head>
   <body>
+    <!-- React描画前にテーマを即座に適用（黒フラッシュ防止） -->
+    <script>
+      (function(){var t=localStorage.getItem('ne-theme');if(t==='steampunk')document.documentElement.dataset.theme='steampunk';})();
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

@@ -5,7 +5,9 @@ import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from
 import type { BoardProps } from 'boardgame.io/react';
 import type { GameState, Card, PlayerState } from './types';
 import { getConstructionCost, isConsumable, getWagePerWorker, canBuildAnything, canBuildFarmFree, canDualConstruct, canPlaceOnBuilding, getRoundWorkplaceInfo } from './game';
-import { TIMING } from './constants';
+import { TIMING, FEATURE_DEFAULTS } from './constants';
+import type { FeatureFlags } from './constants';
+import { DebugPanel } from './components/DebugPanel';
 import { decideCPUMove } from './bots';
 import type { CPUConfig } from './App';
 import { soundManager } from './SoundManager';
@@ -13,6 +15,7 @@ import { SoundSettings } from './SoundSettings';
 import { CPUSettings } from './CPUSettings';
 import { useAnimations } from './components/AnimationLayer';
 import { BgImageOverlay } from './components/BgImageOverlay';
+import './cpu-anim.css';
 // HandScene3D は現在未使用（ポンチ絵ベースのHTMLレイアウトに置換済み）
 import {
     IconMoney, IconWorker, IconHouse, IconDeck, IconDiscard, IconLog,
@@ -49,11 +52,42 @@ function TagBadges({ defId }: { defId: string }) {
     const d = getCardDef(defId);
     return (
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4, position: 'relative', zIndex: 1 }}>
-            {d.tags.includes('farm') && <span className="tag-badge tag-farm"><TagFarm size={10} /> 農園</span>}
-            {d.tags.includes('factory') && <span className="tag-badge tag-factory"><TagFactory size={10} /> 工場</span>}
-            {d.unsellable && <span className="tag-badge tag-lock"><TagLock size={10} /> 売却不可</span>}
+            {d.tags.includes('farm') && <span className="tag-badge tag-farm"><TagFarm size={"calc(var(--fs) * 1.11)"} /> 農園</span>}
+            {d.tags.includes('factory') && <span className="tag-badge tag-factory"><TagFactory size={"calc(var(--fs) * 1.11)"} /> 工場</span>}
+            {d.unsellable && <span className="tag-badge tag-lock"><TagLock size={"calc(var(--fs) * 1.11)"} /> 売却不可</span>}
         </div>
     );
+}
+
+/** effectText内の数値・キーワードを自動ハイライトして表示（Slay the Spire風） */
+function renderEffectText(text: string): React.ReactNode {
+    if (!text) return null;
+    // 数値パターン: $15, 5枚, 3枚, +3VP, +6VP, -1, 2つ, 1人, 4枚
+    // キーワード: 消費財, 農園, 工場, 売却不可, 手札, 山札, 捨て札, 家計, 負債, 労働者
+    const pattern = /(\$\d+|\d+枚|\d+つ|\d+人|[+\-]\d+VP|\d+VP|コスト[+\-]?\d+|[※]?農園|[※]?工場|売却不可|消費財|手札|山札|捨て札|家計|負債トークン|負債|労働者|建物|建設|無料)/g;
+    const parts: React.ReactNode[] = [];
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+    let key = 0;
+    while ((match = pattern.exec(text)) !== null) {
+        if (match.index > lastIndex) {
+            parts.push(text.slice(lastIndex, match.index));
+        }
+        const m = match[0];
+        // 数値系: ゴールドで太字, キーワード系: ティール色
+        const isNumeric = /^\$?\d|^[+\-]\d|^コスト/.test(m);
+        parts.push(
+            <b key={key++} style={{
+                color: isNumeric ? 'var(--gold-light)' : 'var(--teal)',
+                fontWeight: 700,
+            }}>{m}</b>
+        );
+        lastIndex = pattern.lastIndex;
+    }
+    if (lastIndex < text.length) {
+        parts.push(text.slice(lastIndex));
+    }
+    return parts;
 }
 
 /** カード背景画像: テキストの背面に半透明で表示 */
@@ -124,7 +158,14 @@ function computeCpuStateSignature(G: GameState, activePid: string): string {
 // ============================================================
 export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<GameState> & { cpuConfig?: CPUConfig }) {
     const [showDiscard, setShowDiscard] = useState(false);
-    // 手札長押しプレビュー用
+    // NPC手札表示トグル（pid → 表示中かどうか）
+    const [npcHandVisible, setNpcHandVisible] = useState<Record<string, boolean>>({});
+    // CPUミープル飛行アニメーション中フラグ（useEffect再発火防止用）
+    const cpuAnimInProgressRef = useRef(false);
+    // フィーチャーフラグ (デバッグパネルでリアルタイム切替可能)
+    const [featureFlags, setFeatureFlags] = useState<FeatureFlags>({ ...FEATURE_DEFAULTS });
+    const [showDebugPanel, setShowDebugPanel] = useState(false);
+    // 手札長押し/ホバープレビュー用
     // プレビューデータ型: カード or 公共職場
     type PreviewData =
         | { type: 'card'; defId: string }
@@ -133,12 +174,17 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     // pressingCardIdxはuseRefで管理（再レンダリングによるonPointerLeave発火を防ぐ）
     const pressingCardIdxRef = useRef<number | null>(null);
+    // ホバープレビュー中かどうかのフラグ（閉じ方の制御用）
+    const isHoverPreviewRef = useRef(false);
+    // ホバープレビュー元カードの位置（カーソル離脱検知用）
+    const hoverCardRectRef = useRef<DOMRect | null>(null);
     const clearPreviewTimer = () => {
         if (previewTimerRef.current) { clearTimeout(previewTimerRef.current); previewTimerRef.current = null; }
     };
     // カード用プレビュー開始
     const startCardPreview = (defId: string, cardIdx: number) => {
         clearPreviewTimer();
+        isHoverPreviewRef.current = false;
         pressingCardIdxRef.current = cardIdx;
         previewTimerRef.current = setTimeout(() => {
             setPreviewData({ type: 'card', defId });
@@ -147,6 +193,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     // 公共職場用プレビュー開始
     const startWorkplacePreview = (wp: { id: string; name: string; effectText: string; multipleAllowed: boolean; fromBuildingDefId?: string }, cardIdx: number) => {
         clearPreviewTimer();
+        isHoverPreviewRef.current = false;
         pressingCardIdxRef.current = cardIdx;
         previewTimerRef.current = setTimeout(() => {
             // 売却建物（fromBuildingDefIdあり）はCardDefフォーマットで表示
@@ -157,6 +204,63 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
             }
         }, TIMING.LONG_PRESS_MS);
     };
+    // ホバーによるカードプレビュー開始（eから元カードの位置を記録）
+    const startHoverCardPreview = (defId: string, cardIdx: number, e: React.PointerEvent) => {
+        if (!featureFlags.HOVER_PREVIEW) return;
+        clearPreviewTimer();
+        // 既存のホバープレビューがあれば閉じてから新しいプレビューを開始
+        if (isHoverPreviewRef.current) {
+            isHoverPreviewRef.current = false;
+            setPreviewData(null);
+        }
+        hoverCardRectRef.current = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        pressingCardIdxRef.current = cardIdx;
+        previewTimerRef.current = setTimeout(() => {
+            isHoverPreviewRef.current = true;
+            setPreviewData({ type: 'card', defId });
+        }, TIMING.HOVER_PREVIEW_MS);
+    };
+    // ホバーによる職場プレビュー開始（eから元カードの位置を記録）
+    const startHoverWorkplacePreview = (wp: { id: string; name: string; effectText: string; multipleAllowed: boolean; fromBuildingDefId?: string }, cardIdx: number, e: React.PointerEvent) => {
+        if (!featureFlags.HOVER_PREVIEW) return;
+        clearPreviewTimer();
+        if (isHoverPreviewRef.current) {
+            isHoverPreviewRef.current = false;
+            setPreviewData(null);
+        }
+        hoverCardRectRef.current = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        pressingCardIdxRef.current = cardIdx;
+        previewTimerRef.current = setTimeout(() => {
+            isHoverPreviewRef.current = true;
+            if (wp.fromBuildingDefId) {
+                setPreviewData({ type: 'card', defId: wp.fromBuildingDefId });
+            } else {
+                setPreviewData({ type: 'workplace', wpId: wp.id, name: wp.name, effectText: wp.effectText, multipleAllowed: wp.multipleAllowed });
+            }
+        }, TIMING.HOVER_PREVIEW_MS);
+    };
+    // ホバープレビュー中にカーソルが元カード領域外に出たか判定（暗転モード用: オーバーレイがポインタイベントを受ける場合）
+    const handlePreviewPointerMove = (e: React.PointerEvent) => {
+        if (!isHoverPreviewRef.current || !hoverCardRectRef.current) return;
+        const r = hoverCardRectRef.current;
+        const margin = 20; // 少し余裕を持たせる
+        if (e.clientX < r.left - margin || e.clientX > r.right + margin ||
+            e.clientY < r.top - margin || e.clientY > r.bottom + margin) {
+            closePreview();
+        }
+    };
+    // ホバー離脱時のプレビュー終了
+    // no-darkenモード: オーバーレイがpointer-events:noneなのでカードのonPointerLeaveが正常発火→プレビューを閉じる
+    // darkenモード: オーバーレイがポインタを奪うため即発火→タイマーキャンセルのみ（handlePreviewPointerMoveで閉じる）
+    const endHoverPreview = () => {
+        clearPreviewTimer();
+        pressingCardIdxRef.current = null;
+        if (isHoverPreviewRef.current && !featureFlags.DARKEN_ON_PREVIEW) {
+            isHoverPreviewRef.current = false;
+            hoverCardRectRef.current = null;
+            setPreviewData(null);
+        }
+    };
     const endPreview = () => {
         clearPreviewTimer();
         pressingCardIdxRef.current = null;
@@ -165,7 +269,30 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     const closePreview = () => {
         clearPreviewTimer();
         pressingCardIdxRef.current = null;
+        isHoverPreviewRef.current = false;
+        hoverCardRectRef.current = null;
         setPreviewData(null);
+    };
+    // no-darkenモードのホバープレビュー中: documentクリックで閉じる
+    // （プレビューカードがpointer-events:noneのため、onClickでは閉じられない）
+    useEffect(() => {
+        if (!previewData || !isHoverPreviewRef.current || featureFlags.DARKEN_ON_PREVIEW) return;
+        const handler = () => closePreview();
+        document.addEventListener('pointerdown', handler);
+        return () => document.removeEventListener('pointerdown', handler);
+    });
+    // クリック配置モード: 職場を直接クリックするだけでワーカーを配置
+    const handleWorkplaceClickPlace = (wpId: string) => {
+        if (!featureFlags.CLICK_PLACE_WORKER) return;
+        if (rawG.phase !== 'work' || !canInteract || curPid !== myPid) return;
+        // 利用可能なワーカーがあるか確認
+        const realMyPlayer = rawG.players[myPid];
+        if (!realMyPlayer || realMyPlayer.availableWorkers <= 0) return;
+        // ドラッグ中は無視（ドラッグ操作と競合しないように）
+        if (workerDragRef.current) return;
+        soundManager.playSFX('click');
+        prepareDrawDetection();
+        moves.placeWorker(wpId);
     };
     const [showLog, setShowLog] = useState(false);
     const [muted, setMuted] = useState(soundManager.getSettings().isMuted);
@@ -182,6 +309,8 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     const prevRoundRef = useRef(rawG.round);
     const curPid = ctx.currentPlayer;
     const curIdx = parseInt(curPid);
+    // CPU対戦: 最後に手番だった人間プレイヤーIDを保持（CPUターン中のmyPid固定用）
+    const lastHumanPidRef = useRef(curPid);
 
     // プレイヤーごとのミープル色マッピング
     const PLAYER_COLORS = ['blue', 'green', 'yellow', 'purple'];
@@ -249,8 +378,17 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
 
     // ====== P2P対応 ======
     // playerIDがあればP2P（オンライン）モード、なければホットシート/CPU対戦
+    // CPU対戦モード: CPUターン中はmyPidを直前の人間プレイヤーに固定（手札丸見え防止）
+    // 全員CPUの場合は観戦モード → 従来通り手番プレイヤーに追従
+    const allCpu = !!(cpuConfig?.enabled && cpuConfig.cpuPlayers.length >= ctx.numPlayers);
+    const isCpuTurn = !!(cpuConfig?.enabled && !allCpu && cpuConfig.cpuPlayers.includes(curPid));
+    if (cpuConfig?.enabled && !cpuConfig.cpuPlayers.includes(curPid)) {
+        lastHumanPidRef.current = curPid; // 人間ターン時のみ更新
+    }
     // ドローアニメーション中はmyPidを前プレイヤーに固定（ホットシートで正しい手札を追跡するため）
-    const myPid = playerID ?? (drawAnimRef.current ? displayCurPid : curPid);
+    const myPid = playerID ?? (isCpuTurn
+        ? lastHumanPidRef.current
+        : (drawAnimRef.current ? displayCurPid : curPid));
     const isOnline = playerID !== null && playerID !== undefined;
 
     // モーダルフェーズ中の操作者判定
@@ -613,7 +751,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
             rect.left + rect.width / 2,
             rect.top + rect.height / 2,
             '',
-            'rgba(45, 212, 191, 0.6)'
+            'var(--teal-60)'
         );
         // ドロー検知準備（move前の状態保存）
         prepareDrawDetection();
@@ -629,7 +767,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
             rect.left + rect.width / 2,
             rect.top + rect.height / 2,
             '',
-            'rgba(212, 168, 83, 0.6)'
+            'var(--gold-60)'
         );
         // ドロー検知準備（move前の状態保存）
         prepareDrawDetection();
@@ -680,6 +818,8 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     const cpuMoveSignatureRef = useRef<string>('');
     // フォールバック: signatureが一定時間変わらない場合にリセットするためのタイマー
     const cpuStuckTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // CPUミープル飛行完了待ちタイマー（cleanup用）
+    const cpuAnimTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     useEffect(() => {
         if (!cpuConfig?.enabled) return;
@@ -687,6 +827,8 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
         if (showCpuSettings) return; // 設定中は停止
         // ドローアニメーション中はCPU moveをブロック（Refで即時参照）
         if (drawAnimRef.current) return;
+        // ミープル飛行アニメーション中はmoveをブロック（二重発火防止）
+        if (cpuAnimInProgressRef.current) return;
 
         // CPU自動プレイ時の給料日・精算: 各CPUプレイヤーの未確認分を処理
         let activePid = curPid;
@@ -724,7 +866,76 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                 if (moveFn) {
                     // move発行前にsignatureを記録（P2P重複防止用）
                     cpuMoveSignatureRef.current = sig;
-                    moveFn(...action.args);
+
+                    // CPUワーカー配置: Web Animations APIでミープルが飛んでいくアニメーション
+                    if (action.moveName === 'placeWorker' || action.moveName === 'placeWorkerOnBuilding') {
+                        const targetEl = action.moveName === 'placeWorker'
+                            ? document.querySelector(`[data-workplace-id="${action.args[0]}"]`) as HTMLElement | null
+                            : document.querySelector(`[data-building-uid="${action.args[0]}"]`) as HTMLElement | null;
+                        // 開始位置: 利用可能なワーカートークンを掴む（なければプレイヤーエリアから）
+                        const workerToken = document.querySelector(`[data-player-id="${activePid}"] .worker-token:not(.used)`) as HTMLElement | null;
+                        const startEl = workerToken || document.querySelector(`[data-player-id="${activePid}"]`) as HTMLElement | null;
+
+                        if (targetEl && startEl) {
+                            const startRect = startEl.getBoundingClientRect();
+                            const targetRect = targetEl.getBoundingClientRect();
+                            const pidIdx = parseInt(activePid);
+
+                            // アニメーション中フラグON（useEffect再発火防止）
+                            cpuAnimInProgressRef.current = true;
+
+                            // DOM直接操作でミープル要素を作成（Reactを経由しない）
+                            const meeple = document.createElement('img');
+                            meeple.src = getMeepleSrc(pidIdx);
+                            meeple.style.cssText = 'position:fixed;left:0;top:0;width:32px;height:32px;z-index:300;pointer-events:none;border-radius:50%;';
+                            document.body.appendChild(meeple);
+
+                            const sx = startRect.left + startRect.width / 2 - 16;
+                            const sy = startRect.top + startRect.height / 2 - 16;
+                            const ex = targetRect.left + targetRect.width / 2 - 16;
+                            const ey = targetRect.top + targetRect.height / 2 - 16;
+
+                            // 持ち上げ時にclick SE
+                            soundManager.playSFX('click');
+
+                            // Web Animations API: GPUアクセラレーションで滑らか60FPS
+                            const anim = meeple.animate([
+                                {
+                                    transform: `translate(${sx}px, ${sy}px) scale(0.7)`,
+                                    filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))',
+                                },
+                                {
+                                    transform: `translate(${ex}px, ${ey}px) scale(1.1)`,
+                                    filter: 'drop-shadow(0 6px 16px rgba(0,0,0,0.5)) drop-shadow(0 0 12px var(--teal-40))',
+                                },
+                            ], {
+                                duration: 600,
+                                easing: 'cubic-bezier(0.34, 1.56, 0.64, 1)',
+                                fill: 'forwards',
+                            });
+
+                            anim.onfinish = () => {
+                                // 着地: リップル + move実行
+                                const rippleColor = action.moveName === 'placeWorker'
+                                    ? 'var(--teal-60)'
+                                    : 'var(--gold-60)';
+                                triggerRipple(
+                                    targetRect.left + targetRect.width / 2,
+                                    targetRect.top + targetRect.height / 2,
+                                    '', rippleColor
+                                );
+                                meeple.remove();
+                                cpuAnimInProgressRef.current = false;
+                                moveFn(...action.args);
+                            };
+                        } else {
+                            moveFn(...action.args);
+                        }
+                    } else {
+                        // その他のアクション: 即座実行
+                        soundManager.playSFX('click');
+                        moveFn(...action.args);
+                    }
                 }
             }
         }, delay);
@@ -830,10 +1041,10 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
         return (
             <div className="game-bg" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', padding: 16 }}>
                 <div className="glass-card animate-slide-up" style={{ padding: 40, maxWidth: 420, width: '100%', textAlign: 'center' }}>
-                    <div style={{ fontSize: 48, marginBottom: 16, animation: 'pulse 2s ease-in-out infinite' }}>⏳</div>
-                    <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--gold)', marginBottom: 8 }}>P{G.activePlayer + 1} が操作中...</h2>
+                    <div style={{ fontSize: 'var(--fs-icon)', marginBottom: 16, animation: 'pulse 2s ease-in-out infinite' }}>⏳</div>
+                    <h2 style={{ fontSize: 'var(--fs-4xl)', fontWeight: 700, color: 'var(--gold)', marginBottom: 8 }}>P{G.activePlayer + 1} が操作中...</h2>
                     <p style={{ color: 'var(--text-secondary)', marginBottom: 4 }}>{phaseLabels[G.phase] || G.phase}を行っています</p>
-                    <p style={{ color: 'var(--text-dim)', fontSize: 12, marginTop: 16 }}>しばらくお待ちください</p>
+                    <p style={{ color: 'var(--text-dim)', fontSize: 'var(--fs-xl2)', marginTop: 16 }}>しばらくお待ちください</p>
                 </div>
             </div>
         );
@@ -900,8 +1111,34 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                     alt=""
                 />
             )}
-            {/* 長押しプレビューオーバーレイ（カード / 公共職場） */}
+            {/* CPUミープル飛行アニメーションはWeb Animations APIでDOM直接操作（React外） */}
+            {/* 長押し/ホバープレビューオーバーレイ（カード / 公共職場） */}
             {previewData && (() => {
+                // ホバープレビュー時の位置計算（元カードの上方向に表示、上にスペースなければ下方向）
+                const hoverPos = isHoverPreviewRef.current && hoverCardRectRef.current ? (() => {
+                    const r = hoverCardRectRef.current!;
+                    const pw = 280; // プレビュー幅（CSSのcard-preview-cardと一致）
+                    const ph = 420; // プレビュー概算高さ（画像+テキスト+タグの全体）
+                    const gap = 4;  // カードとプレビューの隙間（近接表示）
+                    // 水平位置: カード中央に揃え、画面端からはみ出さないようクランプ
+                    let left = r.left + (r.width - pw) / 2;
+                    left = Math.max(8, Math.min(left, window.innerWidth - pw - 8));
+                    // 垂直位置: 下方向優先（カードの下に表示）、下にスペースなければ上方向
+                    const spaceBelow = window.innerHeight - r.bottom;
+                    let top: number;
+                    if (spaceBelow >= ph + gap) {
+                        top = r.bottom + gap; // 下に表示（カードに被らない）
+                    } else {
+                        // 上に表示: カードの上方向に配置し、画面上端からはみ出さないようにする
+                        // 高さ制限はCSSのmax-height: 70vhに委ねる（maxHeightのインライン指定はしない）
+                        top = r.top - ph - gap;
+                        top = Math.max(4, top);
+                    }
+                    // 上下両端のクランプ: 画面からはみ出さない
+                    top = Math.max(4, Math.min(top, window.innerHeight - ph - 4));
+                    return { position: 'fixed' as const, left, top, width: pw, zIndex: 10000 };
+                })() : null;
+
                 if (previewData.type === 'card') {
                     // カード（建物 / 売却建物）フォーマット
                     const pDef = getCardDef(previewData.defId);
@@ -909,19 +1146,43 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                     const imgSrc = pDef.image ? `${import.meta.env.BASE_URL}${pDef.image.replace(/^\//, '')}` : null;
                     const tagLabel = pDef.tags.includes('farm') ? '🌿 農場' : pDef.tags.includes('factory') ? '🏭 工場' : '🏢 施設';
                     return (
-                        <div className="card-preview-overlay" onPointerUp={closePreview} onClick={closePreview}>
-                            <div className="card-preview-card">
+                        <div className={`card-preview-overlay${featureFlags.DARKEN_ON_PREVIEW ? '' : ' no-darken'}`} onPointerUp={closePreview} onClick={closePreview} onPointerMove={handlePreviewPointerMove}>
+                            <div className="card-preview-card" style={hoverPos || undefined}>
                                 <div className="card-preview-image">
                                     {imgSrc && <img src={imgSrc} alt={pDef.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
                                 </div>
                                 <div className="card-preview-info">
-                                    <div style={{ fontWeight: 700, fontSize: 18, color: 'var(--text-primary)', marginBottom: 4 }}>{pDef.name}</div>
-                                    <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>{tagLabel}</div>
-                                    <div style={{ display: 'flex', gap: 16, marginBottom: 8 }}>
-                                        <span style={{ fontSize: 14, color: 'var(--text-dim)', fontWeight: 600 }}>コスト: <b style={{ color: 'var(--gold-light)' }}>C{pDef.cost}</b></span>
-                                        <span style={{ fontSize: 14, color: 'var(--text-dim)', fontWeight: 600 }}>得点: <b style={{ color: 'var(--gold-light)' }}>{pDef.vp}VP</b></span>
+                                    {/* ヘッダー: カード名 + タイプ */}
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-2)' }}>
+                                        <div style={{ fontWeight: 900, fontSize: 'var(--fs-4xl)', color: 'var(--text-primary)', letterSpacing: '0.5px' }}>{pDef.name}</div>
+                                        <span style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-dim)', fontWeight: 500 }}>{tagLabel}</span>
                                     </div>
-                                    {pDef.effectText && <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5 }}>{pDef.effectText}</div>}
+                                    {/* スタッツ行: コスト / VP */}
+                                    <div style={{ display: 'flex', gap: 'var(--sp-4)', marginBottom: 'var(--sp-3)', alignItems: 'center' }}>
+                                        <span className="card-preview-stat">
+                                            <span style={{ color: 'var(--gold-light)', fontSize: 'var(--fs-3xl)', fontWeight: 800 }}>C{pDef.cost}</span>
+                                        </span>
+                                        <span className="card-preview-stat">
+                                            <span style={{ color: 'var(--gold-light)', fontSize: 'var(--fs-3xl)', fontWeight: 800 }}>{pDef.vp}VP</span>
+                                        </span>
+                                    </div>
+                                    {/* セパレーター */}
+                                    <div className="card-preview-separator" />
+                                    {/* 効果テキスト: ハイライト付き */}
+                                    {pDef.effectText && (
+                                        <div className="card-preview-effect">
+                                            {renderEffectText(pDef.effectText)}
+                                        </div>
+                                    )}
+                                    {/* タグバッジ */}
+                                    {(pDef.tags.length > 0 || pDef.unsellable) && (
+                                        <div style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap', marginTop: 'var(--sp-3)' }}>
+                                            {pDef.tags.includes('farm') && <span className="tag-badge tag-farm"><TagFarm size={"calc(var(--fs) * 1.33)"} /> 農園</span>}
+                                            {pDef.tags.includes('factory') && <span className="tag-badge tag-factory"><TagFactory size={"calc(var(--fs) * 1.33)"} /> 工場</span>}
+                                            {pDef.unsellable && <span className="tag-badge tag-lock"><TagLock size={"calc(var(--fs) * 1.33)"} /> 売却不可</span>}
+                                            {pDef.consumeOnUse && <span className="tag-badge" style={{ color: 'var(--red)', background: 'var(--red-15)' }}>🔥 使い捨て</span>}
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -931,22 +1192,38 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                     const wpImg = getWorkplaceImage(previewData.wpId);
                     const wpImgSrc = wpImg ? `${import.meta.env.BASE_URL}${wpImg}` : null;
                     return (
-                        <div className="card-preview-overlay" onPointerUp={closePreview} onClick={closePreview}>
-                            <div className="card-preview-card">
+                        <div className={`card-preview-overlay${featureFlags.DARKEN_ON_PREVIEW ? '' : ' no-darken'}`} onPointerUp={closePreview} onClick={closePreview} onPointerMove={handlePreviewPointerMove}>
+                            <div className="card-preview-card" style={hoverPos || undefined}>
                                 <div className="card-preview-image">
                                     {wpImgSrc && <img src={wpImgSrc} alt={previewData.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
                                 </div>
                                 <div className="card-preview-info">
-                                    <div style={{ fontWeight: 700, fontSize: 18, color: 'var(--text-primary)', marginBottom: 4 }}>{previewData.name}</div>
-                                    <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>🏛️ 公共職場</div>
-                                    {previewData.effectText && <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5 }}>{previewData.effectText}</div>}
-                                    {previewData.multipleAllowed && <div style={{ fontSize: 12, color: 'var(--purple)', marginTop: 6, fontWeight: 600 }}>∞ 複数配置可能</div>}
+                                    {/* ヘッダー: 職場名 + タイプ */}
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-2)' }}>
+                                        <div style={{ fontWeight: 900, fontSize: 'var(--fs-4xl)', color: 'var(--text-primary)', letterSpacing: '0.5px' }}>{previewData.name}</div>
+                                        <span style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-dim)', fontWeight: 500 }}>🏛️ 公共職場</span>
+                                    </div>
+                                    {/* セパレーター */}
+                                    <div className="card-preview-separator" />
+                                    {/* 効果テキスト: ハイライト付き */}
+                                    {previewData.effectText && (
+                                        <div className="card-preview-effect">
+                                            {renderEffectText(previewData.effectText)}
+                                        </div>
+                                    )}
+                                    {/* 特殊ルール */}
+                                    {previewData.multipleAllowed && (
+                                        <div style={{ display: 'flex', gap: 'var(--sp-2)', marginTop: 'var(--sp-3)' }}>
+                                            <span className="tag-badge" style={{ color: 'var(--purple)', background: 'rgba(167,139,250,0.15)' }}>∞ 複数配置可能</span>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>
                     );
                 }
             })()}
+            {showDiscard && <DiscardPileModal discard={G.discard} onClose={() => setShowDiscard(false)} />}
             <div className="game-scaler">
                 {/* ラウンドアナウンスオーバーレイ */}
                 {roundAnnounce !== null && (
@@ -956,33 +1233,37 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                 )}
                 {/* ====== ヘッダー ====== */}
                 <div className="game-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 12px', borderRadius: 6 }}>
-                    <h1 style={{ fontSize: 13, fontWeight: 900, color: 'var(--gold)', margin: 0, display: 'flex', alignItems: 'center', gap: 6, letterSpacing: '1px' }}>
-                        <IconHammer size={14} color="var(--gold)" /> NATIONAL ECONOMY
+                    <h1 style={{ fontSize: 'var(--fs-xl3)', fontWeight: 900, color: 'var(--gold)', margin: 0, display: 'flex', alignItems: 'center', gap: 6, letterSpacing: '1px' }}>
+                        <IconHammer size={"calc(var(--fs) * 1.56)"} color="var(--gold)" /> NATIONAL ECONOMY
                     </h1>
                     <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
-                        <span className="stat-badge"><span style={{ color: 'var(--text-dim)', fontSize: 8, fontWeight: 700 }}>ROUND</span><b style={{ color: 'var(--blue)', fontSize: 12 }}>{G.round}</b><span style={{ color: 'var(--text-dim)' }}>/9</span></span>
-                        <span className="stat-badge"><IconDeck size={10} color="var(--purple)" /><b style={{ color: 'var(--purple)', fontSize: 10 }}>{G.deck.length}</b></span>
-                        <button onClick={() => { soundManager.playSFX('click'); setShowDiscard(!showDiscard); }} className="stat-badge" style={{ cursor: 'pointer', border: '1px solid rgba(251, 146, 60, 0.15)' }}>
-                            <IconDiscard size={10} color="var(--orange)" /><b style={{ color: 'var(--orange)', fontSize: 10 }}>{G.discard.length}</b>
+                        <span className="stat-badge"><span style={{ color: 'var(--text-dim)', fontSize: 'var(--fs-md)', fontWeight: 700 }}>ROUND</span><b style={{ color: 'var(--blue)', fontSize: 'var(--fs-xl2)' }}>{G.round}</b><span style={{ color: 'var(--text-dim)' }}>/9</span></span>
+                        <span className="stat-badge"><IconDeck size={"calc(var(--fs) * 1.11)"} color="var(--purple)" /><b style={{ color: 'var(--purple)', fontSize: 'var(--fs-lg)' }}>{G.deck.length}</b></span>
+                        <button onClick={() => { soundManager.playSFX('click'); setShowDiscard(!showDiscard); }} className="stat-badge" style={{ cursor: 'pointer', border: '1px solid var(--glass-border)' }}>
+                            <IconDiscard size={"calc(var(--fs) * 1.11)"} color="var(--orange)" /><b style={{ color: 'var(--orange)', fontSize: 'var(--fs-lg)' }}>{G.discard.length}</b>
                         </button>
                         <button onClick={() => { soundManager.playSFX('click'); setShowLog(!showLog); }} className="stat-badge" style={{ cursor: 'pointer', border: '1px solid rgba(99, 102, 241, 0.15)' }}>
-                            <IconLog size={10} color="#818cf8" /><b style={{ color: '#818cf8', fontSize: 10 }}>{G.log.length}</b>
+                            <IconLog size={"calc(var(--fs) * 1.11)"} color="#818cf8" /><b style={{ color: '#818cf8', fontSize: 'var(--fs-lg)' }}>{G.log.length}</b>
                         </button>
                         <button onClick={() => { soundManager.playSFX('click'); setShowSettings(true); }} className="stat-badge" style={{ cursor: 'pointer', padding: '3px 6px' }} title="音量設定">
-                            {muted ? <IconSoundOff size={12} /> : <IconSoundOn size={12} />}
+                            {muted ? <IconSoundOff size={"calc(var(--fs) * 1.33)"} /> : <IconSoundOn size={"calc(var(--fs) * 1.33)"} />}
                         </button>
                         {cpuConfig?.enabled && (
                             <button onClick={() => { soundManager.playSFX('click'); setShowCpuSettings(true); }} className="stat-badge" style={{ cursor: 'pointer', padding: '3px 6px' }} title="CPU設定">
-                                <IconRobot size={12} />
+                                <IconRobot size={"calc(var(--fs) * 1.33)"} />
                             </button>
                         )}
+                        <button onClick={() => { soundManager.playSFX('click'); setShowDebugPanel(!showDebugPanel); }} className="stat-badge" style={{ cursor: 'pointer', padding: '3px 6px', border: showDebugPanel ? '1px solid rgba(212,168,83,0.4)' : undefined }} title="デバッグパネル">
+                            <span style={{ fontSize: 'var(--fs-xl2)' }}>🔧</span>
+                        </button>
                     </div>
                 </div>
 
                 {/* 設定・モーダル系 */}
                 {showSettings && <SoundSettings onClose={() => { setShowSettings(false); setMuted(soundManager.getSettings().isMuted); }} />}
                 {showCpuSettings && <CPUSettings onClose={() => setShowCpuSettings(false)} />}
-                {showDiscard && <DiscardPileModal discard={G.discard} onClose={() => setShowDiscard(false)} />}
+                {showDebugPanel && <DebugPanel features={featureFlags} onFeaturesChange={setFeatureFlags} onClose={() => setShowDebugPanel(false)} />}
+
                 {showLog && <LogModal log={G.log} onClose={() => setShowLog(false)} />}
 
                 {/* 建設キャンセルバーはインフォバーに移動（項目5） */}
@@ -993,12 +1274,30 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                     {/* ==== 左列: P2/P3/P4 + ターン + ログ ==== */}
                     <div className="area-opponents">
                         {/* ターン表示 */}
-                        <div className="turn-bar" style={{ marginBottom: 2, fontSize: 10 }}>
-                            {cpuConfig?.enabled && cpuConfig.cpuPlayers.includes(displayCurPid) ? <IconRobot size={12} /> : <IconPlayer size={12} />}
+                        <div className="turn-bar" style={{ marginBottom: 2, fontSize: 'var(--fs-lg)' }}>
+                            {cpuConfig?.enabled && cpuConfig.cpuPlayers.includes(displayCurPid) ? <IconRobot size={"calc(var(--fs) * 1.33)"} /> : <IconPlayer size={"calc(var(--fs) * 1.33)"} />}
                             <span><b style={{ color: 'var(--gold-light)' }}>P{displayCurIdx + 1}</b> のターン</span>
                             {cpuConfig?.enabled && cpuConfig.cpuPlayers.includes(displayCurPid) && (
-                                <span style={{ marginLeft: 4, fontSize: 8, color: 'var(--text-dim)', background: 'rgba(160, 120, 48, 0.15)', padding: '1px 4px', borderRadius: 3, display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-                                    <span className="animate-pulse">●</span> Thinking…
+                                <span style={{
+                                    marginLeft: 4, fontSize: 'var(--fs-md)', color: 'var(--teal)',
+                                    background: 'linear-gradient(135deg, var(--teal-15), rgba(96, 165, 250, 0.08))',
+                                    padding: '2px 6px', borderRadius: 4,
+                                    border: '1px solid var(--teal-15)',
+                                    display: 'inline-flex', alignItems: 'center', gap: 3,
+                                }}>
+                                    <span style={{
+                                        display: 'inline-flex', gap: 2, alignItems: 'center',
+                                    }}>
+                                        {[0, 1, 2].map(i => (
+                                            <span key={i} style={{
+                                                width: 3, height: 3, borderRadius: '50%',
+                                                background: 'var(--teal)',
+                                                animation: `cpuThinkDot 1.2s ease-in-out ${i * 0.2}s infinite`,
+                                                opacity: 0.4,
+                                            }} />
+                                        ))}
+                                    </span>
+                                    <span style={{ letterSpacing: '0.5px' }}>Thinking</span>
                                 </span>
                             )}
                         </div>
@@ -1010,34 +1309,83 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                 const p = G.players[pid];
                                 const active = pid === displayCurPid;
                                 const isCpu = cpuConfig?.enabled && cpuConfig.cpuPlayers.includes(pid);
+                                const isNpcHandShown = !!(isCpu && npcHandVisible[pid]);
+                                // CPUミープル飛行アニメーション用: opponent-cardにプレイヤーIDを付与
                                 return (
-                                    <div key={pid} className={`opponent-card ${active ? 'opponent-card-active' : 'opponent-card-inactive'}`}>
+                                    <div key={pid} data-player-id={pid} className={`opponent-card ${active ? 'opponent-card-active' : 'opponent-card-inactive'}`}>
                                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2, flexShrink: 0 }}>
-                                            <span style={{ fontWeight: 700, fontSize: 10, color: active ? 'var(--teal)' : 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 3 }}>
-                                                {isCpu ? <IconRobot size={10} /> : <IconPlayer size={10} />}
+                                            <span style={{ fontWeight: 700, fontSize: 'var(--fs-lg)', color: active ? 'var(--teal)' : 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 3 }}>
+                                                {isCpu ? <IconRobot size={"calc(var(--fs) * 1.11)"} /> : <IconPlayer size={"calc(var(--fs) * 1.11)"} />}
                                                 P{i + 1}
-                                                {i === G.startPlayer && <span style={{ color: 'var(--orange)', fontSize: 8 }}>★</span>}
+                                                {i === G.startPlayer && <span style={{ color: 'var(--orange)', fontSize: 'var(--fs-md)' }}>★</span>}
                                             </span>
-                                            {/* ステータスバッジ */}
-                                            <div style={{ display: 'flex', gap: 3 }}>
-                                                <span className="stat-badge" style={{ fontSize: 8, padding: '1px 4px' }}>
-                                                    <IconMoney size={8} color="var(--gold-light)" /><b style={{ color: 'var(--gold-light)' }}>${p.money}</b>
+                                            {/* ステータスバッジ + NPC手札トグル */}
+                                            <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+                                                <span className="stat-badge" style={{ fontSize: 'var(--fs-md)', padding: '1px 4px' }}>
+                                                    <IconMoney size={"calc(var(--fs) * 0.89)"} color="var(--gold-light)" /><b style={{ color: 'var(--gold-light)' }}>${p.money}</b>
                                                 </span>
-                                                <span className="stat-badge" style={{ fontSize: 8, padding: '1px 4px' }}>
-                                                    <IconWorker size={8} color="var(--blue)" /><b style={{ color: 'var(--blue)' }}>{p.availableWorkers}/{p.workers}</b>
+                                                <span className="stat-badge" style={{ fontSize: 'var(--fs-md)', padding: '1px 4px' }}>
+                                                    <IconWorker size={"calc(var(--fs) * 0.89)"} color="var(--blue)" /><b style={{ color: 'var(--blue)' }}>{p.availableWorkers}/{p.workers}</b>
                                                 </span>
-                                                {p.unpaidDebts > 0 && <span className="stat-badge" style={{ fontSize: 8, padding: '1px 4px', borderColor: 'rgba(248,113,113,0.3)' }}><b style={{ color: 'var(--red)' }}>Debt {p.unpaidDebts}</b></span>}
+                                                {p.unpaidDebts > 0 && <span className="stat-badge" style={{ fontSize: 'var(--fs-md)', padding: '1px 4px', borderColor: 'var(--red-30)' }}><b style={{ color: 'var(--red)' }}>Debt {p.unpaidDebts}</b></span>}
+                                                {/* NPC手札トグルボタン（CPUプレイヤーのみ表示） */}
+                                                {isCpu && (
+                                                    <button
+                                                        onClick={() => { soundManager.playSFX('click'); setNpcHandVisible(prev => ({ ...prev, [pid]: !prev[pid] })); }}
+                                                        title={isNpcHandShown ? 'NPC手札を隠す' : 'NPC手札を表示'}
+                                                        style={{
+                                                            background: isNpcHandShown ? 'var(--teal-15)' : 'var(--glass-bg)',
+                                                            border: `1px solid ${isNpcHandShown ? 'var(--teal-40)' : 'var(--glass-border)'}`,
+                                                            borderRadius: 4,
+                                                            padding: '1px 4px',
+                                                            cursor: 'pointer',
+                                                            fontSize: 'var(--fs-lg)',
+                                                            lineHeight: 1,
+                                                            transition: 'all 0.2s ease',
+                                                        }}
+                                                    >
+                                                        {isNpcHandShown ? '👁️' : '🙈'}
+                                                    </button>
+                                                )}
                                             </div>
                                         </div>
 
-                                        {/* 手札（ミニ直線配置） */}
+                                        {/* 手札（ミニ直線配置）: NPC手札トグルで表示切替 */}
                                         <div className="opponent-hand-fan" style={{ display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
-                                            {Array.from({ length: p.hand.length }).map((_, ci) => (
-                                                <div key={ci} className="opponent-hand-card" style={{
-                                                    marginLeft: ci === 0 ? 0 : getCardOverlapMargin(p.hand.length, false),
-                                                    zIndex: ci + 1,
-                                                }} />
-                                            ))}
+                                            {isNpcHandShown
+                                                ? p.hand.map((c, ci) => (
+                                                    <div key={c.uid}
+                                                        onPointerDown={() => { if (!isHidden(c)) startCardPreview(c.defId, 4000 + i * 100 + ci); }}
+                                                        onPointerUp={endPreview}
+                                                        onPointerLeave={() => { endPreview(); endHoverPreview(); }}
+                                                        onPointerEnter={(e) => { if (!isHidden(c)) startHoverCardPreview(c.defId, 4000 + i * 100 + ci, e); }}
+                                                        className="opponent-hand-card"
+                                                        style={{
+                                                            marginLeft: ci === 0 ? 0 : getCardOverlapMargin(p.hand.length, false),
+                                                            zIndex: ci + 1,
+                                                            background: isConsumable(c)
+                                                                ? 'linear-gradient(135deg, rgba(251,146,60,0.25), var(--bg-secondary))'
+                                                                : 'linear-gradient(135deg, var(--teal-15), rgba(30,30,40,0.9))',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            justifyContent: 'center',
+                                                            padding: '1px',
+                                                            overflow: 'hidden',
+                                                        }}>
+                                                        {!isHidden(c) && (
+                                                            <div style={{ fontSize: 'var(--fs-xs)', fontWeight: 700, color: 'var(--text-primary)', textAlign: 'center', lineHeight: 1.1, wordBreak: 'break-all' }}>
+                                                                {cName(c.defId)}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                ))
+                                                : Array.from({ length: p.hand.length }).map((_, ci) => (
+                                                    <div key={ci} className="opponent-hand-card" style={{
+                                                        marginLeft: ci === 0 ? 0 : getCardOverlapMargin(p.hand.length, false),
+                                                        zIndex: ci + 1,
+                                                    }} />
+                                                ))
+                                            }
                                         </div>
 
                                         {/* 建物（カードスプライト・水平スクロール） */}
@@ -1045,22 +1393,24 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                             <div className="opponent-buildings-scroll">
                                                 {p.buildings.map((b, bi) => {
                                                     const def = getCardDef(b.card.defId);
-                                                    const borderColor = def.tags.includes('farm') ? 'rgba(74, 222, 128, 0.3)' : def.tags.includes('factory') ? 'rgba(251, 146, 60, 0.3)' : 'rgba(96, 165, 250, 0.15)';
+                                                    const borderColor = def.tags.includes('farm') ? 'var(--tag-farm-bg)' : def.tags.includes('factory') ? 'var(--tag-factory-bg)' : 'var(--glass-border)';
                                                     return (
                                                         <div key={bi}
+                                                            data-building-uid={b.card.uid}
                                                             onPointerDown={() => { startCardPreview(b.card.defId, 3000 + i * 100 + bi); }}
                                                             onPointerUp={endPreview}
-                                                            onPointerLeave={endPreview}
+                                                            onPointerLeave={() => { endPreview(); endHoverPreview(); }}
+                                                            onPointerEnter={(e) => { startHoverCardPreview(b.card.defId, 3000 + i * 100 + bi, e); }}
                                                             className={`opponent-building-sprite ${b.workerPlaced ? 'building-placed' : ''}`}
                                                             style={{ borderColor }}>
                                                             <CardBgImage defId={b.card.defId} />
-                                                            <div style={{ fontWeight: 700, fontSize: 8, lineHeight: 1.2, color: b.workerPlaced ? 'var(--text-dim)' : 'var(--text-primary)', position: 'relative', zIndex: 1 }}>{def.name}</div>
+                                                            <div style={{ fontWeight: 700, fontSize: 'var(--fs-md)', lineHeight: 1.2, color: b.workerPlaced ? 'var(--text-dim)' : 'var(--text-primary)', position: 'relative', zIndex: 1 }}>{def.name}</div>
                                                             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2, position: 'relative', zIndex: 1 }}>
-                                                                <span style={{ fontSize: 7, color: 'var(--text-dim)', fontWeight: 600 }}>C{def.cost}</span>
-                                                                <span style={{ fontSize: 7, color: 'var(--gold-dim)', fontWeight: 600 }}>{def.vp}VP</span>
+                                                                <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', fontWeight: 600 }}>C{def.cost}</span>
+                                                                <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--gold-dim)', fontWeight: 600 }}>{def.vp}VP</span>
                                                             </div>
                                                             <TagBadges defId={b.card.defId} />
-                                                            {def.effectText && <div style={{ fontSize: 6, color: 'var(--text-dim)', marginTop: 'auto', lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{def.effectText}</div>}
+                                                            {def.effectText && <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-dim)', marginTop: 'auto', lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{def.effectText}</div>}
                                                             {b.workerPlaced && <img src={getMeepleSrc(parseInt(pid))} className="worker-on-building-icon" alt="配置済み" />}
                                                         </div>
                                                     );
@@ -1074,14 +1424,14 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
 
                         {/* コンパクトログ */}
                         <div className="inline-log" style={{ marginTop: 'auto' }}>
-                            <div style={{ fontSize: 8, color: 'var(--text-dim)', fontWeight: 700, marginBottom: 2, display: 'flex', alignItems: 'center', gap: 3 }}>
-                                <IconLog size={8} /> LOG
-                                <button onClick={() => { soundManager.playSFX('click'); setShowLog(true); }} style={{ marginLeft: 'auto', fontSize: 7, color: 'var(--text-dim)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>全件</button>
+                            <div style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-dim)', fontWeight: 700, marginBottom: 2, display: 'flex', alignItems: 'center', gap: 3 }}>
+                                <IconLog size={"calc(var(--fs) * 1.11)"} /> LOG
+                                <button onClick={() => { soundManager.playSFX('click'); setShowLog(true); }} style={{ marginLeft: 'auto', fontSize: 'var(--fs-base)', color: 'var(--text-dim)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>全件</button>
                             </div>
                             {G.log.slice(-3).reverse().map((entry, i) => (
                                 <div key={G.log.length - i}
                                     className={`log-entry ${entry.text.startsWith('===') ? 'log-entry-round' : entry.text.startsWith('---') ? 'log-entry-phase' : 'log-entry-action'}`}
-                                    style={{ fontSize: 7 }}>
+                                    style={{ fontSize: 'var(--fs-base)' }}>
                                     {entry.text}
                                 </div>
                             ))}
@@ -1089,24 +1439,24 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                     </div>
 
                     {/* ==== 右列: 公共の場 ==== */}
-                    <div className="area-public" style={{ border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: 4 }}>
+                    <div className="area-public" style={{ border: '1px solid var(--glass-border)', borderRadius: 4 }}>
                         {/* 家計 */}
                         <div className={`household-box ${wagePressure ? 'wage-pressure' : ''}`}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8, zIndex: 1 }}>
-                                <IconHouse size={16} color={wagePressure ? 'var(--red)' : 'var(--teal)'} />
+                                <IconHouse size={"calc(var(--fs) * 1.78)"} color={wagePressure ? 'var(--red)' : 'var(--teal)'} />
                                 <div>
-                                    <div style={{ fontSize: 8, color: 'var(--text-dim)', fontWeight: 600 }}>HOUSEHOLD</div>
-                                    <div style={{ fontSize: 18, fontWeight: 900, color: wagePressure ? 'var(--red)' : 'var(--green)', lineHeight: 1 }}>${G.household}</div>
+                                    <div style={{ fontSize: 'var(--fs-md)', color: 'var(--text-dim)', fontWeight: 600 }}>HOUSEHOLD</div>
+                                    <div style={{ fontSize: 'var(--fs-4xl)', fontWeight: 900, color: wagePressure ? 'var(--red)' : 'var(--green)', lineHeight: 1 }}>${G.household}</div>
                                 </div>
                             </div>
                             <div style={{ display: 'flex', gap: 10, zIndex: 1 }}>
                                 <div style={{ textAlign: 'center' }}>
-                                    <div style={{ fontSize: 7, color: 'var(--text-dim)' }}>WAGE</div>
-                                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--teal)' }}>${wage}</div>
+                                    <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)' }}>WAGE</div>
+                                    <div style={{ fontSize: 'var(--fs-xl3)', fontWeight: 700, color: 'var(--teal)' }}>${wage}</div>
                                 </div>
                                 <div style={{ textAlign: 'center' }}>
-                                    <div style={{ fontSize: 7, color: 'var(--text-dim)' }}>ROUND</div>
-                                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--blue)' }}>{G.round}/9</div>
+                                    <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)' }}>ROUND</div>
+                                    <div style={{ fontSize: 'var(--fs-xl3)', fontWeight: 700, color: 'var(--blue)' }}>{G.round}/9</div>
                                 </div>
                             </div>
                         </div>
@@ -1145,11 +1495,11 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                             {/* 裏面: 追加職場名 */}
                                                             <div className="deck-top-face round-card-back" style={{ overflow: 'hidden' }}>
                                                                 <WorkplaceBgImage wpId={getRoundWorkplaceId(r)} />
-                                                                <div style={{ fontSize: 7, color: 'var(--text-dim)', position: 'relative', zIndex: 1 }}>新職場</div>
-                                                                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--teal)', position: 'relative', zIndex: 1 }}>
+                                                                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', position: 'relative', zIndex: 1 }}>新職場</div>
+                                                                <div style={{ fontSize: 'var(--fs-lg)', fontWeight: 700, color: 'var(--teal)', position: 'relative', zIndex: 1 }}>
                                                                     {wpName || '—'}
                                                                 </div>
-                                                                <div style={{ fontSize: 7, color: 'var(--text-dim)', position: 'relative', zIndex: 1 }}>R{r}</div>
+                                                                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', position: 'relative', zIndex: 1 }}>R{r}</div>
                                                             </div>
                                                         </div>
                                                     ) : (
@@ -1217,7 +1567,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                         <div style={{
                                             position: 'absolute', top: 2, right: 2, zIndex: 20,
                                             background: 'rgba(0,0,0,0.7)', borderRadius: 4, padding: '1px 4px',
-                                            fontSize: 8, color: 'var(--text-dim)', fontWeight: 600, pointerEvents: 'none',
+                                            fontSize: 'var(--fs-md)', color: 'var(--text-dim)', fontWeight: 600, pointerEvents: 'none',
                                         }}>{G.discard.length}</div>
                                     )}
                                 </div>
@@ -1239,15 +1589,17 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                 return (
                                                     <div key={wp.id}
                                                         data-workplace-id={wp.id}
+                                                        onClick={() => handleWorkplaceClickPlace(wp.id)}
                                                         onPointerDown={() => { if (!workerDragRender) startWorkplacePreview(wp, 2000 + col); }}
                                                         onPointerUp={() => { if (!workerDragRender) endPreview(); }}
-                                                        onPointerLeave={() => { if (!workerDragRender) endPreview(); }}
+                                                        onPointerLeave={() => { if (!workerDragRender) endPreview(); endHoverPreview(); }}
+                                                        onPointerEnter={(e) => { startHoverWorkplacePreview(wp, 2000 + col, e); }}
                                                         className={`workplace-card ${ok ? 'workplace-available' : 'game-card-disabled'} ${workerDragRender?.hoveredUid === wp.id ? 'worker-drag-hover' : ''}`}
                                                         style={{ position: 'relative', overflow: 'hidden' }}>
                                                         <WorkplaceBgImage wpId={wp.id} />
-                                                        <div style={{ fontWeight: 700, fontSize: 8, color: ok ? 'var(--teal)' : 'var(--text-dim)', position: 'relative', zIndex: 1 }}>{wp.name}</div>
-                                                        <div style={{ fontSize: 7, color: 'var(--text-dim)', marginTop: 1, lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{wp.effectText}</div>
-                                                        {wp.multipleAllowed && <div style={{ fontSize: 6, color: 'var(--purple)', position: 'relative', zIndex: 1 }}>∞ 複数可</div>}
+                                                        <div style={{ fontWeight: 700, fontSize: 'var(--fs-md)', color: ok ? 'var(--teal)' : 'var(--text-dim)', position: 'relative', zIndex: 1 }}>{wp.name}</div>
+                                                        <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', marginTop: 1, lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{wp.effectText}</div>
+                                                        {wp.multipleAllowed && <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--purple)', position: 'relative', zIndex: 1 }}>∞ 複数可</div>}
                                                         {wp.workers.length > 0 && (
                                                             <div style={{ marginTop: 2, display: 'flex', gap: 1, flexWrap: 'wrap', position: 'relative', zIndex: 1 }}>
                                                                 {wp.workers.map((w, i) => <span key={i} className="worker-chip"><img src={getMeepleSrc(w)} className="worker-chip-icon" alt="" />P{w + 1}</span>)}
@@ -1267,14 +1619,16 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                 return (
                                                     <div key={wp.id}
                                                         data-workplace-id={wp.id}
+                                                        onClick={() => handleWorkplaceClickPlace(wp.id)}
                                                         onPointerDown={() => { if (!workerDragRender) startWorkplacePreview(wp, 2100 + col); }}
                                                         onPointerUp={() => { if (!workerDragRender) endPreview(); }}
-                                                        onPointerLeave={() => { if (!workerDragRender) endPreview(); }}
+                                                        onPointerLeave={() => { if (!workerDragRender) endPreview(); endHoverPreview(); }}
+                                                        onPointerEnter={(e) => { startHoverWorkplacePreview(wp, 2100 + col, e); }}
                                                         className={`workplace-card ${ok ? 'workplace-available' : 'game-card-disabled'} ${workerDragRender?.hoveredUid === wp.id ? 'worker-drag-hover' : ''}`}
                                                         style={{ position: 'relative', overflow: 'hidden' }}>
                                                         <WorkplaceBgImage wpId={wp.id} />
-                                                        <div style={{ fontWeight: 700, fontSize: 8, color: ok ? 'var(--teal)' : 'var(--text-dim)', position: 'relative', zIndex: 1 }}>{wp.name}</div>
-                                                        <div style={{ fontSize: 7, color: 'var(--text-dim)', marginTop: 1, lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{wp.effectText}</div>
+                                                        <div style={{ fontWeight: 700, fontSize: 'var(--fs-md)', color: ok ? 'var(--teal)' : 'var(--text-dim)', position: 'relative', zIndex: 1 }}>{wp.name}</div>
+                                                        <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', marginTop: 1, lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{wp.effectText}</div>
                                                         {wp.workers.length > 0 && (
                                                             <div style={{ marginTop: 2, display: 'flex', gap: 1, position: 'relative', zIndex: 1 }}>
                                                                 {wp.workers.map((w, i) => <span key={i} className="worker-chip"><img src={getMeepleSrc(w)} className="worker-chip-icon" alt="" />P{w + 1}</span>)}
@@ -1296,22 +1650,26 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                             .sort((a, b) => a.addedAtRound - b.addedAtRound);
                                         const maxCols = Math.max(row1.length, row2.length, 1);
 
-                                        // 通常の職場カード（アニメ中は非表示）
-                                        const SimpleWorkplaceCard = ({ wp, ok }: { wp: typeof roundAdded[0]; ok: boolean }) => {
+                                        // インラインレンダー関数（コンポーネントではない）でDOM安定性を保証
+                                        // ※レンダー内でコンポーネントを定義するとstate変更でDOMが再作成されポインタイベントが失われる
+                                        const renderWorkplaceCard = (wp: typeof roundAdded[0], ok: boolean) => {
                                             const isAnimating = roundCardAnim && wp.addedAtRound === roundCardAnim.round;
                                             return (
                                                 <div
+                                                    key={wp.id}
                                                     ref={(el) => { roundWorkplaceRefs.current[wp.addedAtRound] = el; }}
                                                     data-workplace-id={wp.id}
+                                                    onClick={() => handleWorkplaceClickPlace(wp.id)}
                                                     onPointerDown={() => { if (!workerDragRender) startWorkplacePreview(wp, 2200 + wp.addedAtRound); }}
                                                     onPointerUp={() => { if (!workerDragRender) endPreview(); }}
-                                                    onPointerLeave={() => { if (!workerDragRender) endPreview(); }}
+                                                    onPointerLeave={() => { if (!workerDragRender) endPreview(); endHoverPreview(); }}
+                                                    onPointerEnter={(e) => { startHoverWorkplacePreview(wp, 2200 + wp.addedAtRound, e); }}
                                                     className={`workplace-card ${ok && !isAnimating ? 'workplace-available' : 'game-card-disabled'} ${workerDragRender?.hoveredUid === wp.id ? 'worker-drag-hover' : ''}`}
                                                     style={{ ...(isAnimating ? { opacity: 0 } : {}), position: 'relative', overflow: 'hidden' }}>
                                                     <WorkplaceBgImage wpId={wp.id} />
-                                                    <div style={{ fontWeight: 700, fontSize: 8, color: ok ? 'var(--teal)' : 'var(--text-dim)', position: 'relative', zIndex: 1 }}>{wp.name}</div>
-                                                    <div style={{ fontSize: 7, color: 'var(--text-dim)', marginTop: 1, lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{wp.effectText}</div>
-                                                    {wp.multipleAllowed && <div style={{ fontSize: 6, color: 'var(--purple)', position: 'relative', zIndex: 1 }}>∞ 複数可</div>}
+                                                    <div style={{ fontWeight: 700, fontSize: 'var(--fs-md)', color: ok ? 'var(--teal)' : 'var(--text-dim)', position: 'relative', zIndex: 1 }}>{wp.name}</div>
+                                                    <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', marginTop: 1, lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{wp.effectText}</div>
+                                                    {wp.multipleAllowed && <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--purple)', position: 'relative', zIndex: 1 }}>∞ 複数可</div>}
                                                     {wp.workers.length > 0 && (
                                                         <div style={{ marginTop: 2, display: 'flex', gap: 1, flexWrap: 'wrap', position: 'relative', zIndex: 1 }}>
                                                             {wp.workers.map((w, i) => <span key={i} className="worker-chip"><img src={getMeepleSrc(w)} className="worker-chip-icon" alt="" />P{w + 1}</span>)}
@@ -1328,13 +1686,13 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                         const wp = row1[col];
                                                         if (!wp) return <div key={`round-r1-${col}`} className="workplace-empty" />;
                                                         const ok = G.phase === 'work' && canInteract && canPlacePublic(G, curPid, wp);
-                                                        return <SimpleWorkplaceCard key={wp.id} wp={wp} ok={ok} />;
+                                                        return renderWorkplaceCard(wp, ok);
                                                     })}
                                                     {Array.from({ length: maxCols }).map((_, col) => {
                                                         const wp = row2[col];
                                                         if (!wp) return <div key={`round-r2-${col}`} className="workplace-empty" />;
                                                         const ok = G.phase === 'work' && canInteract && canPlacePublic(G, curPid, wp);
-                                                        return <SimpleWorkplaceCard key={wp.id} wp={wp} ok={ok} />;
+                                                        return renderWorkplaceCard(wp, ok);
                                                     })}
                                                 </div>
                                                 {/* フローティング移動要素: フリップ後のカードがデッキ位置→職場位置へ移動 */}
@@ -1356,9 +1714,9 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                             overflow: 'hidden',
                                                         }}>
                                                             <WorkplaceBgImage wpId={getRoundWorkplaceId(roundCardAnim.round)} />
-                                                            <div style={{ fontSize: 7, color: 'var(--text-dim)', position: 'relative', zIndex: 1 }}>新職場</div>
-                                                            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--teal)', position: 'relative', zIndex: 1 }}>{wpName || '—'}</div>
-                                                            <div style={{ fontSize: 7, color: 'var(--text-dim)', position: 'relative', zIndex: 1 }}>R{roundCardAnim.round}</div>
+                                                            <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', position: 'relative', zIndex: 1 }}>新職場</div>
+                                                            <div style={{ fontSize: 'var(--fs-lg)', fontWeight: 700, color: 'var(--teal)', position: 'relative', zIndex: 1 }}>{wpName || '—'}</div>
+                                                            <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', position: 'relative', zIndex: 1 }}>R{roundCardAnim.round}</div>
                                                         </div>
                                                     );
                                                 })()}
@@ -1369,9 +1727,9 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
 
                                 {/* 売却建物 */}
                                 {soldWorkplaces.length > 0 && (
-                                    <div>
+                                    <div style={{ position: 'relative', zIndex: 3 }}>
                                         <div className="workplaces-row-label" style={{ color: 'var(--green)' }}>
-                                            <IconHouse size={8} color="var(--green)" /> 売却建物
+                                            <IconHouse size={"calc(var(--fs) * 0.89)"} color="var(--green)" /> 売却建物
                                         </div>
                                         <div className="sold-buildings-area">
                                             <div className="sold-buildings-grid">
@@ -1381,28 +1739,30 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                     return (
                                                         <div key={wp.id}
                                                             data-workplace-id={wp.id}
+                                                            onClick={() => handleWorkplaceClickPlace(wp.id)}
                                                             onPointerDown={() => { if (!workerDragRender) startWorkplacePreview(wp, 2300 + soldWorkplaces.indexOf(wp)); }}
                                                             onPointerUp={() => { if (!workerDragRender) endPreview(); }}
-                                                            onPointerLeave={() => { if (!workerDragRender) endPreview(); }}
+                                                            onPointerLeave={() => { if (!workerDragRender) endPreview(); endHoverPreview(); }}
+                                                            onPointerEnter={(e) => { startHoverWorkplacePreview(wp, 2300 + soldWorkplaces.indexOf(wp), e); }}
                                                             className={`hand-card building-card-in-field ${ok ? 'hand-card-playable' : ''} ${!ok && wp.workers.length > 0 ? 'building-placed' : ''} ${workerDragRender?.hoveredUid === wp.id ? 'worker-drag-hover' : ''}`}
                                                             style={{
-                                                                borderColor: ok ? 'rgba(45, 212, 191, 0.4)' : 'rgba(45, 212, 191, 0.15)',
+                                                                borderColor: ok ? 'var(--teal-40)' : 'var(--teal-15)',
                                                             }}>
                                                             {wp.fromBuildingDefId && <CardBgImage defId={wp.fromBuildingDefId} />}
-                                                            <div style={{ fontWeight: 700, fontSize: 9, lineHeight: 1.2, color: ok ? 'var(--text-primary)' : 'var(--text-dim)', position: 'relative', zIndex: 1 }}>
+                                                            <div style={{ fontWeight: 700, fontSize: 'var(--fs-base)', lineHeight: 1.2, color: ok ? 'var(--text-primary)' : 'var(--text-dim)', position: 'relative', zIndex: 1 }}>
                                                                 {wp.name}
                                                             </div>
                                                             {def && (
                                                                 <>
                                                                     <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2, position: 'relative', zIndex: 1 }}>
-                                                                        <span style={{ fontSize: 8, color: 'var(--text-dim)', fontWeight: 600 }}>C{def.cost}</span>
-                                                                        <span style={{ fontSize: 8, color: 'var(--gold-dim)', fontWeight: 600 }}>{def.vp}VP</span>
+                                                                        <span style={{ fontSize: 'var(--fs-md)', color: 'var(--text-dim)', fontWeight: 600 }}>C{def.cost}</span>
+                                                                        <span style={{ fontSize: 'var(--fs-md)', color: 'var(--gold-dim)', fontWeight: 600 }}>{def.vp}VP</span>
                                                                     </div>
                                                                     <TagBadges defId={wp.fromBuildingDefId!} />
-                                                                    {def.effectText && <div style={{ fontSize: 6, color: 'var(--text-dim)', marginTop: 'auto', lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{def.effectText}</div>}
+                                                                    {def.effectText && <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-dim)', marginTop: 'auto', lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{def.effectText}</div>}
                                                                 </>
                                                             )}
-                                                            {!def && <div style={{ fontSize: 7, color: 'var(--text-dim)', marginTop: 1, lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{wp.effectText}</div>}
+                                                            {!def && <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', marginTop: 1, lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{wp.effectText}</div>}
                                                             {wp.workers.length > 0 && (
                                                                 <div style={{ marginTop: 2, display: 'flex', gap: 1, position: 'relative', zIndex: 1 }}>
                                                                     {wp.workers.map((w, i) => <span key={i} className="worker-chip"><img src={getMeepleSrc(w)} className="worker-chip-icon" alt="" />P{w + 1}</span>)}
@@ -1422,7 +1782,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                 </div >
 
                 {/* ====== 下段: 自分の場 ====== */}
-                < div className="area-my-field" >
+                < div className="area-my-field" data-player-id={myPid} >
                     {/* 左: ワーカーコマ + 手札 */}
                     < div className="my-hand-section" ref={handAreaRef} >
                         {/* ワーカーコマ */}
@@ -1437,7 +1797,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                     return (
                                         <img key={i}
                                             src={getMeepleSrc(parseInt(myPid))}
-                                            className={`worker-token ${!isAvailable ? 'used' : ''} ${canDrag ? 'draggable' : ''} ${workerDragRender?.workerIndex === i ? 'dragging' : ''}`}
+                                            className={`worker-token ${!isAvailable ? 'used' : ''} ${canDrag ? 'draggable worker-available-pulse' : ''} ${workerDragRender?.workerIndex === i ? 'dragging' : ''}`}
                                             onPointerDown={(e) => {
                                                 if (!canDrag) return;
                                                 e.preventDefault();
@@ -1455,12 +1815,12 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                         {
                             needsCleanup && (
                                 <div className="inline-info-bar" style={{ borderColor: 'var(--red)' }}>
-                                    <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
+                                    <span style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-secondary)' }}>
                                         <span style={{ color: 'var(--red)', fontWeight: 700 }}>{cleanupPlayerState!.selectedIndices.length}/{cleanupPlayerState!.excessCount}</span>枚を選択
                                     </span>
                                     <button onClick={() => { soundManager.playSFX('click'); moves.confirmDiscard(); }}
                                         disabled={cleanupPlayerState!.selectedIndices.length !== cleanupPlayerState!.excessCount}
-                                        className="btn-danger" style={{ fontSize: 11, padding: '2px 8px', lineHeight: 1 }}>
+                                        className="btn-danger" style={{ fontSize: 'var(--fs-xl)', padding: '2px 8px', lineHeight: 1 }}>
                                         ✓
                                     </button>
                                 </div>
@@ -1470,7 +1830,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                         {
                             isDiscardPhase && (
                                 <div className="inline-info-bar" style={{ borderColor: 'var(--orange)' }}>
-                                    <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
+                                    <span style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-secondary)' }}>
                                         <span style={{ color: 'var(--red)', fontWeight: 700 }}>{rawG.discardState!.selectedIndices.length}/{rawG.discardState!.count}</span>枚を選択
                                     </span>
                                     <button onClick={() => {
@@ -1481,11 +1841,11 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                         moves.confirmDiscard();
                                     }}
                                         disabled={rawG.discardState!.selectedIndices.length !== rawG.discardState!.count}
-                                        className="btn-danger" style={{ fontSize: 11, padding: '2px 8px', lineHeight: 1 }}>
+                                        className="btn-danger" style={{ fontSize: 'var(--fs-xl)', padding: '2px 8px', lineHeight: 1 }}>
                                         ✓
                                     </button>
                                     <button onClick={() => { soundManager.playSFX('click'); moves.cancelAction(); }}
-                                        className="btn-ghost" style={{ fontSize: 11, padding: '2px 8px', lineHeight: 1 }}>
+                                        className="btn-ghost" style={{ fontSize: 'var(--fs-xl)', padding: '2px 8px', lineHeight: 1 }}>
                                         ✕
                                     </button>
                                 </div>
@@ -1498,7 +1858,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                 const showHand = !isOnline || myPid === playerID;
                                 if (!showHand) return (
                                     <div className="hand-fan">
-                                        <div style={{ fontSize: 9, color: 'var(--text-dim)' }}>手札 {myPlayer.hand.length}枚</div>
+                                        <div style={{ fontSize: 'var(--fs-base)', color: 'var(--text-dim)' }}>手札 {myPlayer.hand.length}枚</div>
                                     </div>
                                 );
                                 // ドローアニメーション中はrawG（リアル）の手札を使用
@@ -1550,7 +1910,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                 return (
                                                     <div key={`hidden-${ci}`} className="hand-card hand-card-hidden"
                                                         style={{ marginLeft: ci === 0 ? 0 : overlapMargin, zIndex: ci + 1, ...drawStyle }}>
-                                                        <div style={{ fontWeight: 700, fontSize: 16, color: 'var(--text-dim)', textAlign: 'center', marginTop: 'auto', marginBottom: 'auto' }}>🂠</div>
+                                                        <div style={{ fontWeight: 700, fontSize: 'var(--fs-3xl)', color: 'var(--text-dim)', textAlign: 'center', marginTop: 'auto', marginBottom: 'auto' }}>🂠</div>
                                                     </div>
                                                 );
                                             }
@@ -1561,6 +1921,8 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                             let isSelected = false;
                                             let isExcluded = false;
                                             let clickAction: (() => void) | null = null;
+                                            // ワーカードラッグ中に大工系職場にホバー → 建設可能カードをプレビュー強調
+                                            let isDragBuildHighlight = false;
 
                                             if (canInteract && isBuildPhase && !isCons && def) {
                                                 const bs = G.buildState!;
@@ -1590,10 +1952,17 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                 clickAction = () => moves.toggleDiscard(ci);
                                             }
 
+                                            // ワーカードラッグ中に大工系職場にホバー → 建設可能カードを強調
+                                            if (!canClick && !isCons && def && workerDragRender?.hoveredUid?.startsWith('carpenter')) {
+                                                const carpenterCostReduction = 0; // 大工のコスト軽減は0
+                                                const cost = getConstructionCost(myPlayer, c.defId, carpenterCostReduction);
+                                                isDragBuildHighlight = myPlayer.hand.length - 1 >= cost;
+                                            }
+
                                             const selectedStyle = isSelected
                                                 ? { transform: 'translateY(-10px)' }
                                                 : isExcluded
-                                                    ? { borderColor: 'rgba(212, 168, 83, 0.4)', opacity: 0.6 }
+                                                    ? { borderColor: 'var(--gold-40)', opacity: 0.6 }
                                                     : {};
 
                                             return (
@@ -1601,28 +1970,29 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                     onClick={() => { if (canClick && clickAction && !previewData) { soundManager.playSFX('click'); clickAction(); } }}
                                                     onPointerDown={() => { if (!isCons) startCardPreview(c.defId, ci); }}
                                                     onPointerUp={endPreview}
-                                                    onPointerLeave={endPreview}
-                                                    className={`hand-card ${isCons ? 'hand-card-consumable' : ''} ${canClick ? 'hand-card-playable' : ''} ${pressingCardIdxRef.current === ci ? 'hand-card-pressing' : ''}`}
+                                                    onPointerLeave={() => { endPreview(); endHoverPreview(); }}
+                                                    onPointerEnter={(e) => { if (!isCons) startHoverCardPreview(c.defId, ci, e); }}
+                                                    className={`hand-card ${isCons ? 'hand-card-consumable' : ''} ${canClick || isDragBuildHighlight ? 'hand-card-playable' : ''} ${workerDragRender?.hoveredUid?.startsWith('carpenter') && !isDragBuildHighlight && !isCons ? 'hand-card-drag-dimmed' : ''} ${pressingCardIdxRef.current === ci ? 'hand-card-pressing' : ''}`}
                                                     style={{ marginLeft: ci === 0 ? 0 : overlapMargin, zIndex: ci + 1, ...drawStyle, ...selectedStyle }}>
                                                     <CardBgImage defId={c.defId} />
-                                                    <div style={{ fontWeight: 700, fontSize: 9, lineHeight: 1.2, color: isCons ? 'var(--text-secondary)' : 'var(--text-primary)', position: 'relative', zIndex: 1 }}>
+                                                    <div style={{ fontWeight: 700, fontSize: 'var(--fs-base)', lineHeight: 1.2, color: isCons ? 'var(--text-secondary)' : 'var(--text-primary)', position: 'relative', zIndex: 1 }}>
                                                         {cName(c.defId)}
                                                     </div>
                                                     {def && (
                                                         <>
                                                             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2, position: 'relative', zIndex: 1, opacity: 1 }}>
-                                                                <span style={{ fontSize: 10, color: 'var(--text-secondary)', fontWeight: 600 }}>
+                                                                <span style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-secondary)', fontWeight: 600 }}>
                                                                     C{isBuildPhase ? getConstructionCost(myPlayer, c.defId, G.buildState!.costReduction) : def.cost}
                                                                 </span>
-                                                                <span style={{ fontSize: 10, color: 'var(--gold-light)', fontWeight: 600 }}>{def.vp}VP</span>
+                                                                <span style={{ fontSize: 'var(--fs-lg)', color: 'var(--gold-light)', fontWeight: 600 }}>{def.vp}VP</span>
                                                             </div>
                                                             <div style={{ opacity: 1 }}><TagBadges defId={c.defId} /></div>
-                                                            {def.effectText && <div style={{ fontSize: 9, color: 'var(--text-secondary)', marginTop: 'auto', lineHeight: 1.2, position: 'relative', zIndex: 1, opacity: 1 }}>{def.effectText}</div>}
+                                                            {def.effectText && <div style={{ fontSize: 'var(--fs-base)', color: 'var(--text-secondary)', marginTop: 'auto', lineHeight: 1.2, position: 'relative', zIndex: 1, opacity: 1 }}>{def.effectText}</div>}
                                                         </>
                                                     )}
-                                                    {isCons && <div style={{ fontSize: 7, color: 'var(--text-dim)', marginTop: 2, position: 'relative', zIndex: 1 }}>消費財</div>}
-                                                    {isSelected && <div style={{ color: 'var(--red)', fontSize: 8, fontWeight: 700, position: 'relative', zIndex: 1 }}>✓ 捨てる</div>}
-                                                    {isExcluded && <div style={{ color: 'var(--gold)', fontSize: 7, position: 'relative', zIndex: 1 }}>建設対象</div>}
+                                                    {isCons && <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', marginTop: 2, position: 'relative', zIndex: 1 }}>消費財</div>}
+                                                    {isSelected && <div style={{ color: 'var(--red)', fontSize: 'var(--fs-md)', fontWeight: 700, position: 'relative', zIndex: 1 }}>✓ 捨てる</div>}
+                                                    {isExcluded && <div style={{ color: 'var(--gold)', fontSize: 'var(--fs-sm)', position: 'relative', zIndex: 1 }}>建設対象</div>}
                                                 </div>
                                             );
                                         })}
@@ -1630,7 +2000,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                 );
                             })()}
                             {myPlayer.hand.length > 10 && (
-                                <div style={{ position: 'absolute', right: -8, bottom: 40, fontSize: 8, color: 'var(--gold-dim)', writingMode: 'vertical-rl' }}>
+                                <div style={{ position: 'absolute', right: -8, bottom: 40, fontSize: 'var(--fs-md)', color: 'var(--gold-dim)', writingMode: 'vertical-rl' }}>
                                     +{myPlayer.hand.length - 10}枚 →
                                 </div>
                             )}
@@ -1659,13 +2029,13 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                 const canConfirm = !isExcessive && (canAfford || allSellableSelected);
                                 return (
                                     <div className="buildings-info-bar" style={{ borderColor: 'var(--red)' }}>
-                                        <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>
+                                        <span style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-secondary)' }}>
                                             💰 給料日 — 賃金<b style={{ color: 'var(--red)' }}>${pps.totalWage}</b> 所持<b style={{ color: 'var(--gold-light)' }}>${p.money}</b>+売却<b style={{ color: 'var(--green)' }}>${sellTotal}</b>
                                         </span>
-                                        {isExcessive && <span style={{ fontSize: 9, color: 'var(--red)' }}>⚠ 売りすぎ</span>}
+                                        {isExcessive && <span style={{ fontSize: 'var(--fs-base)', color: 'var(--red)' }}>⚠ 売りすぎ</span>}
                                         <button onClick={() => { soundManager.playSFX('click'); moves.confirmPaydaySell(); }}
                                             disabled={!canConfirm}
-                                            className="btn-danger" style={{ fontSize: 9, padding: '2px 8px' }}>
+                                            className="btn-danger" style={{ fontSize: 'var(--fs-base)', padding: '2px 8px' }}>
                                             ✓
                                         </button>
                                     </div>
@@ -1676,9 +2046,9 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                         {
                             isPaydayPhase && paydayPlayerState && !needsPaydaySelling && !paydayPlayerState.confirmed && (
                                 <div className="buildings-info-bar" style={{ borderColor: 'var(--gold)' }}>
-                                    <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>💰 給料は自動支払い済み</span>
+                                    <span style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-secondary)' }}>💰 給料は自動支払い済み</span>
                                     <button onClick={() => { soundManager.playSFX('click'); moves.confirmPayday(); }}
-                                        className="btn-primary" style={{ fontSize: 9, padding: '2px 8px' }}>
+                                        className="btn-primary" style={{ fontSize: 'var(--fs-base)', padding: '2px 8px' }}>
                                         ✓
                                     </button>
                                 </div>
@@ -1688,11 +2058,11 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                         {
                             isBuildPhase && (
                                 <div className="buildings-info-bar" style={{ borderColor: 'var(--gold)' }}>
-                                    <span style={{ fontSize: 10, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                                        <IconHammer size={10} /> 建設するカードを選択
+                                    <span style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                                        <IconHammer size={"calc(var(--fs) * 1.11)"} /> 建設するカードを選択
                                     </span>
                                     <button onClick={() => { soundManager.playSFX('click'); moves.cancelAction(); }}
-                                        className="btn-ghost" style={{ fontSize: 9, padding: '2px 8px' }}>
+                                        className="btn-ghost" style={{ fontSize: 'var(--fs-base)', padding: '2px 8px' }}>
                                         ✕ キャンセル
                                     </button>
                                 </div>
@@ -1707,12 +2077,16 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                 const isPaydaySellable = needsPaydaySelling && !def.unsellable;
                                 const isPaydaySelected = needsPaydaySelling && (paydayPlayerState?.selectedBuildingIndices ?? []).includes(bi);
                                 const color = isPaydaySelected ? 'var(--red)'
-                                    : (canActivate || isPaydaySellable) ? 'rgba(45, 212, 191, 0.4)' : 'rgba(45, 212, 191, 0.15)';
+                                    : (canActivate || isPaydaySellable) ? 'var(--teal-40)' : 'var(--teal-15)';
                                 return (
                                     <div key={`${b.card.defId}-${bi}`}
                                         data-building-uid={b.card.uid}
                                         onClick={(e) => {
-                                            // ワーカー配置はドラッグ&ドロップのみ（クリック配置削除）
+                                            // CLICK_PLACE_WORKERフラグ有効時: クリックでワーカーを配置
+                                            if (canActivate && featureFlags.CLICK_PLACE_WORKER && !workerDragRef.current) {
+                                                handlePlaceWorkerOnBuilding(b.card.uid, e);
+                                                return;
+                                            }
                                             if (isPaydaySellable) {
                                                 const pps2 = paydayPlayerState!;
                                                 const alreadySelected = pps2.selectedBuildingIndices.includes(bi);
@@ -1726,26 +2100,27 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                         }}
                                         onPointerDown={() => { if (!workerDragRender) startCardPreview(b.card.defId, 1000 + bi); }}
                                         onPointerUp={() => { if (!workerDragRender) endPreview(); }}
-                                        onPointerLeave={() => { if (!workerDragRender) endPreview(); }}
+                                        onPointerLeave={() => { if (!workerDragRender) endPreview(); endHoverPreview(); }}
+                                        onPointerEnter={(e) => { startHoverCardPreview(b.card.defId, 1000 + bi, e); }}
                                         className={`hand-card building-card-in-field ${canActivate || isPaydaySellable ? 'hand-card-playable' : ''} ${b.workerPlaced && !isPaydayPhase ? 'building-placed' : ''} ${workerDragRender?.hoveredUid === b.card.uid && canActivate ? 'worker-drag-hover' : ''}`}
                                         style={{
                                             borderColor: color,
-                                            ...(isPaydaySelected ? { boxShadow: '0 0 12px rgba(248, 113, 113, 0.3)' } : {}),
+                                            ...(isPaydaySelected ? { boxShadow: '0 0 12px var(--red-30)' } : {}),
                                             ...(needsPaydaySelling && def.unsellable ? { opacity: 0.5 } : {}),
                                         }}
                                         title={`${def.name} (${def.vp}VP) ${def.effectText}`}>
                                         <CardBgImage defId={b.card.defId} />
-                                        <div style={{ fontWeight: 700, fontSize: 9, lineHeight: 1.2, color: b.workerPlaced ? 'var(--text-dim)' : 'var(--text-primary)', position: 'relative', zIndex: 1 }}>
+                                        <div style={{ fontWeight: 700, fontSize: 'var(--fs-base)', lineHeight: 1.2, color: b.workerPlaced ? 'var(--text-dim)' : 'var(--text-primary)', position: 'relative', zIndex: 1 }}>
                                             {def.name}
                                         </div>
                                         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2, position: 'relative', zIndex: 1 }}>
-                                            <span style={{ fontSize: 8, color: 'var(--text-dim)', fontWeight: 600 }}>C{def.cost}</span>
-                                            <span style={{ fontSize: 8, color: 'var(--gold-dim)', fontWeight: 600 }}>{def.vp}VP</span>
+                                            <span style={{ fontSize: 'var(--fs-md)', color: 'var(--text-dim)', fontWeight: 600 }}>C{def.cost}</span>
+                                            <span style={{ fontSize: 'var(--fs-md)', color: 'var(--gold-dim)', fontWeight: 600 }}>{def.vp}VP</span>
                                         </div>
                                         <TagBadges defId={b.card.defId} />
-                                        {def.effectText && <div style={{ fontSize: 6, color: 'var(--text-dim)', marginTop: 'auto', lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{def.effectText}</div>}
+                                        {def.effectText && <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-dim)', marginTop: 'auto', lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{def.effectText}</div>}
                                         {b.workerPlaced && <img src={getMeepleSrc(parseInt(myPid))} className="worker-on-building-icon" alt="配置済み" />}
-                                        {isPaydaySelected && <div style={{ color: 'var(--red)', fontSize: 8, fontWeight: 700, position: 'relative', zIndex: 1 }}>💰 売却</div>}
+                                        {isPaydaySelected && <div style={{ color: 'var(--red)', fontSize: 'var(--fs-md)', fontWeight: 700, position: 'relative', zIndex: 1 }}>💰 売却</div>}
                                     </div>
                                 );
                             })}
@@ -1754,23 +2129,23 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
 
                     {/* 右: ステータス */}
                     < div className="my-status-panel" >
-                        <span className="stat-badge" style={{ fontSize: 9, padding: '2px 6px' }}>
-                            <IconMoney size={9} color="var(--gold-light)" /><b style={{ color: 'var(--gold-light)' }}>${myPlayer.money}</b>
+                        <span className="stat-badge" style={{ fontSize: 'var(--fs-base)', padding: '2px 6px' }}>
+                            <IconMoney size={"var(--fs)"} color="var(--gold-light)" /><b style={{ color: 'var(--gold-light)' }}>${myPlayer.money}</b>
                         </span>
-                        <span className="stat-badge" style={{ fontSize: 9, padding: '2px 6px' }}>
-                            <IconDeck size={9} color="var(--text-secondary)" /><b style={{ color: 'var(--text-secondary)' }}>{myPlayer.hand.length}/{myPlayer.maxHandSize}</b>
+                        <span className="stat-badge" style={{ fontSize: 'var(--fs-base)', padding: '2px 6px' }}>
+                            <IconDeck size={"var(--fs)"} color="var(--text-secondary)" /><b style={{ color: 'var(--text-secondary)' }}>{myPlayer.hand.length}/{myPlayer.maxHandSize}</b>
                         </span>
                         {
                             myPlayer.unpaidDebts > 0 && (
-                                <span className="stat-badge" style={{ fontSize: 9, padding: '2px 6px', borderColor: 'rgba(248,113,113,0.3)' }}>
+                                <span className="stat-badge" style={{ fontSize: 'var(--fs-base)', padding: '2px 6px', borderColor: 'var(--red-30)' }}>
                                     <b style={{ color: 'var(--red)' }}>Debt {myPlayer.unpaidDebts}</b>
                                 </span>
                             )
                         }
                         {
                             myPlayer.vpTokens > 0 && (
-                                <span className="stat-badge" style={{ fontSize: 9, padding: '2px 6px' }}>
-                                    <IconTrophy size={9} color="var(--gold)" /><b style={{ color: 'var(--gold)' }}>{myPlayer.vpTokens}</b>
+                                <span className="stat-badge" style={{ fontSize: 'var(--fs-base)', padding: '2px 6px' }}>
+                                    <IconTrophy size={"var(--fs)"} color="var(--gold)" /><b style={{ color: 'var(--gold)' }}>{myPlayer.vpTokens}</b>
                                 </span>
                             )
                         }
@@ -1802,8 +2177,8 @@ function LogModal({ log, onClose }: { log: GameState['log']; onClose: () => void
         <div className="modal-overlay" onClick={onClose}>
             <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 560 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-                    <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#818cf8', display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <IconLog size={20} /> ゲームログ
+                    <h2 style={{ margin: 0, fontSize: 'var(--fs-4xl)', fontWeight: 700, color: '#818cf8', display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <IconLog size={"calc(var(--fs) * 2.22)"} /> ゲームログ
                     </h2>
                     <button onClick={() => { soundManager.playSFX('click'); onClose(); }} className="btn-ghost">閉じる</button>
                 </div>
@@ -1858,13 +2233,13 @@ function DesignOfficeUI({ G, moves, onBeforeSelect }: { G: GameState; moves: any
                                 {imgSrc && <img src={imgSrc} alt={pDef.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
                             </div>
                             <div className="card-preview-info">
-                                <div style={{ fontWeight: 700, fontSize: 18, color: 'var(--text-primary)', marginBottom: 4 }}>{pDef.name}</div>
-                                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 6 }}>{tagLabel}</div>
+                                <div style={{ fontWeight: 700, fontSize: 'var(--fs-4xl)', color: 'var(--text-primary)', marginBottom: 4 }}>{pDef.name}</div>
+                                <div style={{ fontSize: 'var(--fs-xl2)', color: 'var(--text-secondary)', marginBottom: 6 }}>{tagLabel}</div>
                                 <div style={{ display: 'flex', gap: 16, marginBottom: 8 }}>
-                                    <span style={{ fontSize: 14, color: 'var(--text-dim)', fontWeight: 600 }}>コスト: <b style={{ color: 'var(--gold-light)' }}>C{pDef.cost}</b></span>
-                                    <span style={{ fontSize: 14, color: 'var(--text-dim)', fontWeight: 600 }}>得点: <b style={{ color: 'var(--gold-light)' }}>{pDef.vp}VP</b></span>
+                                    <span style={{ fontSize: 'var(--fs-2xl)', color: 'var(--text-dim)', fontWeight: 600 }}>コスト: <b style={{ color: 'var(--gold-light)' }}>C{pDef.cost}</b></span>
+                                    <span style={{ fontSize: 'var(--fs-2xl)', color: 'var(--text-dim)', fontWeight: 600 }}>得点: <b style={{ color: 'var(--gold-light)' }}>{pDef.vp}VP</b></span>
                                 </div>
-                                {pDef.effectText && <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5 }}>{pDef.effectText}</div>}
+                                {pDef.effectText && <div style={{ fontSize: 'var(--fs-xl3)', color: 'var(--text-secondary)', lineHeight: 1.5 }}>{pDef.effectText}</div>}
                             </div>
                         </div>
                     </div>
@@ -1872,8 +2247,8 @@ function DesignOfficeUI({ G, moves, onBeforeSelect }: { G: GameState; moves: any
             })()}
             <div className="modal-content animate-slide-up" style={{ position: 'relative', maxWidth: 700 }}>
                 {/* キャンセルボタン廃止 */}
-                <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--gold)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <IconSearch size={22} color="var(--gold)" /> 設計事務所
+                <h2 style={{ fontSize: 'var(--fs-4xl)', fontWeight: 700, color: 'var(--gold)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <IconSearch size={"calc(var(--fs) * 2.44)"} color="var(--gold)" /> 設計事務所
                 </h2>
                 <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>
                     山札から<b style={{ color: 'var(--teal)' }}>{dos.revealedCards.length}枚</b>公開。
@@ -1903,30 +2278,30 @@ function DesignOfficeUI({ G, moves, onBeforeSelect }: { G: GameState; moves: any
                                     ...(isSelected ? {
                                         borderColor: 'var(--teal)',
                                         transform: 'translateY(-10px)',
-                                        boxShadow: '0 0 12px rgba(45, 212, 191, 0.4)',
+                                        boxShadow: '0 0 12px var(--teal-40)',
                                     } : {}),
                                 }}>
                                 <CardBgImage defId={c.defId} />
                                 {/* カード名 */}
-                                <div style={{ fontWeight: 700, fontSize: 9, lineHeight: 1.2, color: isCons ? 'var(--text-secondary)' : 'var(--text-primary)', position: 'relative', zIndex: 1 }}>
+                                <div style={{ fontWeight: 700, fontSize: 'var(--fs-base)', lineHeight: 1.2, color: isCons ? 'var(--text-secondary)' : 'var(--text-primary)', position: 'relative', zIndex: 1 }}>
                                     {cName(c.defId)}
                                 </div>
                                 {def && (
                                     <>
                                         {/* コスト・VP */}
                                         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2, position: 'relative', zIndex: 1 }}>
-                                            <span style={{ fontSize: 10, color: 'var(--text-secondary)', fontWeight: 600 }}>C{def.cost}</span>
-                                            <span style={{ fontSize: 10, color: 'var(--gold-light)', fontWeight: 600 }}>{def.vp}VP</span>
+                                            <span style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-secondary)', fontWeight: 600 }}>C{def.cost}</span>
+                                            <span style={{ fontSize: 'var(--fs-lg)', color: 'var(--gold-light)', fontWeight: 600 }}>{def.vp}VP</span>
                                         </div>
                                         {/* 属性タグ */}
                                         <TagBadges defId={c.defId} />
                                         {/* 説明文 */}
-                                        {def.effectText && <div style={{ fontSize: 9, color: 'var(--text-secondary)', marginTop: 'auto', lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{def.effectText}</div>}
+                                        {def.effectText && <div style={{ fontSize: 'var(--fs-base)', color: 'var(--text-secondary)', marginTop: 'auto', lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{def.effectText}</div>}
                                     </>
                                 )}
-                                {isCons && <div style={{ fontSize: 7, color: 'var(--text-dim)', marginTop: 2, position: 'relative', zIndex: 1 }}>消費財</div>}
+                                {isCons && <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', marginTop: 2, position: 'relative', zIndex: 1 }}>消費財</div>}
                                 {/* 選択マーク */}
-                                {isSelected && <div style={{ position: 'absolute', top: 4, right: 4, fontSize: 14, zIndex: 2 }}>✓</div>}
+                                {isSelected && <div style={{ position: 'absolute', top: 4, right: 4, fontSize: 'var(--fs-2xl)', zIndex: 2 }}>✓</div>}
                             </div>
                         );
                     })}
@@ -1937,7 +2312,7 @@ function DesignOfficeUI({ G, moves, onBeforeSelect }: { G: GameState; moves: any
                         onClick={() => { if (selectedIdx !== null) { soundManager.playSFX('click'); onBeforeSelect?.(); moves.selectDesignOfficeCard(selectedIdx); } }}
                         disabled={selectedIdx === null}
                         className="btn-primary"
-                        style={{ fontSize: 11, padding: '4px 16px', lineHeight: 1 }}>
+                        style={{ fontSize: 'var(--fs-xl)', padding: '4px 16px', lineHeight: 1 }}>
                         ✓
                     </button>
                 </div>
@@ -1978,19 +2353,19 @@ function DualConstructionUI({ G, moves, pid }: { G: GameState; moves: any; pid: 
         <div className="game-bg" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
             <div className="modal-content animate-slide-up" style={{ position: 'relative' }}>
                 <button onClick={() => { soundManager.playSFX('click'); moves.cancelAction(); }} className="btn-ghost" style={{ position: 'absolute', top: 16, right: 16 }}>✕ キャンセル</button>
-                <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--gold)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <IconHammer size={22} color="var(--gold)" /> 二胡市建設
+                <h2 style={{ fontSize: 'var(--fs-4xl)', fontWeight: 700, color: 'var(--gold)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <IconHammer size={"calc(var(--fs) * 2.44)"} color="var(--gold)" /> 二胡市建設
                 </h2>
                 <p style={{ color: 'var(--text-secondary)', marginBottom: 4 }}>
                     同じコストの建物カードを<b style={{ color: 'var(--gold)' }}>2枚</b>選択してください（コストは1つ分のみ支払い）
                 </p>
-                <p style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 16 }}>選択中: {ds.selectedCardIndices.length}/2枚</p>
+                <p style={{ fontSize: 'var(--fs-xl)', color: 'var(--text-dim)', marginBottom: 16 }}>選択中: {ds.selectedCardIndices.length}/2枚</p>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
                     {p.hand.map((c, ci) => {
                         const isCons = isConsumable(c);
                         if (isCons) return (
                             <div key={c.uid} className="game-card game-card-disabled" style={{ minWidth: 100 }}>
-                                <div style={{ fontWeight: 700, fontSize: 12 }}>消費財</div>
+                                <div style={{ fontWeight: 700, fontSize: 'var(--fs-xl2)' }}>消費財</div>
                             </div>
                         );
                         const def = getCardDef(c.defId);
@@ -2005,10 +2380,10 @@ function DualConstructionUI({ G, moves, pid }: { G: GameState; moves: any; pid: 
                             <div key={c.uid} onClick={() => selectable && (soundManager.playSFX('click'), moves.toggleDualCard(ci))}
                                 className={`game-card ${selected ? 'game-card-selected' : selectable ? 'game-card-clickable' : 'game-card-disabled'}`}
                                 style={{ minWidth: 100 }}>
-                                <div style={{ fontWeight: 700, fontSize: 12 }}>{def.name}</div>
-                                <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>C{def.cost}/{def.vp}VP</div>
+                                <div style={{ fontWeight: 700, fontSize: 'var(--fs-xl2)' }}>{def.name}</div>
+                                <div style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-dim)' }}>C{def.cost}/{def.vp}VP</div>
                                 <TagBadges defId={c.defId} />
-                                {selected && <div style={{ color: 'var(--gold)', fontSize: 11, marginTop: 4, fontWeight: 700 }}>✓ 選択中</div>}
+                                {selected && <div style={{ color: 'var(--gold)', fontSize: 'var(--fs-xl)', marginTop: 4, fontWeight: 700 }}>✓ 選択中</div>}
                             </div>
                         );
                     })}
@@ -2040,8 +2415,8 @@ function DiscardUI({ G, moves, pid, onBeforeConfirm }: { G: GameState; moves: an
         <div className="game-bg" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
             <div className="modal-content animate-slide-up" style={{ position: 'relative', maxWidth: 750 }}>
                 <button onClick={() => { soundManager.playSFX('click'); moves.cancelAction(); }} className="btn-ghost" style={{ position: 'absolute', top: 16, right: 16 }}>✕ キャンセル</button>
-                <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--gold)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <IconTrash size={22} color="var(--gold)" /> カードを捨てる
+                <h2 style={{ fontSize: 'var(--fs-4xl)', fontWeight: 700, color: 'var(--gold)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <IconTrash size={"calc(var(--fs) * 2.44)"} color="var(--gold)" /> カードを捨てる
                 </h2>
                 <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>
                     {ds.reason} — <b style={{ color: 'var(--red)' }}>{ds.count}枚</b>選択してください（選択中: {ds.selectedIndices.length}枚）
@@ -2057,14 +2432,14 @@ function DiscardUI({ G, moves, pid, onBeforeConfirm }: { G: GameState; moves: an
                                 className={`game-card ${excluded ? '' : 'game-card-clickable'}`}
                                 style={{
                                     minWidth: 100,
-                                    ...(excluded ? { borderColor: 'rgba(212, 168, 83, 0.3)', background: 'rgba(212, 168, 83, 0.08)', opacity: 0.6, cursor: 'not-allowed' } : {}),
-                                    ...(selected ? { borderColor: 'var(--red)', boxShadow: '0 0 15px rgba(248, 113, 113, 0.2)' } : {}),
+                                    ...(excluded ? { borderColor: 'var(--gold-40)', background: 'var(--gold-15)', opacity: 0.6, cursor: 'not-allowed' } : {}),
+                                    ...(selected ? { borderColor: 'var(--red)', boxShadow: '0 0 15px var(--red-30)' } : {}),
                                 }}>
-                                <div style={{ fontWeight: 700, fontSize: 12 }}>{cName(c.defId)}</div>
-                                {excluded && <div style={{ fontSize: 9, color: 'var(--gold)' }}>建設対象</div>}
-                                {!isCons && !excluded && <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>C{getCardDef(c.defId).cost}/{getCardDef(c.defId).vp}VP</div>}
+                                <div style={{ fontWeight: 700, fontSize: 'var(--fs-xl2)' }}>{cName(c.defId)}</div>
+                                {excluded && <div style={{ fontSize: 'var(--fs-base)', color: 'var(--gold)' }}>建設対象</div>}
+                                {!isCons && !excluded && <div style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-dim)' }}>C{getCardDef(c.defId).cost}/{getCardDef(c.defId).vp}VP</div>}
                                 <TagBadges defId={c.defId} />
-                                {selected && <div style={{ color: 'var(--red)', fontSize: 11, marginTop: 4, fontWeight: 700 }}>✓ 捨てる</div>}
+                                {selected && <div style={{ color: 'var(--red)', fontSize: 'var(--fs-xl)', marginTop: 4, fontWeight: 700 }}>✓ 捨てる</div>}
                             </div>
                         );
                     })}
@@ -2096,10 +2471,10 @@ function PaydayUI({ G, moves, myPid, isOnline }: { G: GameState; moves: any; myP
         return (
             <div className="game-bg" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
                 <div className="glass-card animate-slide-up" style={{ padding: 40, maxWidth: 420, width: '100%', textAlign: 'center' }}>
-                    <div style={{ fontSize: 48, marginBottom: 16, animation: 'pulse 2s ease-in-out infinite' }}>💰</div>
-                    <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--gold)', marginBottom: 8 }}>給料日処理中...</h2>
+                    <div style={{ fontSize: 'var(--fs-icon)', marginBottom: 16, animation: 'pulse 2s ease-in-out infinite' }}>💰</div>
+                    <h2 style={{ fontSize: 'var(--fs-4xl)', fontWeight: 700, color: 'var(--gold)', marginBottom: 8 }}>給料日処理中...</h2>
                     <p style={{ color: 'var(--text-secondary)', marginBottom: 4 }}>あなたの賌金は自動支払い済みです</p>
-                    {waiting.length > 0 && <p style={{ color: 'var(--text-dim)', fontSize: 12, marginTop: 8 }}>待機中: {waiting.map(([pid]) => `P${parseInt(pid) + 1}`).join(', ')}</p>}
+                    {waiting.length > 0 && <p style={{ color: 'var(--text-dim)', fontSize: 'var(--fs-xl2)', marginTop: 8 }}>待機中: {waiting.map(([pid]) => `P${parseInt(pid) + 1}`).join(', ')}</p>}
                 </div>
             </div>
         );
@@ -2127,31 +2502,31 @@ function PaydayUI({ G, moves, myPid, isOnline }: { G: GameState; moves: any; myP
     return (
         <div className="game-bg" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
             <div className="modal-content animate-slide-up" style={{ maxWidth: 640 }}>
-                <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--gold)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <IconPayment size={22} color="var(--gold)" /> 給料日 — P{parseInt(targetPid) + 1}
+                <h2 style={{ fontSize: 'var(--fs-4xl)', fontWeight: 700, color: 'var(--gold)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <IconPayment size={"calc(var(--fs) * 2.44)"} color="var(--gold)" /> 給料日 — P{parseInt(targetPid) + 1}
                 </h2>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
                     <div className="glass-card" style={{ padding: 12 }}>
-                        <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>賌金</div>
-                        <div style={{ fontSize: 14, fontWeight: 700, marginTop: 4 }}>
+                        <div style={{ fontSize: 'var(--fs-xl)', color: 'var(--text-dim)' }}>賌金</div>
+                        <div style={{ fontSize: 'var(--fs-2xl)', fontWeight: 700, marginTop: 4 }}>
                             ${ps.wagePerWorker}/人 × {Math.max(0, p.workers - p.robotWorkers)}人 = <span style={{ color: 'var(--red)' }}>${totalWage}</span>
                         </div>
                     </div>
                     <div className="glass-card" style={{ padding: 12 }}>
-                        <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>所持金 + 売却</div>
-                        <div style={{ fontSize: 14, fontWeight: 700, marginTop: 4 }}>
+                        <div style={{ fontSize: 'var(--fs-xl)', color: 'var(--text-dim)' }}>所持金 + 売却</div>
+                        <div style={{ fontSize: 'var(--fs-2xl)', fontWeight: 700, marginTop: 4 }}>
                             <span style={{ color: 'var(--gold-light)' }}>${p.money}</span> + <span style={{ color: 'var(--green)' }}>${sellTotal}</span> = <span style={{ color: totalFunds >= totalWage ? 'var(--green)' : 'var(--red)' }}>${totalFunds}</span>
                         </div>
                     </div>
                 </div>
 
-                {shortage > 0 && <p style={{ color: 'var(--red)', marginBottom: 12, fontSize: 13 }}>⚠️ 不足: ${shortage} — 建物を売却してください（1VP=$1）</p>}
+                {shortage > 0 && <p style={{ color: 'var(--red)', marginBottom: 12, fontSize: 'var(--fs-xl3)' }}>⚠️ 不足: ${shortage} — 建物を売却してください（1VP=$1）</p>}
 
                 {p.buildings.length > 0 && (
                     <div style={{ marginBottom: 12 }}>
-                        <span style={{ fontSize: 11, color: 'var(--text-dim)', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4 }}>
-                            <IconHouse size={14} /> 建物（クリックで売却選択/解除）:
+                        <span style={{ fontSize: 'var(--fs-xl)', color: 'var(--text-dim)', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <IconHouse size={"calc(var(--fs) * 1.56)"} /> 建物（クリックで売却選択/解除）:
                         </span>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
                             {p.buildings.map((b, bi) => {
@@ -2164,10 +2539,10 @@ function PaydayUI({ G, moves, myPid, isOnline }: { G: GameState; moves: any; myP
                                         style={{
                                             ...(selected ? { borderColor: 'var(--gold)', boxShadow: 'var(--glow-gold)' } : {}),
                                         }}>
-                                        <div style={{ fontWeight: 700, fontSize: 12 }}>{def.name}</div>
-                                        <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>{def.vp}VP = <b style={{ color: 'var(--gold-light)' }}>${def.vp}</b></div>
-                                        {disabled && <div style={{ color: 'var(--red)', fontSize: 9 }}>売却不可</div>}
-                                        {selected && <div style={{ color: 'var(--gold)', fontSize: 11, marginTop: 3, fontWeight: 700 }}>✓ 売却</div>}
+                                        <div style={{ fontWeight: 700, fontSize: 'var(--fs-xl2)' }}>{def.name}</div>
+                                        <div style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-dim)' }}>{def.vp}VP = <b style={{ color: 'var(--gold-light)' }}>${def.vp}</b></div>
+                                        {disabled && <div style={{ color: 'var(--red)', fontSize: 'var(--fs-base)' }}>売却不可</div>}
+                                        {selected && <div style={{ color: 'var(--gold)', fontSize: 'var(--fs-xl)', marginTop: 3, fontWeight: 700 }}>✓ 売却</div>}
                                     </div>
                                 );
                             })}
@@ -2175,7 +2550,7 @@ function PaydayUI({ G, moves, myPid, isOnline }: { G: GameState; moves: any; myP
                     </div>
                 )}
 
-                {isExcessive && <p style={{ color: 'var(--orange)', fontSize: 12, marginBottom: 8 }}>⚠️ 余分に建物を売ることはできません</p>}
+                {isExcessive && <p style={{ color: 'var(--orange)', fontSize: 'var(--fs-xl2)', marginBottom: 8 }}>⚠️ 余分に建物を売ることはできません</p>}
 
                 <button onClick={() => {
                     soundManager.playSFX('click');
@@ -2183,7 +2558,7 @@ function PaydayUI({ G, moves, myPid, isOnline }: { G: GameState; moves: any; myP
                 }}
                     disabled={!canConfirm}
                     className="btn-primary">
-                    <IconPayment size={16} /> 支払い確定{!canAfford && allSellableSelected ? `（不足$${totalWage - totalFunds}は負債）` : ''}
+                    <IconPayment size={"calc(var(--fs) * 1.78)"} /> 支払い確定{!canAfford && allSellableSelected ? `（不足$${totalWage - totalFunds}は負債）` : ''}
                 </button>
             </div>
         </div>
@@ -2207,10 +2582,10 @@ function CleanupUI({ G, moves, myPid, isOnline }: { G: GameState; moves: any; my
         return (
             <div className="game-bg" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
                 <div className="glass-card animate-slide-up" style={{ padding: 40, maxWidth: 420, width: '100%', textAlign: 'center' }}>
-                    <div style={{ fontSize: 48, marginBottom: 16, animation: 'pulse 2s ease-in-out infinite' }}>🗑️</div>
-                    <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--gold)', marginBottom: 8 }}>精算処理中...</h2>
+                    <div style={{ fontSize: 'var(--fs-icon)', marginBottom: 16, animation: 'pulse 2s ease-in-out infinite' }}>🗑️</div>
+                    <h2 style={{ fontSize: 'var(--fs-4xl)', fontWeight: 700, color: 'var(--gold)', marginBottom: 8 }}>精算処理中...</h2>
                     <p style={{ color: 'var(--text-secondary)', marginBottom: 4 }}>あなたの手札整理は完了しています</p>
-                    {waiting.length > 0 && <p style={{ color: 'var(--text-dim)', fontSize: 12, marginTop: 8 }}>待機中: {waiting.map(([pid]) => `P${parseInt(pid) + 1}`).join(', ')}</p>}
+                    {waiting.length > 0 && <p style={{ color: 'var(--text-dim)', fontSize: 'var(--fs-xl2)', marginTop: 8 }}>待機中: {waiting.map(([pid]) => `P${parseInt(pid) + 1}`).join(', ')}</p>}
                 </div>
             </div>
         );
@@ -2222,8 +2597,8 @@ function CleanupUI({ G, moves, myPid, isOnline }: { G: GameState; moves: any; my
     return (
         <div className="game-bg" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
             <div className="modal-content animate-slide-up" style={{ maxWidth: 750 }}>
-                <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--gold)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <IconTrash size={22} color="var(--gold)" /> 精算 — P{parseInt(targetPid) + 1}
+                <h2 style={{ fontSize: 'var(--fs-4xl)', fontWeight: 700, color: 'var(--gold)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <IconTrash size={"calc(var(--fs) * 2.44)"} color="var(--gold)" /> 精算 — P{parseInt(targetPid) + 1}
                 </h2>
                 <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>
                     手札上限 {p.maxHandSize}枚を超えています。<b style={{ color: 'var(--red)' }}>{excessCount}枚</b>捨ててください（選択中: {selectedIndices.length}枚）
@@ -2236,12 +2611,12 @@ function CleanupUI({ G, moves, myPid, isOnline }: { G: GameState; moves: any; my
                                 className={`game-card game-card-clickable`}
                                 style={{
                                     minWidth: 90,
-                                    ...(selected ? { borderColor: 'var(--red)', boxShadow: '0 0 15px rgba(248, 113, 113, 0.2)' } : {}),
+                                    ...(selected ? { borderColor: 'var(--red)', boxShadow: '0 0 15px var(--red-30)' } : {}),
                                 }}>
-                                <div style={{ fontWeight: 700, fontSize: 12 }}>{cName(c.defId)}</div>
-                                {!isConsumable(c) && <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>C{getCardDef(c.defId).cost}/{getCardDef(c.defId).vp}VP</div>}
+                                <div style={{ fontWeight: 700, fontSize: 'var(--fs-xl2)' }}>{cName(c.defId)}</div>
+                                {!isConsumable(c) && <div style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-dim)' }}>C{getCardDef(c.defId).cost}/{getCardDef(c.defId).vp}VP</div>}
                                 <TagBadges defId={c.defId} />
-                                {selected && <div style={{ color: 'var(--red)', fontSize: 11, marginTop: 3, fontWeight: 700 }}>✓ 捨てる</div>}
+                                {selected && <div style={{ color: 'var(--red)', fontSize: 'var(--fs-xl)', marginTop: 3, fontWeight: 700 }}>✓ 捨てる</div>}
                             </div>
                         );
                     })}
@@ -2260,37 +2635,53 @@ function CleanupUI({ G, moves, myPid, isOnline }: { G: GameState; moves: any; my
 // 捨て札表示モーダル
 // ============================================================
 function DiscardPileModal({ discard, onClose }: { discard: GameState['discard']; onClose: () => void }) {
-    const groups: Record<string, number> = {};
+    // defIdでグループ化（コスト順ソート）
+    const groups: Record<string, { defId: string; count: number }> = {};
     for (const c of discard) {
-        const n = cName(c.defId);
-        groups[n] = (groups[n] || 0) + 1;
+        if (!groups[c.defId]) groups[c.defId] = { defId: c.defId, count: 0 };
+        groups[c.defId].count++;
     }
-    const entries = Object.entries(groups).sort((a, b) => b[1] - a[1]);
+    const entries = Object.values(groups).sort((a, b) => {
+        const da = getCardDef(a.defId), db = getCardDef(b.defId);
+        return da.cost - db.cost || da.name.localeCompare(db.name);
+    });
     return (
-        <div className="modal-overlay" onClick={onClose}>
-            <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 420 }}>
-                <h2 style={{ fontSize: 18, fontWeight: 700, color: 'var(--orange)', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <IconDiscard size={20} color="var(--orange)" /> 捨て札（{discard.length}枚）
+        <div className="modal-overlay" onClick={onClose} style={{ zIndex: 99999 }}>
+            <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 640, maxHeight: '80vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                <h2 style={{ fontSize: 'var(--fs-4xl)', fontWeight: 700, color: 'var(--orange)', marginBottom: 'var(--sp-4)', display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', flexShrink: 0 }}>
+                    <IconDiscard size={"calc(var(--fs) * 2.22)"} color="var(--orange)" /> 捨て札（{discard.length}枚）
                 </h2>
                 {entries.length === 0 ? <p style={{ color: 'var(--text-dim)' }}>なし</p> : (
-                    <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
-                        <thead>
-                            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-                                <th style={{ textAlign: 'left', padding: '6px 0', color: 'var(--text-dim)', fontWeight: 500 }}>カード名</th>
-                                <th style={{ textAlign: 'right', padding: '6px 0', color: 'var(--text-dim)', fontWeight: 500 }}>枚数</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {entries.map(([name, count]) => (
-                                <tr key={name} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                                    <td style={{ padding: '5px 0' }}>{name}</td>
-                                    <td style={{ textAlign: 'right', padding: '5px 0', color: 'var(--orange)', fontWeight: 700 }}>{count}</td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                    <div className="discard-grid">
+                        {entries.map(({ defId, count }) => {
+                            const def = getCardDef(defId);
+                            const imgSrc = def.image ? `${import.meta.env.BASE_URL}${def.image.replace(/^\//, '')}` : null;
+                            return (
+                                <div key={defId} className="discard-grid-card">
+                                    {count > 1 && <div className="discard-count-badge">×{count}</div>}
+                                    <div className="discard-card-image">
+                                        {imgSrc ? <img src={imgSrc} alt={def.name} /> : (
+                                            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-dim)', fontSize: 'var(--fs-3xl)' }}>🃏</div>
+                                        )}
+                                    </div>
+                                    <div className="discard-card-info">
+                                        <div className="discard-card-name">{def.name}</div>
+                                        <div className="discard-card-stats">
+                                            <span>C<b style={{ color: 'var(--gold-light)' }}>{def.cost}</b></span>
+                                            <span><b style={{ color: 'var(--gold-light)' }}>{def.vp}</b>VP</span>
+                                        </div>
+                                        {def.effectText && (
+                                            <div className="discard-card-effect">
+                                                {renderEffectText(def.effectText)}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
                 )}
-                <button onClick={() => { soundManager.playSFX('click'); onClose(); }} className="btn-ghost" style={{ marginTop: 16 }}>閉じる</button>
+                <button onClick={() => { soundManager.playSFX('click'); onClose(); }} className="btn-ghost" style={{ marginTop: 'var(--sp-4)', flexShrink: 0 }}>閉じる</button>
             </div>
         </div>
     );
@@ -2311,8 +2702,8 @@ function GameOver({ G }: { G: GameState }) {
     return (
         <div className="game-bg" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
             <div className="modal-content animate-slide-up" style={{ maxWidth: 700 }}>
-                <h1 className="trophy-glow" style={{ textAlign: 'center', fontSize: 32, fontWeight: 900, color: 'var(--gold)', marginBottom: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
-                    <IconTrophy size={48} color="var(--gold)" /> ゲーム終了！
+                <h1 className="trophy-glow" style={{ textAlign: 'center', fontSize: 'var(--fs-4xl)', fontWeight: 900, color: 'var(--gold)', marginBottom: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
+                    <IconTrophy size={"calc(var(--fs) * 5.33)"} color="var(--gold)" /> ゲーム終了！
                 </h1>
                 {G.finalScores.map((s, i) => {
                     const isExpanded = expandedPlayer === s.playerIndex;
@@ -2320,32 +2711,32 @@ function GameOver({ G }: { G: GameState }) {
                     return (
                         <div key={s.playerIndex} className="glass-card" style={{
                             marginBottom: 12, padding: 16,
-                            ...(i === 0 ? { borderColor: 'rgba(212, 168, 83, 0.3)', boxShadow: 'var(--glow-gold)' } : {}),
+                            ...(i === 0 ? { borderColor: 'var(--gold-40)', boxShadow: 'var(--glow-gold)' } : {}),
                         }}>
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                                    <span style={{ fontSize: 28 }}>{['🥇', '🥈', '🥉'][i] || `${i + 1}位`}</span>
-                                    <span style={{ fontWeight: 700, fontSize: 18 }}>P{s.playerIndex + 1}</span>
+                                    <span style={{ fontSize: 'var(--fs-4xl)' }}>{['🥇', '🥈', '🥉'][i] || `${i + 1}位`}</span>
+                                    <span style={{ fontWeight: 700, fontSize: 'var(--fs-4xl)' }}>P{s.playerIndex + 1}</span>
                                 </div>
-                                <span style={{ fontSize: 28, fontWeight: 900, color: 'var(--gold)' }}>{s.breakdown.total}VP</span>
+                                <span style={{ fontSize: 'var(--fs-4xl)', fontWeight: 900, color: 'var(--gold)' }}>{s.breakdown.total}VP</span>
                             </div>
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginTop: 12 }}>
                                 <div className="glass-card" style={{ padding: 10 }}>
-                                    <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>建物合計</div>
-                                    <div style={{ fontWeight: 700, color: 'var(--green)', fontSize: 16 }}>{s.breakdown.buildingVP + s.breakdown.bonusVP}VP</div>
-                                    <button onClick={() => { soundManager.playSFX('click'); setExpandedPlayer(isExpanded ? null : s.playerIndex); }} className="btn-ghost" style={{ fontSize: 9, marginTop: 4, padding: '1px 6px' }}>
+                                    <div style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-dim)' }}>建物合計</div>
+                                    <div style={{ fontWeight: 700, color: 'var(--green)', fontSize: 'var(--fs-3xl)' }}>{s.breakdown.buildingVP + s.breakdown.bonusVP}VP</div>
+                                    <button onClick={() => { soundManager.playSFX('click'); setExpandedPlayer(isExpanded ? null : s.playerIndex); }} className="btn-ghost" style={{ fontSize: 'var(--fs-base)', marginTop: 4, padding: '1px 6px' }}>
                                         {isExpanded ? '▲ 閉じる' : '▼ 内訳'}
                                     </button>
                                 </div>
                                 <div className="glass-card" style={{ padding: 10 }}>
-                                    <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>所持金</div>
-                                    <div style={{ fontWeight: 700, color: 'var(--gold-light)', fontSize: 16 }}>{s.breakdown.moneyVP}VP</div>
+                                    <div style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-dim)' }}>所持金</div>
+                                    <div style={{ fontWeight: 700, color: 'var(--gold-light)', fontSize: 'var(--fs-3xl)' }}>{s.breakdown.moneyVP}VP</div>
                                 </div>
                                 <div className="glass-card" style={{ padding: 10 }}>
-                                    <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>未払い賃金</div>
-                                    <div style={{ fontWeight: 700, color: 'var(--red)', fontSize: 16 }}>{s.breakdown.debtVP}VP</div>
+                                    <div style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-dim)' }}>未払い賃金</div>
+                                    <div style={{ fontWeight: 700, color: 'var(--red)', fontSize: 'var(--fs-3xl)' }}>{s.breakdown.debtVP}VP</div>
                                     {s.breakdown.rawDebts > 0 && (
-                                        <button onClick={() => { soundManager.playSFX('click'); setExpandedDebt(isDebtExpanded ? null : s.playerIndex); }} className="btn-ghost" style={{ fontSize: 9, marginTop: 4, padding: '1px 6px' }}>
+                                        <button onClick={() => { soundManager.playSFX('click'); setExpandedDebt(isDebtExpanded ? null : s.playerIndex); }} className="btn-ghost" style={{ fontSize: 'var(--fs-base)', marginTop: 4, padding: '1px 6px' }}>
                                             {isDebtExpanded ? '▲ 閉じる' : '▼ 内訳'}
                                         </button>
                                     )}
@@ -2353,11 +2744,11 @@ function GameOver({ G }: { G: GameState }) {
                             </div>
                             {isExpanded && s.breakdown.buildingDetails && (
                                 <div className="glass-card" style={{ marginTop: 8, padding: 12 }}>
-                                    <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 6 }}>📋 建物VP内訳:</div>
+                                    <div style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-dim)', marginBottom: 6 }}>📋 建物VP内訳:</div>
                                     {s.breakdown.buildingDetails.map((bd, bdi) => (
                                         <div key={bdi} style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                                            <span style={{ fontSize: 12 }}>{bd.name}</span>
-                                            <span style={{ fontSize: 12, color: 'var(--green)', fontWeight: 600 }}>
+                                            <span style={{ fontSize: 'var(--fs-xl2)' }}>{bd.name}</span>
+                                            <span style={{ fontSize: 'var(--fs-xl2)', color: 'var(--green)', fontWeight: 600 }}>
                                                 {bd.bonusVP > 0 ? `${bd.baseVP} + ${bd.bonusVP}` : `${bd.baseVP}`}VP
                                             </span>
                                         </div>
@@ -2366,18 +2757,18 @@ function GameOver({ G }: { G: GameState }) {
                             )}
                             {isDebtExpanded && s.breakdown.rawDebts > 0 && (
                                 <div className="glass-card" style={{ marginTop: 8, padding: 12 }}>
-                                    <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 6 }}>📋 未払い賃金内訳:</div>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: 12, borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                                    <div style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-dim)', marginBottom: 6 }}>📋 未払い賃金内訳:</div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: 'var(--fs-xl2)', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
                                         <span>未払い賃金カード</span>
                                         <span style={{ color: 'var(--red)' }}>{s.breakdown.rawDebts}枚 × -3 = {s.breakdown.rawDebts * -3}VP</span>
                                     </div>
                                     {s.breakdown.hasLawOffice && s.breakdown.exemptedDebts > 0 && (
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: 12, borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', fontSize: 'var(--fs-xl2)', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
                                             <span>法律事務所による免除</span>
                                             <span style={{ color: 'var(--green)' }}>+{s.breakdown.exemptedDebts * 3}VP（{s.breakdown.exemptedDebts}枚免除）</span>
                                         </div>
                                     )}
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', marginTop: 4, fontWeight: 700, fontSize: 12 }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', marginTop: 4, fontWeight: 700, fontSize: 'var(--fs-xl2)' }}>
                                         <span>合計</span>
                                         <span style={{ color: 'var(--red)' }}>{s.breakdown.debtVP}VP</span>
                                     </div>
@@ -2390,7 +2781,7 @@ function GameOver({ G }: { G: GameState }) {
                     <button onClick={() => { soundManager.playSFX('click'); setShowFinalLog(!showFinalLog); }} className="btn-ghost" style={{ padding: '10px 20px' }}>
                         📜 ゲームログ
                     </button>
-                    <button onClick={() => { soundManager.playSFX('click'); window.location.reload(); }} className="btn-primary" style={{ padding: '10px 28px', fontSize: 16 }}>
+                    <button onClick={() => { soundManager.playSFX('click'); window.location.reload(); }} className="btn-primary" style={{ padding: '10px 28px', fontSize: 'var(--fs-3xl)' }}>
                         🔄 もう一度
                     </button>
                 </div>

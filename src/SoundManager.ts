@@ -35,13 +35,131 @@ class SoundManager {
 
     /** BGMトラック定義 */
     public readonly bgmTracks = [
-        { id: 'relax', name: 'Relaxing (Default)', src: `${BASE}audio/bgm_relax.mp3` },
-        { id: 'fast', name: 'Fast Paced', src: `${BASE}audio/bgm_fast.mp3` },
-        { id: 'upbeat', name: 'Upbeat', src: `${BASE}audio/bgm_upbeat.mp3` },
-        { id: 'jazz', name: 'Jazz Lounge', src: `${BASE}audio/bgm_jazz.mp3` },
+        // --- オリジナルBGM ---
+        { id: 'relax', name: 'Relaxing (Default)', src: `${BASE}audio/bgm_relax.mp3`, category: 'オリジナル' },
+        { id: 'fast', name: 'Fast Paced', src: `${BASE}audio/bgm_fast.mp3`, category: 'オリジナル' },
+        { id: 'upbeat', name: 'Upbeat', src: `${BASE}audio/bgm_upbeat.mp3`, category: 'オリジナル' },
+        { id: 'jazz', name: 'Jazz Lounge', src: `${BASE}audio/bgm_jazz.mp3`, category: 'オリジナル' },
+        // --- ポケモン 赤緑/FRLG ---
+        { id: 'pkmn_masara', name: 'マサラタウン', src: `${BASE}audio/pokemon_bgm/tracks/01_masara_town_rgfrlg.mp3`, category: '赤緑/FRLG' },
+        { id: 'pkmn_route1_rg', name: '1ばんどうろ', src: `${BASE}audio/pokemon_bgm/tracks/05_route1_rgfrlg.mp3`, category: '赤緑/FRLG' },
+        { id: 'pkmn_guren', name: 'グレンタウン', src: `${BASE}audio/pokemon_bgm/tracks/11_guren_town_rgfrlg.mp3`, category: '赤緑/FRLG' },
+        { id: 'pkmn_tokiwa', name: 'トキワシティ', src: `${BASE}audio/pokemon_bgm/tracks/18_tokiwa_city_rgfrlg.mp3`, category: '赤緑/FRLG' },
+        { id: 'pkmn_kuchiba', name: 'クチバシティ', src: `${BASE}audio/pokemon_bgm/tracks/25_kuchiba_city_rgfrlg.mp3`, category: '赤緑/FRLG' },
+        { id: 'pkmn_opening_rg', name: 'オープニング初代', src: `${BASE}audio/pokemon_bgm/tracks/32_opening_rgfrlg.mp3`, category: '赤緑/FRLG' },
+        { id: 'pkmn_tamamushi', name: 'タマムシシティ', src: `${BASE}audio/pokemon_bgm/tracks/40_tamamushi_city_rgfrlg.mp3`, category: '赤緑/FRLG' },
+        { id: 'pkmn_otsukimiyama', name: 'おつきみやま', src: `${BASE}audio/pokemon_bgm/tracks/47_otsukimi_yama_rgfrlg.mp3`, category: '赤緑/FRLG' },
+        { id: 'pkmn_shion', name: 'シオンタウン', src: `${BASE}audio/pokemon_bgm/tracks/53_shion_town_rgfrlg.mp3`, category: '赤緑/FRLG' },
+        // --- ポケモン 金銀/HGSS ---
+        { id: 'pkmn_pokecen_gs', name: 'ポケモンセンター', src: `${BASE}audio/pokemon_bgm/tracks/04_pokemon_center_gshgss.mp3`, category: '金銀/HGSS' },
+        { id: 'pkmn_yoshino', name: 'ヨシノシティ', src: `${BASE}audio/pokemon_bgm/tracks/10_yoshino_city_gshgss.mp3`, category: '金銀/HGSS' },
+        { id: 'pkmn_enju', name: 'エンジュシティ', src: `${BASE}audio/pokemon_bgm/tracks/17_enju_city_gshgss.mp3`, category: '金銀/HGSS' },
+        { id: 'pkmn_naminori_gs', name: 'なみのり', src: `${BASE}audio/pokemon_bgm/tracks/24_naminori_gshgss.mp3`, category: '金銀/HGSS' },
+        { id: 'pkmn_kikyou', name: 'キキョウシティ', src: `${BASE}audio/pokemon_bgm/tracks/31_kikyou_city_gshgss.mp3`, category: '金銀/HGSS' },
+        { id: 'pkmn_kogane', name: 'コガネシティ', src: `${BASE}audio/pokemon_bgm/tracks/39_kogane_city_gshgss.mp3`, category: '金銀/HGSS' },
+        { id: 'pkmn_ending_gs', name: 'エンディング', src: `${BASE}audio/pokemon_bgm/tracks/46_ending_gshgss.mp3`, category: '金銀/HGSS' },
+        { id: 'pkmn_route26', name: '26番道路', src: `${BASE}audio/pokemon_bgm/tracks/52_route26_gshgss.mp3`, category: '金銀/HGSS' },
+        { id: 'pkmn_kikyou2', name: 'キキョウシティ (2)', src: `${BASE}audio/pokemon_bgm/tracks/59_kikyou_city2_gshgss.mp3`, category: '金銀/HGSS' },
+        { id: 'pkmn_hiwada', name: 'ヒワダタウン', src: `${BASE}audio/pokemon_bgm/tracks/63_hiwada_town_gshgss.mp3`, category: '金銀/HGSS' },
+        { id: 'pkmn_wakaba', name: 'ワカバタウン', src: `${BASE}audio/pokemon_bgm/tracks/67_wakaba_town_gshgss.mp3`, category: '金銀/HGSS' },
+        // --- ポケモン RSE/ORAS ---
+        { id: 'pkmn_fuen', name: 'フエンタウン', src: `${BASE}audio/pokemon_bgm/tracks/03_fuen_town_rseoras.mp3`, category: 'RSE/ORAS' },
+        { id: 'pkmn_naminori_rse', name: 'なみのり', src: `${BASE}audio/pokemon_bgm/tracks/09_naminori_rseoras.mp3`, category: 'RSE/ORAS' },
+        { id: 'pkmn_kanazumi', name: 'カナズミシティ', src: `${BASE}audio/pokemon_bgm/tracks/16_kanazumi_city_rseoras.mp3`, category: 'RSE/ORAS' },
+        { id: 'pkmn_mishiro', name: 'ミシロタウン', src: `${BASE}audio/pokemon_bgm/tracks/23_mishiro_town_rseoras.mp3`, category: 'RSE/ORAS' },
+        { id: 'pkmn_kaina', name: 'カイナシティ', src: `${BASE}audio/pokemon_bgm/tracks/30_kaina_city_rseoras.mp3`, category: 'RSE/ORAS' },
+        { id: 'pkmn_hiwamaki', name: 'ヒワマキシティ', src: `${BASE}audio/pokemon_bgm/tracks/38_hiwamaki_city_rseoras.mp3`, category: 'RSE/ORAS' },
+        { id: 'pkmn_touka', name: 'トウカシティ', src: `${BASE}audio/pokemon_bgm/tracks/45_touka_city_rseoras.mp3`, category: 'RSE/ORAS' },
+        { id: 'pkmn_route101', name: '101ばんどうろ', src: `${BASE}audio/pokemon_bgm/tracks/58_route101_rseoras.mp3`, category: 'RSE/ORAS' },
+        { id: 'pkmn_touka2', name: 'トウカシティ (2)', src: `${BASE}audio/pokemon_bgm/tracks/62_touka_city2_rseoras.mp3`, category: 'RSE/ORAS' },
+        { id: 'pkmn_mishiro2', name: 'ミシロタウン (2)', src: `${BASE}audio/pokemon_bgm/tracks/66_mishiro_town2_rseoras.mp3`, category: 'RSE/ORAS' },
+        { id: 'pkmn_muro', name: 'ムロタウン', src: `${BASE}audio/pokemon_bgm/tracks/71_muro_town_rseoras.mp3`, category: 'RSE/ORAS' },
+        // --- ポケモン DP/BDSP ---
+        { id: 'pkmn_route209', name: '209ばんどうろ', src: `${BASE}audio/pokemon_bgm/tracks/02_route209_dpbdsp.mp3`, category: 'DP/BDSP' },
+        { id: 'pkmn_kotobuki', name: 'コトブキシティ', src: `${BASE}audio/pokemon_bgm/tracks/08_kotobuki_city_dpbdsp.mp3`, category: 'DP/BDSP' },
+        { id: 'pkmn_mio', name: 'ミオシティ', src: `${BASE}audio/pokemon_bgm/tracks/15_mio_city_dpbdsp.mp3`, category: 'DP/BDSP' },
+        { id: 'pkmn_nagisa', name: 'ナギサシティ', src: `${BASE}audio/pokemon_bgm/tracks/22_nagisa_city_dpbdsp.mp3`, category: 'DP/BDSP' },
+        { id: 'pkmn_futaba', name: 'フタバタウン', src: `${BASE}audio/pokemon_bgm/tracks/29_futaba_town_dpbdsp.mp3`, category: 'DP/BDSP' },
+        { id: 'pkmn_route201', name: '201ばんどうろ', src: `${BASE}audio/pokemon_bgm/tracks/37_route201_dpbdsp.mp3`, category: 'DP/BDSP' },
+        { id: 'pkmn_friendly_shop', name: 'フレンドリィショップ', src: `${BASE}audio/pokemon_bgm/tracks/44_friendly_shop_dpbdsp.mp3`, category: 'DP/BDSP' },
+        { id: 'pkmn_opening_dp', name: 'オープニング', src: `${BASE}audio/pokemon_bgm/tracks/57_opening_dpbdsp.mp3`, category: 'DP/BDSP' },
+        { id: 'pkmn_jitensha_dp', name: 'じてんしゃ', src: `${BASE}audio/pokemon_bgm/tracks/61_jitensha_dpbdsp.mp3`, category: 'DP/BDSP' },
+        { id: 'pkmn_mizuumi', name: 'みずうみ', src: `${BASE}audio/pokemon_bgm/tracks/65_mizuumi_dpbdsp.mp3`, category: 'DP/BDSP' },
+        { id: 'pkmn_hakutai', name: 'ハクタイシティ', src: `${BASE}audio/pokemon_bgm/tracks/70_hakutai_city_dpbdsp.mp3`, category: 'DP/BDSP' },
+        { id: 'pkmn_masago', name: 'マサゴタウン', src: `${BASE}audio/pokemon_bgm/tracks/73_masago_town_dpbdsp.mp3`, category: 'DP/BDSP' },
+        // --- ポケモン BW ---
+        { id: 'pkmn_raimon', name: 'ライモンシティ', src: `${BASE}audio/pokemon_bgm/tracks/06_raimon_city_bw.mp3`, category: 'BW' },
+        { id: 'pkmn_skyarrow', name: 'スカイアローブリッジ', src: `${BASE}audio/pokemon_bgm/tracks/07_sky_arrow_bridge_bw.mp3`, category: 'BW' },
+        { id: 'pkmn_hiun', name: 'ヒウンシティ', src: `${BASE}audio/pokemon_bgm/tracks/12_hiun_city_bw.mp3`, category: 'BW' },
+        { id: 'pkmn_kagome', name: 'カゴメタウン', src: `${BASE}audio/pokemon_bgm/tracks/13_kagome_town_bw.mp3`, category: 'BW' },
+        { id: 'pkmn_marine_tube', name: 'マリンチューブ', src: `${BASE}audio/pokemon_bgm/tracks/14_marine_tube_bw.mp3`, category: 'BW' },
+        { id: 'pkmn_sazanami', name: 'サザナミタウン', src: `${BASE}audio/pokemon_bgm/tracks/19_sazanami_town_bw.mp3`, category: 'BW' },
+        { id: 'pkmn_sayonara', name: 'サヨナラ', src: `${BASE}audio/pokemon_bgm/tracks/20_sayonara_bw.mp3`, category: 'BW' },
+        { id: 'pkmn_hiougi', name: 'ヒオウギシティ', src: `${BASE}audio/pokemon_bgm/tracks/21_hiougi_city_bw.mp3`, category: 'BW' },
+        { id: 'pkmn_kanoko', name: 'カノコタウン', src: `${BASE}audio/pokemon_bgm/tracks/26_kanoko_town_bw.mp3`, category: 'BW' },
+        { id: 'pkmn_yume_no_ato', name: '夢の跡地', src: `${BASE}audio/pokemon_bgm/tracks/27_yume_no_ato_bw.mp3`, category: 'BW' },
+        { id: 'pkmn_jitensha_bw', name: 'じてんしゃ', src: `${BASE}audio/pokemon_bgm/tracks/28_jitensha_bw.mp3`, category: 'BW' },
+        { id: 'pkmn_route10', name: '10ばんどうろ', src: `${BASE}audio/pokemon_bgm/tracks/33_route10_bw.mp3`, category: 'BW' },
+        { id: 'pkmn_route12', name: '12ばんどうろ', src: `${BASE}audio/pokemon_bgm/tracks/34_route12_bw.mp3`, category: 'BW' },
+        { id: 'pkmn_route1_bw', name: '1ばんどうろ', src: `${BASE}audio/pokemon_bgm/tracks/35_route1_bw.mp3`, category: 'BW' },
+        { id: 'pkmn_route2_bw', name: '2ばんどうろ', src: `${BASE}audio/pokemon_bgm/tracks/36_route2_bw.mp3`, category: 'BW' },
+        { id: 'pkmn_route6', name: '6ばんどうろ', src: `${BASE}audio/pokemon_bgm/tracks/41_route6_bw.mp3`, category: 'BW' },
+        { id: 'pkmn_n_room', name: 'Nの部屋', src: `${BASE}audio/pokemon_bgm/tracks/42_n_room_bw.mp3`, category: 'BW' },
+        { id: 'pkmn_inishie', name: 'いにしえのうた', src: `${BASE}audio/pokemon_bgm/tracks/43_inishie_no_uta_bw.mp3`, category: 'BW' },
+        { id: 'pkmn_shippou', name: 'シッポウシティ', src: `${BASE}audio/pokemon_bgm/tracks/48_shippou_city_bw.mp3`, category: 'BW' },
+        { id: 'pkmn_ryuurasen', name: 'リュウラセンの塔', src: `${BASE}audio/pokemon_bgm/tracks/49_ryuurasen_tower_bw.mp3`, category: 'BW' },
+        { id: 'pkmn_yuruganu', name: '揺れぬ想い', src: `${BASE}audio/pokemon_bgm/tracks/50_yuruganu_omoi_bw.mp3`, category: 'BW' },
+        { id: 'pkmn_kanawa', name: 'カナワタウン', src: `${BASE}audio/pokemon_bgm/tracks/51_kanawa_town_bw.mp3`, category: 'BW' },
+        { id: 'pkmn_karakusa', name: 'カラクサタウン', src: `${BASE}audio/pokemon_bgm/tracks/54_karakusa_town_bw.mp3`, category: 'BW' },
+        { id: 'pkmn_sangi', name: 'サンギタウン', src: `${BASE}audio/pokemon_bgm/tracks/55_sangi_town_bw.mp3`, category: 'BW' },
+        { id: 'pkmn_souryuu', name: 'ソウリュウシティ (White)', src: `${BASE}audio/pokemon_bgm/tracks/56_souryuu_city_white_bw.mp3`, category: 'BW' },
+        { id: 'pkmn_tachiwaki', name: 'タチワキシティ', src: `${BASE}audio/pokemon_bgm/tracks/60_tachiwaki_city_bw.mp3`, category: 'BW' },
+        { id: 'pkmn_fukiyose', name: 'フキヨセシティ', src: `${BASE}audio/pokemon_bgm/tracks/64_fukiyose_city_bw.mp3`, category: 'BW' },
+        { id: 'pkmn_pokemon_lab', name: 'ポケモン研究所', src: `${BASE}audio/pokemon_bgm/tracks/68_pokemon_lab_bw.mp3`, category: 'BW' },
+        { id: 'pkmn_hodomoe', name: 'ホドモエシティ', src: `${BASE}audio/pokemon_bgm/tracks/69_hodomoe_city_bw.mp3`, category: 'BW' },
+        { id: 'pkmn_kodai', name: '古代の城', src: `${BASE}audio/pokemon_bgm/tracks/72_kodai_no_shiro_bw.mp3`, category: 'BW' },
     ];
 
     private currentBgmIndex: number = 0; // Default to relax
+
+    /** BGM変更時のコールバック（UIの曲名表示更新用） */
+    private onTrackChangeCallbacks: ((index: number) => void)[] = [];
+
+    /** BGM変更通知の登録 */
+    onTrackChange(cb: (index: number) => void) {
+        this.onTrackChangeCallbacks.push(cb);
+        return () => {
+            this.onTrackChangeCallbacks = this.onTrackChangeCallbacks.filter(c => c !== cb);
+        };
+    }
+
+    /** トラック変更を通知 */
+    private notifyTrackChange(index: number) {
+        this.onTrackChangeCallbacks.forEach(cb => cb(index));
+    }
+
+    /** ポケモンBGMかどうか判定 */
+    private isPokemonTrack(index: number): boolean {
+        return this.bgmTracks[index]?.id.startsWith('pkmn_') ?? false;
+    }
+
+    /** 同じカテゴリの次のトラックインデックスを取得 */
+    private getNextTrackInCategory(currentIndex: number): number {
+        const currentTrack = this.bgmTracks[currentIndex];
+        if (!currentTrack) return currentIndex;
+
+        const category = currentTrack.category;
+        // 同カテゴリのトラックのインデックスを収集
+        const categoryIndices = this.bgmTracks
+            .map((t, i) => ({ track: t, index: i }))
+            .filter(item => item.track.category === category)
+            .map(item => item.index);
+
+        // 現在位置の次を探す。最後なら先頭に戻る
+        const pos = categoryIndices.indexOf(currentIndex);
+        const nextPos = (pos + 1) % categoryIndices.length;
+        return categoryIndices[nextPos];
+    }
 
     /** BGMの再生開始 */
     playBGM(index?: number) {
@@ -58,8 +176,21 @@ class SoundManager {
             this.bgm.pause();
         }
 
+        const isPokemon = this.isPokemonTrack(this.currentBgmIndex);
+
         this.bgm = new Audio(src);
-        this.bgm.loop = true;
+        // オリジナルBGM: ループ再生 / ポケモンBGM: 曲終了で次曲へ
+        this.bgm.loop = !isPokemon;
+
+        if (isPokemon) {
+            // ポケモン曲が終わったら同カテゴリの次の曲へ自動遷移
+            this.bgm.addEventListener('ended', () => {
+                const nextIndex = this.getNextTrackInCategory(this.currentBgmIndex);
+                this.currentBgmIndex = nextIndex;
+                this.notifyTrackChange(nextIndex);
+                this.playBGM(nextIndex);
+            });
+        }
 
         // 音量が0のときはplayしない（ブラウザポリシー対策）
         if (!this.isMuted && this.bgmVolume > 0) {

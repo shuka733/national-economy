@@ -56,6 +56,257 @@
   --gold-40: rgba(212, 168, 83, 0.4);
   --gold-60: rgba(212, 168, 83, 0.6);
   --red-30: rgba(248, 113, 113, 0.3);
+
+  /* フォントスケーリング: game-scaler外のフォールバック値（ビューポートベース） */
+  --fs: calc(min(100vh, 100vw * 9 / 16) / 64);
+  --fs-xs: calc(var(--fs) * 0.67);
+  --fs-sm: calc(var(--fs) * 0.78);
+  --fs-md: calc(var(--fs) * 0.89);
+  --fs-base: var(--fs);
+  --fs-lg: calc(var(--fs) * 1.11);
+  --fs-xl: calc(var(--fs) * 1.22);
+  --fs-xl2: calc(var(--fs) * 1.33);
+  --fs-xl3: calc(var(--fs) * 1.44);
+  --fs-2xl: calc(var(--fs) * 1.56);
+  --fs-3xl: calc(var(--fs) * 1.78);
+  --fs-4xl: calc(var(--fs) * 2.0);
+  --fs-icon: calc(var(--fs) * 5.33);
+  --fs-announce: calc(var(--fs) * 8.0);
+
+  /* スペーシング: game-scaler外のフォールバック値 */
+  --sp-1: calc(var(--fs) * 0.22);  /* ~2px */
+  --sp-2: calc(var(--fs) * 0.44);  /* ~4px */
+  --sp-3: calc(var(--fs) * 0.67);  /* ~6px */
+  --sp-4: calc(var(--fs) * 0.89);  /* ~8px */
+}
+
+/* --- スチームパンクテーマ（暖色系オーバーライド） ---
+   使い方: document.documentElement.dataset.theme = 'steampunk' で有効化
+   解除:   delete document.documentElement.dataset.theme で元テーマに復帰 */
+[data-theme="steampunk"] {
+  /* ベースカラー: ダークブラウン系 */
+  --bg-deep: #1a1208;
+  --bg-primary: #241c10;
+  --bg-secondary: #2e2418;
+  --bg-card: #362a1c;
+  --bg-elevated: #3e3220;
+
+  /* テキスト: 暖色に合わせたウォームホワイト */
+  --text-primary: #f0e6d6;
+  --text-secondary: #b8a890;
+  --text-dim: #7a6b58;
+
+  /* エフェクト: 暖色ガラス */
+  --glass-bg: rgba(46, 36, 24, 0.85);
+  --glass-border: rgba(212, 168, 83, 0.15);
+  --glow-gold: 0 0 20px rgba(212, 168, 83, 0.4);
+  --glow-teal: 0 0 15px rgba(212, 168, 83, 0.2);
+
+  /* teal → 暖色系のアンバーに置き換え */
+  --teal: #d4a853;
+  --teal-dim: #6b5630;
+  --teal-15: rgba(212, 168, 83, 0.15);
+  --teal-40: rgba(212, 168, 83, 0.4);
+  --teal-60: rgba(212, 168, 83, 0.6);
+
+  /* カードタグ色: 暖色系に統一 */
+  --tag-farm: #c8b88a;           /* 農園: オリーブ → ウォームベージュ */
+  --tag-farm-bg: rgba(180, 150, 80, 0.35);
+  --tag-factory: #d4a060;        /* 工場: 青 → 銅色/ブロンズ */
+  --tag-factory-bg: rgba(200, 150, 60, 0.35);
+  --tag-lock: #e8c97a;
+  --tag-lock-bg: rgba(212, 168, 83, 0.35);
+
+  /* アクセントカラー: 暖色系に統一 */
+  --blue: #c8a060;    /* 青 → アンバー */
+  --green: #b8a060;   /* 緑 → オリーブゴールド */
+  --purple: #c8a070;  /* 紫 → ブロンズ */
+  --orange: #d4a050;  /* オレンジ → ゴールド寄り */
+  --red: #c87050;     /* 赤 → 渋い赤銅色 */
+  --red-30: rgba(200, 112, 80, 0.3);
+
+  /* カード画像ベース色: 暖色系 */
+  --card-image-overlay: #5a4a35;
+}
+
+/* ============================================================
+   スチームパンクテーマ — ゲーム画面オーバーライド
+   ============================================================ */
+
+/* ゲーム画面背景テクスチャ: しっかり見えるように */
+[data-theme="steampunk"] .game-scaler {
+  background:
+    linear-gradient(180deg, rgba(26, 18, 8, 0.55) 0%, rgba(20, 14, 6, 0.7) 100%),
+    url('/bg_game.png') center/cover no-repeat;
+}
+
+/* ヘッダーバー: リッチなゲームHUD */
+[data-theme="steampunk"] .game-header {
+  background: linear-gradient(180deg, rgba(46, 36, 24, 0.98) 0%, rgba(30, 22, 12, 0.95) 100%);
+  border-bottom: 2px solid rgba(212, 168, 83, 0.4);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5), inset 0 -1px 0 rgba(212, 168, 83, 0.1);
+}
+
+/* 相手エリア: しっかりしたパネルフレーム */
+[data-theme="steampunk"] .area-opponents {
+  border: 1px solid rgba(212, 168, 83, 0.25);
+  background: rgba(20, 14, 6, 0.6);
+  box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.3);
+}
+
+/* 相手カード: 革調 */
+[data-theme="steampunk"] .opponent-card {
+  background: linear-gradient(170deg, rgba(56, 44, 28, 0.9) 0%, rgba(36, 28, 16, 0.95) 100%);
+  border: 1px solid rgba(212, 168, 83, 0.2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="steampunk"] .opponent-card-active {
+  border-color: rgba(212, 168, 83, 0.5) !important;
+  background: linear-gradient(145deg, rgba(120, 94, 48, 0.35) 0%, rgba(46, 36, 24, 0.9) 100%);
+  box-shadow: 0 0 16px rgba(212, 168, 83, 0.15), inset 0 1px 0 rgba(212, 168, 83, 0.1);
+}
+
+/* 相手手札カード: ダークレザー */
+[data-theme="steampunk"] .opponent-hand-card {
+  background: linear-gradient(170deg, #3e3020 0%, #2a2010 100%) !important;
+  border-color: rgba(212, 168, 83, 0.25) !important;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+
+/* 相手の建物カード */
+[data-theme="steampunk"] .opponent-building-sprite {
+  background: linear-gradient(170deg, rgba(56, 44, 28, 0.95) 0%, rgba(30, 22, 12, 0.98) 100%);
+  border-color: rgba(212, 168, 83, 0.18);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+/* ステータスバッジ */
+[data-theme="steampunk"] .opponent-stat {
+  background: rgba(212, 168, 83, 0.08);
+  border: 1px solid rgba(212, 168, 83, 0.1);
+}
+
+/* ステータスバッジ共通 */
+[data-theme="steampunk"] .stat-badge {
+  border-color: rgba(212, 168, 83, 0.2);
+}
+
+/* 家計ボックス: ゴールドのリッチ枠 */
+[data-theme="steampunk"] .household-box {
+  background: linear-gradient(145deg, rgba(212, 168, 83, 0.12) 0%, rgba(36, 28, 16, 0.95) 100%);
+  border: 1.5px solid rgba(212, 168, 83, 0.4);
+  box-shadow: 0 0 12px rgba(212, 168, 83, 0.1), inset 0 0 8px rgba(212, 168, 83, 0.05);
+}
+
+[data-theme="steampunk"] .household-box::after {
+  background: linear-gradient(90deg, transparent, rgba(212, 168, 83, 0.08), transparent);
+}
+
+/* デッキカード: 暖色のリッチな見え方 */
+[data-theme="steampunk"] .deck-top-face {
+  border-color: rgba(212, 168, 83, 0.25);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.6), 0 0 4px rgba(212, 168, 83, 0.1);
+}
+
+[data-theme="steampunk"] .deck-card.has-depth::before {
+  background: rgba(30, 22, 12, 0.95);
+  border-color: rgba(212, 168, 83, 0.1);
+}
+
+[data-theme="steampunk"] .deck-card.has-depth::after {
+  background: rgba(36, 28, 16, 0.95);
+  border-color: rgba(212, 168, 83, 0.1);
+}
+
+/* ラウンドカードデッキ */
+[data-theme="steampunk"] .deck-round .deck-top-face {
+  background: linear-gradient(160deg, #3a2e1e 0%, #1a1208 100%);
+  border-color: rgba(212, 168, 83, 0.35);
+}
+
+/* 消費財デッキ */
+[data-theme="steampunk"] .deck-consumable .deck-top-face {
+  background: linear-gradient(160deg, #2e2418 0%, #1a1208 100%);
+  border-color: rgba(212, 168, 83, 0.2);
+}
+
+/* 建物デッキ */
+[data-theme="steampunk"] .deck-building .deck-top-face {
+  background: linear-gradient(160deg, #2e2418 0%, #1a1208 100%);
+  border-color: rgba(212, 168, 83, 0.2);
+}
+
+/* 公共エリア: うっすらパネル */
+[data-theme="steampunk"] .area-public {
+  background: rgba(20, 14, 6, 0.4);
+  border-color: rgba(212, 168, 83, 0.15);
+  box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.2);
+}
+
+/* ターンバー */
+[data-theme="steampunk"] .turn-bar {
+  background: rgba(46, 36, 24, 0.8);
+  border-color: rgba(212, 168, 83, 0.2);
+}
+
+/* ログパネル */
+[data-theme="steampunk"] .log-panel {
+  background: rgba(30, 22, 12, 0.9);
+  border: 1px solid rgba(212, 168, 83, 0.15);
+  box-shadow: inset 0 0 12px rgba(0, 0, 0, 0.3);
+}
+
+/* 下段（自分の場）: リッチな背景 */
+[data-theme="steampunk"] .my-buildings-section {
+  background: linear-gradient(0deg, rgba(30, 22, 12, 0.7) 0%, rgba(20, 14, 6, 0.4) 100%);
+  border-top: 1px solid rgba(212, 168, 83, 0.2);
+}
+
+/* 手札エリア */
+[data-theme="steampunk"] .hand-scroll-area {
+  background: rgba(20, 14, 6, 0.3);
+}
+
+/* インフォバー: ゲームUI風 */
+[data-theme="steampunk"] .inline-info-bar,
+[data-theme="steampunk"] .buildings-info-bar {
+  background: linear-gradient(90deg, rgba(46, 36, 24, 0.95), rgba(56, 44, 28, 0.95));
+  border-color: rgba(212, 168, 83, 0.3);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+/* カード共通: ゴールド枠 + リッチな影 */
+[data-theme="steampunk"] .card-sprite {
+  border-color: rgba(212, 168, 83, 0.2);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5), 0 0 2px rgba(212, 168, 83, 0.1);
+}
+
+[data-theme="steampunk"] .card-sprite:hover {
+  border-color: rgba(212, 168, 83, 0.5);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6), 0 0 8px rgba(212, 168, 83, 0.2);
+}
+
+/* 選択可能カード */
+[data-theme="steampunk"] .card-selectable {
+  border-color: rgba(212, 168, 83, 0.6) !important;
+  box-shadow: 0 0 16px rgba(212, 168, 83, 0.25), 0 0 4px rgba(212, 168, 83, 0.4) !important;
+}
+
+/* ワーカーコマ */
+[data-theme="steampunk"] .worker-pip {
+  box-shadow: 0 0 8px rgba(212, 168, 83, 0.4);
+}
+
+/* 賃金フェーズなどのモーダル系 */
+[data-theme="steampunk"] .payday-overlay {
+  background: rgba(20, 14, 6, 0.85);
+}
+
+/* ラウンド表示カード */
+[data-theme="steampunk"] .round-card-front,
+[data-theme="steampunk"] .round-card-back {
+  border-color: rgba(212, 168, 83, 0.25);
 }
 
 /* --- ベースリセット --- */
@@ -97,6 +348,155 @@ body {
     radial-gradient(ellipse at 80% 20%, rgba(45, 212, 191, 0.02) 0%, transparent 50%),
     linear-gradient(180deg, var(--bg-deep) 0%, var(--bg-primary) 100%);
   min-height: 100vh;
+}
+
+/* スチームパンクテーマ: タイトル画面背景 */
+[data-theme="steampunk"] .game-bg {
+  background:
+    linear-gradient(180deg, rgba(26, 18, 8, 0.7) 0%, rgba(26, 18, 8, 0.85) 100%),
+    url('/bg_title.png') center/cover no-repeat;
+}
+
+/* ============================================================
+   メインメニュー — ゲームUI風ボタン
+   ============================================================ */
+
+/* メニューアイテム: 真鍮プレート風 */
+.menu-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 14px 24px;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--fs-3xl);
+  font-weight: 700;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  text-align: center;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* 下のアクセントライン（ホバーで伸びる） */
+.menu-item::before {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--gold), transparent);
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 背景グロー（ホバーで出現） */
+.menu-item::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center,
+    rgba(212, 168, 83, 0.1) 0%,
+    rgba(212, 168, 83, 0.03) 50%,
+    transparent 100%);
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.menu-item:hover {
+  color: var(--gold-light);
+}
+
+.menu-item:hover::before {
+  width: 30%;
+}
+
+.menu-item:hover::after {
+  opacity: 1;
+}
+
+.menu-item:active {
+  transform: scale(0.98);
+}
+
+/* アイコン部分 */
+.menu-item .menu-icon {
+  position: relative;
+  z-index: 1;
+  opacity: 0.6;
+  transition: opacity 0.3s, transform 0.3s;
+}
+
+.menu-item:hover .menu-icon {
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+/* テキスト部分 */
+.menu-item .menu-label {
+  position: relative;
+  z-index: 1;
+}
+
+/* プライマリ（メインボタン）: 少し大きめ */
+.menu-item-primary {
+  font-size: var(--fs-4xl);
+  padding: 18px 24px;
+}
+
+.menu-item-primary::before {
+  background: linear-gradient(180deg, var(--gold-light), var(--gold));
+}
+
+.menu-item-primary:hover {
+  color: #fff;
+  text-shadow: 0 0 20px rgba(212, 168, 83, 0.5);
+}
+
+/* セカンダリ */
+.menu-item-secondary {
+  font-size: var(--fs-2xl);
+  color: var(--text-secondary);
+}
+
+/* DEVメニュー（控えめ） */
+.menu-item-dev {
+  font-size: var(--fs-xl2);
+  color: var(--text-dim);
+  padding: 10px 24px;
+}
+
+.menu-item-dev::before {
+  background: linear-gradient(180deg, var(--text-dim), rgba(107, 114, 128, 0.3));
+}
+
+/* セパレータ（歯車デコレーション付きの水平線） */
+.menu-separator {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 24px;
+  opacity: 0.3;
+}
+
+.menu-separator-line {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--gold-dim), transparent);
+}
+
+.menu-separator-dot {
+  width: 6px;
+  height: 6px;
+  border: 1px solid var(--gold-dim);
+  border-radius: 50%;
+  transform: rotate(45deg);
 }
 
 /* --- ガラスカード --- */
@@ -205,7 +605,7 @@ body {
 
 .wp-title {
   font-weight: 700;
-  font-size: 8px;
+  font-size: var(--fs-md);
   position: relative;
   z-index: 1;
 }
@@ -219,7 +619,7 @@ body {
 }
 
 .wp-effect {
-  font-size: 7px;
+  font-size: var(--fs-sm);
   color: var(--text-dim);
   margin-top: 1px;
   line-height: 1.2;
@@ -228,7 +628,7 @@ body {
 }
 
 .wp-multiple {
-  font-size: 6px;
+  font-size: var(--fs-xs);
   color: var(--purple);
   position: relative;
   z-index: 1;
@@ -245,7 +645,7 @@ body {
 
 .card-name {
   font-weight: 700;
-  font-size: 9px;
+  font-size: var(--fs-base);
   line-height: 1.2;
   position: relative;
   z-index: 1;
@@ -263,27 +663,47 @@ body {
 .tag-badge {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  padding: 1px 6px;
-  border-radius: 4px;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
+  gap: var(--sp-1);
+  padding: 1px var(--sp-2);
+  border-radius: 3px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  opacity: 0.7;
+  border: 1px solid transparent;
 }
 
 .tag-farm {
   color: var(--tag-farm);
-  background: var(--tag-farm-bg);
+  border-color: var(--tag-farm-bg);
+  background: none;
 }
 
 .tag-factory {
   color: var(--tag-factory);
-  background: var(--tag-factory-bg);
+  border-color: var(--tag-factory-bg);
+  background: none;
 }
 
 .tag-lock {
   color: var(--tag-lock);
-  background: var(--tag-lock-bg);
+  border-color: var(--tag-lock-bg);
+  background: none;
+}
+
+/* スチームパンク時: さらに統一感 */
+[data-theme="steampunk"] .tag-badge {
+  opacity: 0.55;
+  border-color: rgba(212, 168, 83, 0.2);
+  color: var(--text-secondary);
+}
+
+[data-theme="steampunk"] .tag-farm,
+[data-theme="steampunk"] .tag-factory,
+[data-theme="steampunk"] .tag-lock {
+  color: var(--text-secondary);
+  border-color: rgba(212, 168, 83, 0.15);
+  background: none;
 }
 
 /* --- ステータスバッジ --- */
@@ -293,7 +713,7 @@ body {
   gap: 4px;
   padding: 4px 10px;
   border-radius: 8px;
-  font-size: 11px;
+  font-size: var(--fs-xl);
   font-weight: 500;
   background: var(--bg-elevated);
   border: 1px solid rgba(255, 255, 255, 0.04);
@@ -310,7 +730,7 @@ body {
   cursor: pointer;
   transition: all 0.2s;
   font-family: inherit;
-  font-size: 14px;
+  font-size: var(--fs-2xl);
   letter-spacing: 0.5px;
 }
 
@@ -339,7 +759,7 @@ body {
   cursor: pointer;
   transition: all 0.2s;
   font-family: inherit;
-  font-size: 14px;
+  font-size: var(--fs-2xl);
 }
 
 .btn-danger:hover {
@@ -364,7 +784,7 @@ body {
   cursor: pointer;
   transition: all 0.2s;
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--fs-xl2);
 }
 
 .btn-ghost:hover {
@@ -378,7 +798,7 @@ body {
   align-items: center;
   gap: 8px;
   font-weight: 700;
-  font-size: 13px;
+  font-size: var(--fs-xl3);
   color: var(--teal);
   padding-bottom: 6px;
   margin-bottom: 8px;
@@ -412,7 +832,7 @@ body {
   justify-content: center;
   padding: 1px 6px;
   border-radius: 4px;
-  font-size: 9px;
+  font-size: var(--fs-base);
   font-weight: 700;
   background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
   color: white;
@@ -562,7 +982,7 @@ body {
 
 /* --- ログエントリ --- */
 .log-entry {
-  font-size: 11px;
+  font-size: var(--fs-xl);
   line-height: 1.6;
   padding: 2px 0;
 }
@@ -600,6 +1020,13 @@ body {
   background: var(--bg-deep);
 }
 
+/* スチームパンクテーマ: ゲーム画面背景 */
+[data-theme="steampunk"] .game-layout {
+  background:
+    linear-gradient(180deg, rgba(26, 18, 8, 0.85) 0%, rgba(26, 18, 8, 0.92) 100%),
+    url('/bg_game.png') center/cover no-repeat;
+}
+
 /* game-scaler: CSS-onlyのアスペクト比固定スケーリング。
    JSのtransform:scaleに依存しないため、フェーズ遷移でReactが
    コンポーネントを再マウントしても常に正しいサイズで表示される。
@@ -622,6 +1049,40 @@ body {
   /* 公共の場カードサイズ: 面積50% = 各辺 √0.5 ≈ 71% */
   --pub-card-h: calc(var(--card-h) * 0.71);
   --pub-card-w: calc(var(--card-w) * 0.71);
+  /* フォントスケーリング: --scaler-hの1/64 (参照高さ576pxで9px) */
+  --fs: calc(var(--scaler-h) / 64);
+  /* よく使うフォントサイズのプリセット */
+  --fs-xs: calc(var(--fs) * 0.67);
+  /* 6px相当 */
+  --fs-sm: calc(var(--fs) * 0.78);
+  /* 7px相当 */
+  --fs-md: calc(var(--fs) * 0.89);
+  /* 8px相当 */
+  --fs-base: var(--fs);
+  /* 9px相当 */
+  --fs-lg: calc(var(--fs) * 1.11);
+  /* 10px相当 */
+  --fs-xl: calc(var(--fs) * 1.22);
+  /* 11px相当 */
+  --fs-xl2: calc(var(--fs) * 1.33);
+  /* 12px相当 */
+  --fs-xl3: calc(var(--fs) * 1.44);
+  /* 13px相当 */
+  --fs-2xl: calc(var(--fs) * 1.56);
+  /* 14px相当 */
+  --fs-3xl: calc(var(--fs) * 1.78);
+  /* 16px相当 */
+  --fs-4xl: calc(var(--fs) * 2.0);
+  /* 18px相当 */
+  --fs-icon: calc(var(--fs) * 5.33);
+  /* 48px相当（アイコン用） */
+  --fs-announce: calc(var(--fs) * 8.0);
+  /* 72px相当（ラウンドアナウンス用） */
+  /* スペーシング変数: padding/gap/margin用 */
+  --sp-1: calc(var(--fs) * 0.22);  /* ~2px */
+  --sp-2: calc(var(--fs) * 0.44);  /* ~4px */
+  --sp-3: calc(var(--fs) * 0.67);  /* ~6px */
+  --sp-4: calc(var(--fs) * 0.89);  /* ~8px */
 }
 
 /* --- ヘッダー --- */
@@ -668,11 +1129,11 @@ body {
 .turn-bar {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-4);
   border-radius: 6px;
   background: var(--bg-elevated);
-  font-size: 11px;
+  font-size: var(--fs-xl);
 }
 
 /* --- 相手カード: 常に3分割の1つ分の高さ --- */
@@ -680,7 +1141,7 @@ body {
   background: var(--bg-secondary);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 8px;
-  padding: 4px 6px;
+  padding: var(--sp-2) var(--sp-3);
   transition: all 0.3s;
   position: relative;
   overflow: hidden;
@@ -722,19 +1183,19 @@ body {
 
 .opponent-stats {
   display: flex;
-  gap: 4px;
+  gap: var(--sp-2);
   flex-wrap: wrap;
-  margin-top: 3px;
+  margin-top: var(--sp-1);
 }
 
 .opponent-stat {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  font-size: 9px;
+  gap: var(--sp-1);
+  font-size: var(--fs-base);
   font-weight: 600;
-  padding: 1px 4px;
-  border-radius: 3px;
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--sp-1);
   background: rgba(255, 255, 255, 0.04);
 }
 
@@ -791,7 +1252,7 @@ body {
   background: linear-gradient(170deg, rgba(30, 34, 53, 0.95) 0%, rgba(22, 25, 40, 0.98) 100%);
   display: flex;
   flex-direction: column;
-  padding: 3px 4px;
+  padding: var(--sp-1) var(--sp-2);
   overflow: hidden;
   position: relative;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
@@ -821,13 +1282,13 @@ body {
 
 /* --- 家計ボックス: 固定高 --- */
 .household-box {
-  height: 40px;
-  min-height: 40px;
+  height: auto;
+  min-height: 36px;
   flex-shrink: 0;
   background: linear-gradient(145deg, rgba(45, 212, 191, 0.08) 0%, rgba(30, 34, 53, 0.9) 100%);
   border: 1px solid rgba(45, 212, 191, 0.25);
   border-radius: 8px;
-  padding: 4px 10px;
+  padding: 6px 10px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -871,6 +1332,8 @@ body {
   gap: 8px;
   align-items: center;
   padding: 4px;
+  position: relative;
+  z-index: 0;
 }
 
 /* --- デッキカード共通: 公共カードサイズ(50%面積) --- */
@@ -1001,16 +1464,25 @@ body {
 }
 
 .deck-count {
-  font-size: 16px;
+  font-size: var(--fs-3xl);
   font-weight: 900;
   line-height: 1;
+  text-align: center;
+  width: 100%;
+  overflow: hidden;
 }
 
 .deck-label {
-  font-size: 14px;
+  font-size: var(--fs-md);
   font-weight: 700;
   letter-spacing: 0.3px;
   color: var(--text-dim);
+  text-align: center;
+  width: 100%;
+  overflow-wrap: break-word;
+  word-break: break-all;
+  line-height: 1.2;
+  padding: 0 2px;
 }
 
 /* 建物デッキ枚数ポップアップ: ホバー/長押し時に表示 */
@@ -1023,7 +1495,7 @@ body {
   border: 1px solid rgba(96, 165, 250, 0.4);
   border-radius: 4px;
   padding: 2px 6px;
-  font-size: 9px;
+  font-size: var(--fs-base);
   font-weight: 700;
   color: var(--blue);
   white-space: nowrap;
@@ -1077,7 +1549,7 @@ body {
 }
 
 .workplaces-row-label {
-  font-size: 8px;
+  font-size: var(--fs-md);
   font-weight: 700;
   color: var(--text-dim);
   letter-spacing: 0.5px;
@@ -1092,7 +1564,7 @@ body {
   border: 1px solid rgba(45, 212, 191, 0.15);
   border-radius: 5px;
   padding: 3px 4px;
-  font-size: 8px;
+  font-size: var(--fs-md);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -1101,15 +1573,54 @@ body {
 }
 
 .workplace-card.workplace-available {
-  border-color: rgba(45, 212, 191, 0.4);
+  border-color: rgba(45, 212, 191, 0.7);
   cursor: pointer;
+  /* 配置可能な職場をティールグローで強調（手札のゴールドグローと同パターン） */
+  box-shadow:
+    0 0 6px rgba(45, 212, 191, 0.4),
+    0 0 16px rgba(45, 212, 191, 0.2),
+    0 0 30px rgba(45, 212, 191, 0.08),
+    inset 0 0 10px rgba(45, 212, 191, 0.06);
+  animation: workplace-glow-pulse 1.5s ease-in-out infinite;
+  transform: translateY(-1px);
+  will-change: box-shadow, border-color, transform;
+}
+
+@keyframes workplace-glow-pulse {
+  0%, 100% {
+    box-shadow:
+      0 0 6px rgba(45, 212, 191, 0.4),
+      0 0 16px rgba(45, 212, 191, 0.2),
+      0 0 30px rgba(45, 212, 191, 0.08),
+      inset 0 0 10px rgba(45, 212, 191, 0.06);
+    border-color: rgba(45, 212, 191, 0.7);
+  }
+  50% {
+    box-shadow:
+      0 0 10px rgba(45, 212, 191, 0.6),
+      0 0 24px rgba(45, 212, 191, 0.35),
+      0 0 40px rgba(45, 212, 191, 0.12),
+      inset 0 0 15px rgba(45, 212, 191, 0.1);
+    border-color: rgba(45, 212, 191, 1.0);
+  }
 }
 
 .workplace-card.workplace-available:hover {
   background: linear-gradient(145deg, rgba(20, 78, 74, 0.6) 0%, rgba(30, 34, 53, 0.9) 100%);
-  border-color: rgba(45, 212, 191, 0.6);
-  box-shadow: 0 0 12px rgba(45, 212, 191, 0.15);
-  transform: translateY(-1px);
+  border-color: rgba(45, 212, 191, 1.0);
+  box-shadow:
+    0 0 10px rgba(45, 212, 191, 0.7),
+    0 0 24px rgba(45, 212, 191, 0.4),
+    0 0 50px rgba(45, 212, 191, 0.15);
+  transform: translateY(-2px) scale(1.03);
+  animation: none;
+}
+
+/* 配置不可の職場カード: 暗転表示 */
+.workplace-card.game-card-disabled {
+  opacity: 0.5;
+  filter: brightness(0.7);
+  transition: opacity 0.3s, filter 0.3s;
 }
 
 .workplace-card.workplace-sold {
@@ -1122,7 +1633,7 @@ body {
   align-items: center;
   padding: 0px 3px;
   border-radius: 3px;
-  font-size: 7px;
+  font-size: var(--fs-sm);
   font-weight: 700;
   background: rgba(96, 165, 250, 0.2);
   color: var(--blue);
@@ -1130,14 +1641,18 @@ body {
 
 /* --- 売却建物エリア（スクロール対応） --- */
 .sold-buildings-area {
-  overflow-y: auto;
+  overflow: auto;
   max-height: 100%;
   scrollbar-width: thin;
   scrollbar-color: rgba(74, 222, 128, 0.2) transparent;
+  position: relative;
+  z-index: 2;
+  padding-top: 8px;
 }
 
 .sold-buildings-area::-webkit-scrollbar {
   width: 3px;
+  height: 3px;
 }
 
 .sold-buildings-area::-webkit-scrollbar-thumb {
@@ -1146,8 +1661,8 @@ body {
 }
 
 .sold-buildings-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, var(--pub-card-w));
+  display: flex;
+  flex-wrap: wrap;
   gap: 3px;
 }
 
@@ -1155,6 +1670,7 @@ body {
 .sold-buildings-grid .hand-card {
   width: var(--pub-card-w);
   height: var(--pub-card-h);
+  flex-shrink: 0;
 }
 
 /* ============================================================
@@ -1235,11 +1751,51 @@ body {
   cursor: default;
 }
 
+/* ワーカー配置可能時のパルスアニメーション: 利用可能なワーカーを目立たせる */
+.worker-token.worker-available-pulse {
+  animation: worker-pulse 1.5s ease-in-out infinite;
+  filter: drop-shadow(0 0 6px rgba(59, 130, 246, 0.6));
+}
+
+@keyframes worker-pulse {
+
+  0%,
+  100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 4px rgba(59, 130, 246, 0.4));
+  }
+
+  50% {
+    transform: scale(1.12);
+    filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.7));
+  }
+}
+
 /* ドラッグ中の元ミープル（半透明ゴースト化） */
 .worker-token.dragging {
   opacity: 0.3;
   filter: grayscale(0.5);
   transform: scale(0.9);
+}
+
+/* クリック配置モード: 選択中のワーカー */
+.worker-token.worker-selected {
+  filter: drop-shadow(0 0 8px rgba(212, 168, 83, 0.8)) drop-shadow(0 0 16px rgba(212, 168, 83, 0.4));
+  transform: scale(1.2) translateY(-4px);
+  animation: worker-selected-pulse 1s ease-in-out infinite;
+  cursor: pointer;
+  will-change: transform, filter;
+}
+
+@keyframes worker-selected-pulse {
+  0%, 100% {
+    filter: drop-shadow(0 0 8px rgba(212, 168, 83, 0.8)) drop-shadow(0 0 16px rgba(212, 168, 83, 0.4));
+    transform: scale(1.2) translateY(-4px);
+  }
+  50% {
+    filter: drop-shadow(0 0 12px rgba(212, 168, 83, 1.0)) drop-shadow(0 0 24px rgba(212, 168, 83, 0.6));
+    transform: scale(1.25) translateY(-6px);
+  }
 }
 
 /* ドラッグホバー時の建物/職場ハイライト */
@@ -1298,7 +1854,8 @@ body {
   justify-content: flex-start;
   align-items: flex-end;
   padding: 0 8px;
-  overflow: hidden;
+  overflow: visible;
+  clip-path: inset(-12px 0 0 0);  /* 上方向12pxだけ許容、他はクリップ */
 }
 
 /* 個別カード: 自分の場の高さに合わせたサイズ */
@@ -1349,6 +1906,15 @@ body {
   transform: none;
 }
 
+/* 売却建物エリア: playableで上昇OK（z-index差で解決）、scaleは無効 */
+.sold-buildings-grid .hand-card.hand-card-playable {
+  transform: translateY(-3px);
+}
+
+.sold-buildings-grid .hand-card.hand-card-playable:hover {
+  transform: translateY(-5px);
+}
+
 /* 押下中: カードは上がったまま維持（長押しプレビュー対応） */
 .hand-card.hand-card-pressing,
 .hand-card.hand-card-pressing:hover {
@@ -1357,27 +1923,53 @@ body {
 
 .hand-card.hand-card-playable {
   cursor: grab;
-  border-color: rgba(212, 168, 83, 0.35);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4), 0 0 12px rgba(212, 168, 83, 0.15);
-  animation: card-glow-pulse 2s ease-in-out infinite;
+  border-color: rgba(212, 168, 83, 0.7);
+  box-shadow:
+    0 0 8px rgba(212, 168, 83, 0.4),
+    0 0 20px rgba(212, 168, 83, 0.25),
+    0 0 40px rgba(212, 168, 83, 0.1),
+    inset 0 0 15px rgba(212, 168, 83, 0.08);
+  animation: card-glow-pulse 1.5s ease-in-out infinite;
+  transform: translateY(-3px);
+  z-index: 10 !important;
+  will-change: box-shadow, border-color, transform;
 }
 
 @keyframes card-glow-pulse {
-
-  0%,
-  100% {
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4), 0 0 12px rgba(212, 168, 83, 0.15);
+  0%, 100% {
+    box-shadow:
+      0 0 8px rgba(212, 168, 83, 0.4),
+      0 0 20px rgba(212, 168, 83, 0.25),
+      0 0 40px rgba(212, 168, 83, 0.1),
+      inset 0 0 15px rgba(212, 168, 83, 0.08);
+    border-color: rgba(212, 168, 83, 0.7);
   }
-
   50% {
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4), 0 0 20px rgba(212, 168, 83, 0.3);
+    box-shadow:
+      0 0 12px rgba(212, 168, 83, 0.6),
+      0 0 30px rgba(212, 168, 83, 0.4),
+      0 0 50px rgba(212, 168, 83, 0.15),
+      inset 0 0 20px rgba(212, 168, 83, 0.12);
+    border-color: rgba(212, 168, 83, 1.0);
   }
 }
 
 .hand-card.hand-card-playable:hover {
   border-color: var(--gold);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5), 0 0 24px rgba(212, 168, 83, 0.35), var(--glow-gold);
+  box-shadow:
+    0 0 12px rgba(212, 168, 83, 0.7),
+    0 0 30px rgba(212, 168, 83, 0.5),
+    0 0 60px rgba(212, 168, 83, 0.2),
+    var(--glow-gold);
   animation: none;
+  transform: translateY(-8px) scale(1.04);
+}
+
+/* ワーカードラッグ中に建設不可のカードを薄暗くする */
+.hand-card.hand-card-drag-dimmed {
+  opacity: 0.4;
+  filter: grayscale(0.5) brightness(0.7);
+  transition: opacity 0.2s ease, filter 0.2s ease;
 }
 
 .hand-card.hand-card-consumable {
@@ -1478,7 +2070,7 @@ body {
   border-radius: 5px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.06);
-  font-size: 10px;
+  font-size: var(--fs-lg);
   font-weight: 600;
 }
 
@@ -1488,7 +2080,7 @@ body {
   align-items: center;
   gap: 6px;
   font-weight: 700;
-  font-size: 11px;
+  font-size: var(--fs-xl);
   color: var(--teal);
   padding-bottom: 3px;
   margin-bottom: 3px;
@@ -1608,7 +2200,7 @@ body {
 }
 
 .round-announce-text {
-  font-size: 72px;
+  font-size: var(--fs-announce);
   font-weight: 900;
   color: var(--gold);
   text-shadow: 0 0 40px rgba(212, 168, 83, 0.6), 0 0 80px rgba(212, 168, 83, 0.3), 0 4px 12px rgba(0, 0, 0, 0.8);
@@ -1653,7 +2245,7 @@ body {
 }
 
 .discard-scatter-name {
-  font-size: 7px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--text-dim);
   text-align: center;
@@ -1733,9 +2325,10 @@ body {
 
 .card-preview-card {
   width: min(280px, 70vw);
-  max-height: 70vh;
+  max-height: calc(100vh - 16px);
   border-radius: 12px;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
   background: var(--bg-primary);
   border: 2px solid rgba(212, 168, 83, 0.3);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), 0 0 40px rgba(212, 168, 83, 0.1);
@@ -1744,8 +2337,8 @@ body {
 }
 
 .card-preview-image {
-  height: 60%;
-  min-height: 120px;
+  min-height: 80px;
+  max-height: 40vh;
   background: linear-gradient(135deg, rgba(30, 34, 53, 0.5), rgba(22, 25, 40, 0.8));
   overflow: hidden;
   flex-shrink: 0;
@@ -1757,4 +2350,258 @@ body {
   background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
   display: flex;
   flex-direction: column;
+}
+
+/* セパレーター: ゴールドグラデーション横線 */
+.card-preview-separator {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--gold-dim), transparent);
+  margin: var(--sp-2) 0;
+  opacity: 0.6;
+}
+
+/* 効果テキスト: リッチなカード効果表示 */
+.card-preview-effect {
+  font-size: var(--fs-xl3);
+  color: var(--text-secondary);
+  line-height: 1.6;
+  padding: var(--sp-3) var(--sp-4);
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 6px;
+  border-left: 2px solid var(--gold-dim);
+  margin-top: var(--sp-2);
+}
+
+/* スタッツバッジ: コスト/VPの表示 */
+.card-preview-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-xl2);
+  font-weight: 600;
+  padding: var(--sp-1) var(--sp-3);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* 暗転なし版: 全要素をpointer-events:noneにし、下のカードがポインタイベントを受けるようにする */
+/* プレビューカードも含めてnoneにしないと、中央の拡大カードが公共施設カードのイベントをブロックする */
+/* クリック閉じはdocumentリスナー(useEffect)で実現 */
+.card-preview-overlay.no-darken {
+  background: transparent;
+  pointer-events: none;
+}
+
+.card-preview-overlay.no-darken .card-preview-card {
+  pointer-events: none;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8), 0 0 60px rgba(212, 168, 83, 0.15);
+}
+
+/* ============================================================
+   捨て札モーダル: Slay the Spire風カードグリッド
+   ============================================================ */
+.discard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: var(--sp-3);
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  padding: var(--sp-2);
+  align-content: start;
+}
+
+.discard-grid-card {
+  position: relative;
+  border-radius: 8px;
+  background: var(--bg-card);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: transform 0.2s, box-shadow 0.2s;
+  cursor: default;
+}
+
+.discard-grid-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  border-color: rgba(212, 168, 83, 0.3);
+}
+
+.discard-count-badge {
+  position: absolute;
+  top: var(--sp-2);
+  right: var(--sp-2);
+  background: rgba(251, 146, 60, 0.9);
+  color: #fff;
+  font-size: var(--fs-lg);
+  font-weight: 900;
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: 4px;
+  z-index: 2;
+  line-height: 1;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+.discard-card-image {
+  aspect-ratio: 4 / 3;
+  min-height: 100px;
+  overflow: hidden;
+  background: linear-gradient(135deg, rgba(30, 34, 53, 0.5), rgba(22, 25, 40, 0.8));
+}
+
+.discard-card-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.discard-card-info {
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.discard-card-name {
+  font-weight: 700;
+  font-size: var(--fs-xl2);
+  color: var(--text-primary);
+  line-height: 1.2;
+  margin-bottom: var(--sp-1);
+}
+
+.discard-card-stats {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--fs-lg);
+  color: var(--text-dim);
+  margin-bottom: var(--sp-1);
+}
+
+.discard-card-effect {
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+  line-height: 1.4;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: var(--sp-1);
+}
+
+/* ============================================================
+   小画面メディアクエリ
+   ============================================================ */
+
+/* 幅900px以下: padding/gap縮小で詰める */
+@media (max-width: 900px) {
+  .area-public {
+    gap: 8px;
+    padding: 2px 6px;
+  }
+
+  .workplaces-layout {
+    gap: 12px;
+  }
+
+  .area-my-field {
+    gap: 3px;
+    padding: 2px 4px;
+  }
+
+  .my-buildings-scroll {
+    gap: 4px;
+  }
+}
+
+/* 高さ500px以下: ヘッダーをさらにコンパクトに */
+@media (max-height: 500px) {
+  .game-header {
+    padding: 2px 6px;
+  }
+
+  .turn-bar {
+    padding: 2px 6px;
+    font-size: var(--fs-base);
+  }
+}
+
+/* ============================================================
+   BGMセレクター（ミュージック一覧モーダル）
+   ============================================================ */
+
+/* トラックリストアイテム */
+.bgm-track-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--bg-elevated);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+/* カテゴリタブ */
+.bgm-category-tab {
+  padding: 4px 10px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--bg-elevated);
+  color: var(--text-dim);
+  font-size: var(--fs-lg);
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.bgm-category-tab:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: var(--text-primary);
+}
+
+.bgm-category-active {
+  background: rgba(212, 168, 83, 0.15) !important;
+  border-color: rgba(212, 168, 83, 0.4) !important;
+  color: var(--gold) !important;
+  font-weight: 700;
+}
+
+.bgm-track-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.12);
+  transform: translateX(4px);
+}
+
+/* 再生中トラック */
+.bgm-track-active {
+  border-color: rgba(212, 168, 83, 0.4) !important;
+  background: linear-gradient(135deg, rgba(212, 168, 83, 0.1), rgba(30, 30, 40, 0.95)) !important;
+  box-shadow: 0 0 12px rgba(212, 168, 83, 0.15);
+}
+
+/* 再生中インジケーター（イコライザー風バー） */
+.bgm-playing-indicator {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 18px;
+  padding: 0 4px;
+}
+
+.bgm-bar {
+  display: block;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--gold);
+  animation: bgm-bar-bounce 0.8s ease-in-out infinite alternate;
+}
+
+@keyframes bgm-bar-bounce {
+  0% {
+    height: 4px;
+    opacity: 0.5;
+  }
+  100% {
+    height: 16px;
+    opacity: 1;
+  }
 }

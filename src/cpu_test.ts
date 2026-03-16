@@ -375,7 +375,10 @@ async function runP2PTests(): Promise<string> {
 const params = new URLSearchParams(window.location.search);
 const mode = params.get('mode');
 
-if (mode === 'p2p') {
+if (mode === 'glory' || mode === 'glory_debug') {
+    // 担当外のモードの場合は何もしない（test.html側で他のスクリプトが呼ばれる）
+    console.log('[cpu_test.ts] Ignored due to mode:', mode);
+} else if (mode === 'p2p') {
     // P2Pテストモード（非同期）
     (async () => {
         const output = await runP2PTests();
