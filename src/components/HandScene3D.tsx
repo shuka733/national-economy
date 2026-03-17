@@ -206,43 +206,43 @@ function Card3D({
                         overflow: 'hidden',
                     }}>
                         {data.isHidden ? (
-                            <div style={{ textAlign: 'center', fontSize: 24, marginTop: 30, opacity: 0.5 }}>🂠</div>
+                            <div style={{ textAlign: 'center', fontSize: 'var(--fs-4xl)', marginTop: 30, opacity: 0.5 }}>🂠</div>
                         ) : (
                             <>
                                 {/* カード名 */}
                                 <div style={{
                                     fontWeight: 700,
-                                    fontSize: 10,
+                                    fontSize: 'var(--fs-lg)',
                                     lineHeight: 1.2,
                                     color: data.isConsumable ? '#a8a29e' : '#e8e8f0',
                                     marginBottom: 2,
                                 }}>{data.name}</div>
                                 {/* コスト・VP */}
                                 {!data.isConsumable && (
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, marginBottom: 2 }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--fs-base)', marginBottom: 2 }}>
                                         <span style={{ color: '#8899aa', fontWeight: 600 }}>C{data.cost}</span>
                                         <span style={{ color: '#d4a853', fontWeight: 600 }}>{data.vp}VP</span>
                                     </div>
                                 )}
                                 {/* タグ */}
                                 {data.tags.length > 0 && (
-                                    <div style={{ fontSize: 8, color: data.tags.includes('farm') ? '#4ade80' : '#fb923c', marginBottom: 2 }}>
+                                    <div style={{ fontSize: 'var(--fs-md)', color: data.tags.includes('farm') ? '#4ade80' : '#fb923c', marginBottom: 2 }}>
                                         {data.tags.includes('farm') ? '🌾農園' : '⚙工場'}
                                     </div>
                                 )}
                                 {/* 効果テキスト */}
                                 {data.effectText && (
-                                    <div style={{ fontSize: 7, color: '#8899aa', lineHeight: 1.2, marginTop: 'auto' }}>
+                                    <div style={{ fontSize: 'var(--fs-sm)', color: '#8899aa', lineHeight: 1.2, marginTop: 'auto' }}>
                                         {data.effectText}
                                     </div>
                                 )}
                                 {/* 消費財 */}
                                 {data.isConsumable && (
-                                    <div style={{ fontSize: 9, color: '#a8a29e', marginTop: 4 }}>消費財</div>
+                                    <div style={{ fontSize: 'var(--fs-base)', color: '#a8a29e', marginTop: 4 }}>消費財</div>
                                 )}
                                 {/* ドラッグヒント */}
                                 {data.canPlay && (
-                                    <div style={{ fontSize: 7, color: '#d4a853', textAlign: 'center', opacity: 0.5, marginTop: 'auto' }}>↑ drag</div>
+                                    <div style={{ fontSize: 'var(--fs-sm)', color: '#d4a853', textAlign: 'center', opacity: 0.5, marginTop: 'auto' }}>↑ drag</div>
                                 )}
                             </>
                         )}
@@ -315,10 +315,10 @@ function DeckStack3D({
                         justifyContent: 'center',
                         fontFamily: "'Noto Sans JP', sans-serif",
                     }}>
-                        <div style={{ fontSize: 22, fontWeight: 900, color: textColor, lineHeight: 1 }}>
+                        <div style={{ fontSize: 'var(--fs-4xl)', fontWeight: 900, color: textColor, lineHeight: 1 }}>
                             {String(count)}
                         </div>
-                        <div style={{ fontSize: 8, fontWeight: 700, color: '#8899aa', marginTop: 4 }}>
+                        <div style={{ fontSize: 'var(--fs-md)', fontWeight: 700, color: '#8899aa', marginTop: 4 }}>
                             {label}
                         </div>
                     </div>
