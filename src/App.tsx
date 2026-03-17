@@ -265,25 +265,45 @@ function StartNotification({ playerNum, startPlayer, onDismiss }: { playerNum: n
 // ============================================================
 // メインメニュー：モード選択のみ
 // ============================================================
-function MainMenuScreen({ onLocal, onOnline, onDevGallery, theme, onToggleTheme }: {
+/** テーマ名の型定義 */
+export type ThemeName = 'default' | 'steampunk' | 'japanese' | 'watercolor';
+
+/** テーマ表示情報 */
+const THEME_INFO: Record<ThemeName, { label: string; icon: string }> = {
+    default: { label: 'Classic', icon: '🏭' },
+    steampunk: { label: 'Steampunk', icon: '⚙️' },
+    japanese: { label: '和風', icon: '🏯' },
+    watercolor: { label: '水彩', icon: '🎨' },
+};
+const THEME_ORDER: ThemeName[] = ['default', 'steampunk', 'japanese', 'watercolor'];
+
+function MainMenuScreen({ onLocal, onOnline, onDevGallery, theme, onCycleTheme }: {
     onLocal: () => void;
     onOnline: () => void;
     onDevGallery: () => void;
-    theme: 'default' | 'steampunk';
-    onToggleTheme: () => void;
+    theme: ThemeName;
+    onCycleTheme: () => void;
 }) {
     const isSteampunk = theme === 'steampunk';
+    // テーマ別ロゴ画像マッピング（専用ロゴがあるテーマ）
+    const THEME_LOGO: Partial<Record<ThemeName, string>> = {
+        steampunk: 'logo.png',
+        japanese: 'japanese_logo.png',
+        watercolor: 'watercolor_logo.png',
+    };
+    const logoFile = THEME_LOGO[theme];
+    const themeInfo = THEME_INFO[theme];
     return (
         <div className="game-bg" style={{ position: 'relative', display: 'flex', flexDirection: 'column' as const, height: '100vh', padding: 0, overflow: 'hidden' }}>
 
             {/* ロゴエリア: 画面上部より（黄金比付近） */}
             <div className="animate-slide-up" style={{ flex: '1 1 0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <div style={{ textAlign: 'center', marginTop: 'calc(var(--fs) * -4)' }}>
-                    {isSteampunk ? (
+                    {logoFile ? (
                         <div style={{
                             width: 'calc(var(--fs) * 28)', maxWidth: 420,
                             aspectRatio: '1', margin: '0 auto',
-                            backgroundImage: `url(${import.meta.env.BASE_URL}logo.png)`,
+                            backgroundImage: `url(${import.meta.env.BASE_URL}${logoFile})`,
                             backgroundSize: 'contain', backgroundRepeat: 'no-repeat', backgroundPosition: 'center',
                         }} />
                     ) : (
@@ -322,14 +342,14 @@ function MainMenuScreen({ onLocal, onOnline, onDevGallery, theme, onToggleTheme 
 
             {/* フッター: 画面最下部に控えめに */}
             <div style={{ position: 'absolute', bottom: 'calc(var(--fs) * 1.5)', left: 0, right: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
-                <button onClick={() => { soundManager.playSFX('click'); onToggleTheme(); }} style={{
+                <button onClick={() => { soundManager.playSFX('click'); onCycleTheme(); }} style={{
                     background: 'none', border: 'none',
                     color: 'var(--text-dim)', cursor: 'pointer',
                     display: 'inline-flex', alignItems: 'center', gap: 6,
                     fontSize: 'var(--fs-xl)', fontWeight: 500, transition: 'color 0.2s',
                     opacity: 0.5,
                 }}>
-                    {isSteampunk ? <><IconGear size={'1em'} /> Steampunk</> : <><IconWave size={'1em'} /> Classic</>}
+                    {themeInfo.icon} {themeInfo.label}
                 </button>
                 <span style={{ color: 'var(--text-dim)', opacity: 0.2, fontSize: 'var(--fs-lg)' }}>•</span>
                 <span style={{ color: 'var(--text-dim)', fontSize: 'var(--fs-lg)', opacity: 0.35 }}>v9.0</span>
@@ -885,20 +905,25 @@ export default function App() {
     const [screen, setScreen] = useState<Screen>('menu');
     const [config, setConfig] = useState<{ numPlayers: number; version: GameVersion; cpuConfig: CPUConfig } | null>(null);
 
-    // テーマ切り替え（localStorage永続化）
-    const [theme, setTheme] = useState<'default' | 'steampunk'>(() => {
+    // テーマ切り替え（localStorage永続化・5テーマ対応）
+    const [theme, setTheme] = useState<ThemeName>(() => {
         const saved = localStorage.getItem('ne-theme');
-        return saved === 'steampunk' ? 'steampunk' : 'default';
+        if (saved && THEME_ORDER.includes(saved as ThemeName)) return saved as ThemeName;
+        return 'default';
     });
     useEffect(() => {
-        if (theme === 'steampunk') {
-            document.documentElement.dataset.theme = 'steampunk';
-        } else {
+        if (theme === 'default') {
             delete document.documentElement.dataset.theme;
+        } else {
+            document.documentElement.dataset.theme = theme;
         }
         localStorage.setItem('ne-theme', theme);
     }, [theme]);
-    const toggleTheme = () => setTheme(prev => prev === 'default' ? 'steampunk' : 'default');
+    // テーマをサイクル式で切り替え（default → steampunk → japanese → fantasy → watercolor → default ...）
+    const cycleTheme = () => setTheme(prev => {
+        const idx = THEME_ORDER.indexOf(prev);
+        return THEME_ORDER[(idx + 1) % THEME_ORDER.length];
+    });
 
     // ローカルゲーム開始
     const handleStartLocal = (numPlayers: number, version: GameVersion, cpuConfig: CPUConfig) => {
@@ -909,7 +934,7 @@ export default function App() {
     // 画面ルーティング
     switch (screen) {
         case 'menu':
-            return <MainMenuScreen onLocal={() => setScreen('local_setup')} onOnline={() => setScreen('online_menu')} onDevGallery={() => setScreen('dev_gallery')} theme={theme} onToggleTheme={toggleTheme} />;
+            return <MainMenuScreen onLocal={() => setScreen('local_setup')} onOnline={() => setScreen('online_menu')} onDevGallery={() => setScreen('dev_gallery')} theme={theme} onCycleTheme={cycleTheme} />;
         case 'dev_gallery':
             return <DevCardGallery onBack={() => setScreen('menu')} />;
         case 'local_setup':

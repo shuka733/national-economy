@@ -15,6 +15,7 @@ import { SoundSettings } from './SoundSettings';
 import { CPUSettings } from './CPUSettings';
 import { useAnimations } from './components/AnimationLayer';
 import { BgImageOverlay } from './components/BgImageOverlay';
+import { getThemedCardImagePath, getThemedWorkplaceImagePath } from './themeUtils';
 import './cpu-anim.css';
 // HandScene3D は現在未使用（ポンチ絵ベースのHTMLレイアウトに置換済み）
 import {
@@ -95,7 +96,8 @@ function CardBgImage({ defId }: { defId: string }) {
     if (defId === CONSUMABLE_DEF_ID) return null;
     const d = getCardDef(defId);
     if (!d.image) return null;
-    return <BgImageOverlay src={`${import.meta.env.BASE_URL}${d.image!.replace(/^\//, '')}`} />;
+    const themedPath = getThemedCardImagePath(d.image);
+    return <BgImageOverlay src={`${import.meta.env.BASE_URL}${themedPath.replace(/^\//, '')}`} />;
 }
 
 /** ラウンド番号 → 職場ID マッピング (game.ts getRoundWorkplaceInfoから取得) */
@@ -129,7 +131,8 @@ function getWorkplaceImage(wpId: string): string | null {
 function WorkplaceBgImage({ wpId }: { wpId: string }) {
     const img = getWorkplaceImage(wpId);
     if (!img) return null;
-    return <BgImageOverlay src={`${import.meta.env.BASE_URL}${img}`} />;
+    const themedImg = getThemedWorkplaceImagePath(img);
+    return <BgImageOverlay src={`${import.meta.env.BASE_URL}${themedImg}`} />;
 }
 
 /** CPU自動プレイ用: GameStateのフェーズ・選択状態を一意表現する文字列を生成
@@ -1143,7 +1146,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                     // カード（建物 / 売却建物）フォーマット
                     const pDef = getCardDef(previewData.defId);
                     if (!pDef) return null;
-                    const imgSrc = pDef.image ? `${import.meta.env.BASE_URL}${pDef.image.replace(/^\//, '')}` : null;
+                    const imgSrc = pDef.image ? `${import.meta.env.BASE_URL}${getThemedCardImagePath(pDef.image).replace(/^\//, '')}` : null;
                     const tagLabel = pDef.tags.includes('farm') ? '🌿 農場' : pDef.tags.includes('factory') ? '🏭 工場' : '🏢 施設';
                     return (
                         <div className={`card-preview-overlay${featureFlags.DARKEN_ON_PREVIEW ? '' : ' no-darken'}`} onPointerUp={closePreview} onClick={closePreview} onPointerMove={handlePreviewPointerMove}>
@@ -1190,7 +1193,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                 } else {
                     // 公共職場フォーマット（コスト/VP省略）
                     const wpImg = getWorkplaceImage(previewData.wpId);
-                    const wpImgSrc = wpImg ? `${import.meta.env.BASE_URL}${wpImg}` : null;
+                    const wpImgSrc = wpImg ? `${import.meta.env.BASE_URL}${getThemedWorkplaceImagePath(wpImg)}` : null;
                     return (
                         <div className={`card-preview-overlay${featureFlags.DARKEN_ON_PREVIEW ? '' : ' no-darken'}`} onPointerUp={closePreview} onClick={closePreview} onPointerMove={handlePreviewPointerMove}>
                             <div className="card-preview-card" style={hoverPos || undefined}>

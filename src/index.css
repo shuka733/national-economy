@@ -129,6 +129,168 @@
   --card-image-overlay: #5a4a35;
 }
 
+/* --- 和風テーマ（藍色・朱赤ベース） ---
+   使い方: document.documentElement.dataset.theme = 'japanese' */
+[data-theme="japanese"] {
+  /* ベースカラー: 墨・紺系 */
+  --bg-deep: #0a0e18;
+  --bg-primary: #121828;
+  --bg-secondary: #1a2238;
+  --bg-card: #1e2840;
+  --bg-elevated: #243050;
+
+  /* テキスト: 生成り系 */
+  --text-primary: #f0e8d8;
+  --text-secondary: #a8a090;
+  --text-dim: #687068;
+
+  /* アクセントカラー */
+  --gold: #c8a65a;
+  --gold-light: #e0c87a;
+  --gold-dim: #8a7030;
+  --teal: #5a9a7a;
+  --teal-dim: #2a4a3a;
+
+  /* エフェクト */
+  --glass-bg: rgba(18, 24, 40, 0.85);
+  --glass-border: rgba(200, 166, 90, 0.15);
+  --glow-gold: 0 0 20px rgba(200, 166, 90, 0.3);
+  --glow-teal: 0 0 15px rgba(90, 154, 122, 0.2);
+
+  --teal-15: rgba(90, 154, 122, 0.15);
+  --teal-40: rgba(90, 154, 122, 0.4);
+  --teal-60: rgba(90, 154, 122, 0.6);
+  --gold-15: rgba(200, 166, 90, 0.15);
+  --gold-40: rgba(200, 166, 90, 0.4);
+  --gold-60: rgba(200, 166, 90, 0.6);
+
+  /* カードタグ色: 和風 */
+  --tag-farm: #8aaa78;
+  --tag-farm-bg: rgba(100, 150, 80, 0.35);
+  --tag-factory: #7a90b0;
+  --tag-factory-bg: rgba(90, 120, 160, 0.35);
+  --tag-lock: #d4b870;
+  --tag-lock-bg: rgba(200, 166, 90, 0.35);
+
+  /* アクセントカラー */
+  --blue: #4a6a9a;
+  --green: #5a8a68;
+  --purple: #7a6090;
+  --orange: #c87040;
+  --red: #c93a40;
+  --red-30: rgba(201, 58, 64, 0.3);
+
+  --card-image-overlay: #2a3a50;
+}
+
+/* --- ファンタジーテーマ（深紫・翡翠ベース） ---
+   使い方: document.documentElement.dataset.theme = 'fantasy' */
+[data-theme="fantasy"] {
+  /* ベースカラー: 深紫系 */
+  --bg-deep: #10081e;
+  --bg-primary: #180e2a;
+  --bg-secondary: #221638;
+  --bg-card: #2a1e42;
+  --bg-elevated: #34264e;
+
+  /* テキスト: クールシルバー系 */
+  --text-primary: #e8e4f0;
+  --text-secondary: #a8a0b8;
+  --text-dim: #6a6080;
+
+  /* アクセントカラー: アンバーゴールド */
+  --gold: #c8a030;
+  --gold-light: #e0c050;
+  --gold-dim: #8a6a20;
+  --teal: #40b890;
+  --teal-dim: #1a5040;
+
+  /* エフェクト */
+  --glass-bg: rgba(24, 14, 42, 0.85);
+  --glass-border: rgba(100, 80, 160, 0.2);
+  --glow-gold: 0 0 20px rgba(200, 160, 48, 0.35);
+  --glow-teal: 0 0 15px rgba(64, 184, 144, 0.25);
+
+  --teal-15: rgba(64, 184, 144, 0.15);
+  --teal-40: rgba(64, 184, 144, 0.4);
+  --teal-60: rgba(64, 184, 144, 0.6);
+  --gold-15: rgba(200, 160, 48, 0.15);
+  --gold-40: rgba(200, 160, 48, 0.4);
+  --gold-60: rgba(200, 160, 48, 0.6);
+
+  /* カードタグ色: ファンタジー */
+  --tag-farm: #60c878;
+  --tag-farm-bg: rgba(80, 180, 100, 0.3);
+  --tag-factory: #7090d0;
+  --tag-factory-bg: rgba(80, 120, 200, 0.3);
+  --tag-lock: #d0a840;
+  --tag-lock-bg: rgba(200, 160, 48, 0.3);
+
+  /* アクセントカラー */
+  --blue: #4a7aff;
+  --green: #40c878;
+  --purple: #a878fa;
+  --orange: #d4782a;
+  --red: #e85050;
+  --red-30: rgba(232, 80, 80, 0.3);
+
+  --card-image-overlay: #2a1e42;
+}
+
+/* --- 水彩テーマ（パステル・ヨーロッパ田園） ---
+   使い方: document.documentElement.dataset.theme = 'watercolor' */
+[data-theme="watercolor"] {
+  /* ベースカラー: ウォームグレー系 */
+  --bg-deep: #14120e;
+  --bg-primary: #1c1a16;
+  --bg-secondary: #262420;
+  --bg-card: #2e2c28;
+  --bg-elevated: #383630;
+
+  /* テキスト: ウォームホワイト系 */
+  --text-primary: #f0ece4;
+  --text-secondary: #b0a898;
+  --text-dim: #787068;
+
+  /* アクセントカラー: セージグリーン & ローズ */
+  --gold: #c4a060;
+  --gold-light: #d8ba78;
+  --gold-dim: #907838;
+  --teal: #7aaa8a;
+  --teal-dim: #3a5a48;
+
+  /* エフェクト */
+  --glass-bg: rgba(28, 26, 22, 0.85);
+  --glass-border: rgba(180, 160, 120, 0.15);
+  --glow-gold: 0 0 20px rgba(196, 160, 96, 0.3);
+  --glow-teal: 0 0 15px rgba(122, 170, 138, 0.2);
+
+  --teal-15: rgba(122, 170, 138, 0.15);
+  --teal-40: rgba(122, 170, 138, 0.4);
+  --teal-60: rgba(122, 170, 138, 0.6);
+  --gold-15: rgba(196, 160, 96, 0.15);
+  --gold-40: rgba(196, 160, 96, 0.4);
+  --gold-60: rgba(196, 160, 96, 0.6);
+
+  /* カードタグ色: 水彩パステル */
+  --tag-farm: #7aaa6a;
+  --tag-farm-bg: rgba(100, 150, 80, 0.3);
+  --tag-factory: #7a9abc;
+  --tag-factory-bg: rgba(90, 130, 170, 0.3);
+  --tag-lock: #c4a860;
+  --tag-lock-bg: rgba(180, 150, 80, 0.3);
+
+  /* アクセントカラー */
+  --blue: #7ab0d4;
+  --green: #7aaa6a;
+  --purple: #a08aaa;
+  --orange: #c4905a;
+  --red: #c47a7a;
+  --red-30: rgba(196, 122, 122, 0.3);
+
+  --card-image-overlay: #3a3830;
+}
+
 /* ============================================================
    スチームパンクテーマ — ゲーム画面オーバーライド
    ============================================================ */
@@ -138,6 +300,16 @@
   background:
     linear-gradient(180deg, rgba(26, 18, 8, 0.55) 0%, rgba(20, 14, 6, 0.7) 100%),
     url('/bg_game.png') center/cover no-repeat;
+}
+[data-theme="japanese"] .game-scaler {
+  background:
+    linear-gradient(180deg, rgba(10, 14, 24, 0.55) 0%, rgba(10, 14, 24, 0.7) 100%),
+    url('/japanese_bg_game.png') center/cover no-repeat;
+}
+[data-theme="watercolor"] .game-scaler {
+  background:
+    linear-gradient(180deg, rgba(20, 18, 14, 0.55) 0%, rgba(20, 18, 14, 0.7) 100%),
+    url('/watercolor_bg_game.png') center/cover no-repeat;
 }
 
 /* ヘッダーバー: リッチなゲームHUD */
@@ -355,6 +527,20 @@ body {
   background:
     linear-gradient(180deg, rgba(26, 18, 8, 0.7) 0%, rgba(26, 18, 8, 0.85) 100%),
     url('/bg_title.png') center/cover no-repeat;
+}
+
+/* 和風テーマ: タイトル画面背景 */
+[data-theme="japanese"] .game-bg {
+  background:
+    linear-gradient(180deg, rgba(10, 14, 24, 0.7) 0%, rgba(10, 14, 24, 0.85) 100%),
+    url('/japanese_bg_title.png') center/cover no-repeat;
+}
+
+/* 水彩テーマ: タイトル画面背景 */
+[data-theme="watercolor"] .game-bg {
+  background:
+    linear-gradient(180deg, rgba(20, 18, 14, 0.65) 0%, rgba(20, 18, 14, 0.82) 100%),
+    url('/watercolor_bg_title.png') center/cover no-repeat;
 }
 
 /* ============================================================
@@ -1025,6 +1211,16 @@ body {
   background:
     linear-gradient(180deg, rgba(26, 18, 8, 0.85) 0%, rgba(26, 18, 8, 0.92) 100%),
     url('/bg_game.png') center/cover no-repeat;
+}
+[data-theme="japanese"] .game-layout {
+  background:
+    linear-gradient(180deg, rgba(10, 14, 24, 0.85) 0%, rgba(10, 14, 24, 0.92) 100%),
+    url('/japanese_bg_game.png') center/cover no-repeat;
+}
+[data-theme="watercolor"] .game-layout {
+  background:
+    linear-gradient(180deg, rgba(20, 18, 14, 0.85) 0%, rgba(20, 18, 14, 0.92) 100%),
+    url('/watercolor_bg_game.png') center/cover no-repeat;
 }
 
 /* game-scaler: CSS-onlyのアスペクト比固定スケーリング。

@@ -6,6 +6,7 @@ import React, { useState } from 'react';
 import { BASE_CARD_DEFS } from './base_cards';
 import { GLORY_CARD_DEFS } from './glory_cards';
 import type { CardDef } from './types';
+import { getThemedCardImagePath } from './themeUtils';
 
 // ============================================================
 // カードIDから画像パスへのマッピング
@@ -77,7 +78,9 @@ function getImagePath(card: CardDef): string | undefined {
     const base = import.meta.env.BASE_URL.replace(/\/$/, '');
     const file = BASE_IMAGE_FILES[card.id] ?? GLORY_IMAGE_FILES[card.id];
     if (!file) return undefined;
-    return `${base}/cards/${file}`;
+    const basePath = `/cards/${file}`;
+    const themedPath = getThemedCardImagePath(basePath);
+    return `${base}${themedPath}`;
 }
 
 // ============================================================
