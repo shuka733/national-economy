@@ -15,6 +15,17 @@ interface RippleAnimation {
     color: string;
 }
 
+interface MeepleFlightAnimation {
+    id: number;
+    fromX: number;
+    fromY: number;
+    toX: number;
+    toY: number;
+    size: number;
+    duration: number;
+    src: string;
+}
+
 // --- 定数 ---
 const DECK_OUT_DURATION = 300;   // ドロー1_下: デッキ→画面外の移動時間(ms)
 const HAND_IN_DURATION = 400;    // ドロー2_上: 画面外→手札への移動時間(ms)
@@ -56,6 +67,62 @@ function RippleEffect({ ripple }: { ripple: RippleAnimation }) {
                 }}>{ripple.label}</div>
             )}
         </div>
+    );
+}
+
+function FlyingMeepleEffect({
+    flight,
+    onComplete,
+}: {
+    flight: MeepleFlightAnimation;
+    onComplete: (id: number) => void;
+}) {
+    const elemRef = useRef<HTMLImageElement>(null);
+
+    useEffect(() => {
+        const elem = elemRef.current;
+        if (!elem) return;
+
+        const animation = elem.animate([
+            {
+                transform: `translate(${flight.fromX}px, ${flight.fromY}px) scale(0.72)`,
+                filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))',
+                opacity: 0.96,
+            },
+            {
+                transform: `translate(${flight.toX}px, ${flight.toY}px) scale(1.08)`,
+                filter: 'drop-shadow(0 6px 16px rgba(0,0,0,0.5))',
+                opacity: 1,
+            },
+        ], {
+            duration: flight.duration,
+            easing: 'cubic-bezier(0.34, 1.56, 0.64, 1)',
+            fill: 'forwards',
+        });
+
+        animation.onfinish = () => onComplete(flight.id);
+
+        return () => animation.cancel();
+    }, [flight, onComplete]);
+
+    return (
+        <img
+            ref={elemRef}
+            src={flight.src}
+            alt=""
+            style={{
+                position: 'fixed',
+                left: 0,
+                top: 0,
+                width: flight.size,
+                height: flight.size,
+                zIndex: 300,
+                pointerEvents: 'none',
+                borderRadius: '50%',
+                transform: `translate(${flight.fromX}px, ${flight.fromY}px) scale(0.72)`,
+                willChange: 'transform, filter, opacity',
+            }}
+        />
     );
 }
 
@@ -171,8 +238,10 @@ function FlyingCardElement({ card, onComplete }: { card: FlyingCard; onComplete:
 export function useAnimations() {
     const [ripples, setRipples] = useState<RippleAnimation[]>([]);
     const [flyingCards, setFlyingCards] = useState<FlyingCard[]>([]);
+    const [meepleFlights, setMeepleFlights] = useState<MeepleFlightAnimation[]>([]);
     const nextId = useRef(0);
     const drawResolveRef = useRef<(() => void) | null>(null);
+    const meepleResolveMapRef = useRef(new Map<number, () => void>());
 
     // ワーカー配置リップル
     const triggerRipple = useCallback((x: number, y: number, label: string = '', color: string = 'var(--teal)') => {
@@ -181,9 +250,46 @@ export function useAnimations() {
         setTimeout(() => setRipples(prev => prev.filter(r => r.id !== id)), 1000);
     }, []);
 
+    const triggerMeepleFlight = useCallback((
+        fromRect: DOMRect,
+        toRect: DOMRect,
+        src: string,
+        options?: { size?: number; duration?: number }
+    ): Promise<void> => {
+        const id = nextId.current++;
+        const size = options?.size ?? 32;
+        const duration = options?.duration ?? 600;
+
+        return new Promise((resolve) => {
+            meepleResolveMapRef.current.set(id, resolve);
+            setMeepleFlights(prev => [
+                ...prev,
+                {
+                    id,
+                    fromX: fromRect.left + fromRect.width / 2 - size / 2,
+                    fromY: fromRect.top + fromRect.height / 2 - size / 2,
+                    toX: toRect.left + toRect.width / 2 - size / 2,
+                    toY: toRect.top + toRect.height / 2 - size / 2,
+                    size,
+                    duration,
+                    src,
+                },
+            ]);
+        });
+    }, []);
+
     // フライングカード完了（表示から削除のみ、Promise解決は行わない）
     const onFlyingComplete = useCallback((id: number) => {
         setFlyingCards(prev => prev.filter(c => c.id !== id));
+    }, []);
+
+    const onMeepleFlightComplete = useCallback((id: number) => {
+        setMeepleFlights(prev => prev.filter(f => f.id !== id));
+        const resolve = meepleResolveMapRef.current.get(id);
+        if (resolve) {
+            meepleResolveMapRef.current.delete(id);
+            resolve();
+        }
     }, []);
 
     /**
@@ -250,11 +356,14 @@ export function useAnimations() {
     const AnimationOverlay = useCallback(() => (
         <>
             {ripples.map(r => <RippleEffect key={r.id} ripple={r} />)}
+            {meepleFlights.map(f => (
+                <FlyingMeepleEffect key={f.id} flight={f} onComplete={onMeepleFlightComplete} />
+            ))}
             {flyingCards.map(c => (
                 <FlyingCardElement key={c.id} card={c} onComplete={onFlyingComplete} />
             ))}
         </>
-    ), [ripples, flyingCards, onFlyingComplete]);
+    ), [ripples, meepleFlights, flyingCards, onMeepleFlightComplete, onFlyingComplete]);
 
-    return { triggerRipple, triggerDraw, isDrawAnimating, AnimationOverlay };
+    return { triggerRipple, triggerMeepleFlight, triggerDraw, isDrawAnimating, AnimationOverlay };
 }

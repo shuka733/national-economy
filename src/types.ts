@@ -45,6 +45,13 @@ export interface Workplace {
     fromBuildingDefId?: string;
 }
 
+export interface PlacementAnimationEvent {
+    seq: number;
+    playerId: string;
+    moveName: 'placeWorker' | 'placeWorkerOnBuilding';
+    targetId: string;
+}
+
 /** カード捨て選択状態 */
 export interface DiscardState {
     count: number;
@@ -132,6 +139,7 @@ export type GameVersion = 'base' | 'glory';
 export interface GameState {
     version: GameVersion;
     players: { [key: string]: PlayerState };
+    playerNames: Record<string, string>;
     publicWorkplaces: Workplace[];
     household: number;
     round: number;
@@ -153,6 +161,7 @@ export interface GameState {
 
     log: { text: string; round: number }[]; // ゲームログ
 
+    lastPlacementEvent: PlacementAnimationEvent | null;
     finalScores: { playerIndex: number; score: number; breakdown: ScoreBreakdown }[] | null;
 
     /** P2P（オンライン）モードかどうか */

@@ -31,6 +31,50 @@ export type CPUConfig = {
 
 type Screen = 'menu' | 'local_setup' | 'online_menu' | 'host' | 'join' | 'playing' | 'dev_gallery';
 
+type LobbyPlayerInfo = {
+    pid: string;
+    name: string;
+};
+
+const HOST_NAME_STORAGE_KEY = 'ne-host-player-name';
+const GUEST_NAME_STORAGE_KEY = 'ne-guest-player-name';
+
+function defaultPlayerName(playerId: string | number): string {
+    return `P${Number(playerId) + 1}`;
+}
+
+function normalizePlayerName(name: string, fallback: string): string {
+    const trimmed = name.trim();
+    return trimmed || fallback;
+}
+
+function loadStoredPlayerName(storageKey: string): string {
+    return localStorage.getItem(storageKey) ?? '';
+}
+
+function getAvailableGuestPid(connections: Map<string, DataConnection>, numPlayers: number): string | null {
+    for (let i = 1; i < numPlayers; i++) {
+        const pid = String(i);
+        if (!connections.has(pid)) return pid;
+    }
+    return null;
+}
+
+function buildPlayerNames(numPlayers: number, hostName: string, guests: Record<string, LobbyPlayerInfo>): Record<string, string> {
+    const playerNames: Record<string, string> = {
+        '0': normalizePlayerName(hostName, defaultPlayerName(0)),
+    };
+    for (let i = 1; i < numPlayers; i++) {
+        const pid = String(i);
+        playerNames[pid] = normalizePlayerName(guests[pid]?.name ?? '', defaultPlayerName(pid));
+    }
+    return playerNames;
+}
+
+function getResolvedPlayerName(playerNames: Record<string, string> | undefined, playerId: string | number): string {
+    return normalizePlayerName(playerNames?.[String(playerId)] ?? '', defaultPlayerName(playerId));
+}
+
 // ============================================================
 // ICE設定（STUN + TURNサーバー設定でNAT越え対応）
 // ============================================================
@@ -240,7 +284,7 @@ function GameSettingsPanel({
 // ============================================================
 // スタート通知オーバーレイ（P2P用）
 // ============================================================
-function StartNotification({ playerNum, startPlayer, onDismiss }: { playerNum: number; startPlayer: number; onDismiss: () => void }) {
+function StartNotification({ playerName, startPlayerName, onDismiss }: { playerName: string; startPlayerName: string; onDismiss: () => void }) {
     useEffect(() => {
         const t = setTimeout(onDismiss, 3000);
         return () => clearTimeout(t);
@@ -254,8 +298,8 @@ function StartNotification({ playerNum, startPlayer, onDismiss }: { playerNum: n
             <div className="glass-card animate-slide-up" style={{ padding: 32, maxWidth: 400, textAlign: 'center' }}>
                 <div style={{ marginBottom: 16 }}><IconDice size={'var(--fs-icon)'} color="var(--gold)" /></div>
                 <h2 style={{ fontSize: 'var(--fs-4xl)', fontWeight: 900, color: 'var(--gold)', marginBottom: 8 }}>ゲーム開始！</h2>
-                <p style={{ fontSize: 'var(--fs-4xl)', fontWeight: 700, color: 'var(--teal)', marginBottom: 8 }}>あなたは P{playerNum + 1} です</p>
-                <p style={{ color: 'var(--text-secondary)' }}>P{startPlayer + 1} からスタートします</p>
+                <p style={{ fontSize: 'var(--fs-4xl)', fontWeight: 700, color: 'var(--teal)', marginBottom: 8 }}>あなたは {playerName} です</p>
+                <p style={{ color: 'var(--text-secondary)' }}>{startPlayerName} からスタートします</p>
                 <p style={{ color: 'var(--text-dim)', fontSize: 'var(--fs-xl)', marginTop: 16 }}>（クリックまたは3秒後に閉じます）</p>
             </div>
         </div>
@@ -478,21 +522,28 @@ function HostLobby({ onBack }: { onBack: () => void }) {
     // ゲーム設定
     const [numPlayers, setNumPlayers] = useState(2);
     const [version, setVersion] = useState<GameVersion>('base');
+    const [hostName, setHostName] = useState(() => loadStoredPlayerName(HOST_NAME_STORAGE_KEY));
     // ホスト自身のオートプレイ
     const [autoPlay, setAutoPlay] = useState(false);
     const [difficulty, setDifficulty] = useState<AIDifficulty>('heuristic');
     const [cpuMoveDelay, setCpuMoveDelay] = useState(soundManager.getSettings().cpuMoveDelay);
 
-
-    const [connectedPlayers, setConnectedPlayers] = useState<string[]>([]);
+    const [connectedPlayers, setConnectedPlayers] = useState<Record<string, LobbyPlayerInfo>>({});
     const [gameStarted, setGameStarted] = useState(false);
     const [hostState, setHostState] = useState<{ G: GameState; ctx: Ctx } | null>(null);
     const [showStartNotification, setShowStartNotification] = useState(false);
     const peerRef = useRef<Peer | null>(null);
     const connectionsRef = useRef<Map<string, DataConnection>>(new Map());
     const clientsRef = useRef<any[]>([]);
+    const numPlayersRef = useRef(numPlayers);
 
+    useEffect(() => {
+        numPlayersRef.current = numPlayers;
+    }, [numPlayers]);
 
+    useEffect(() => {
+        localStorage.setItem(HOST_NAME_STORAGE_KEY, hostName);
+    }, [hostName]);
 
     useEffect(() => {
         const peer = new Peer(iceConfig);
@@ -509,13 +560,30 @@ function HostLobby({ onBack }: { onBack: () => void }) {
 
         peer.on('connection', (conn) => {
             conn.on('open', () => {
-                const playerIndex = connectionsRef.current.size + 1;
-                const pid = String(playerIndex);
+                const pid = getAvailableGuestPid(connectionsRef.current, numPlayersRef.current);
+                if (!pid) {
+                    conn.send({ type: 'rejected', reason: 'ロビーが満員です' });
+                    conn.close();
+                    return;
+                }
                 connectionsRef.current.set(pid, conn);
-                setConnectedPlayers(prev => [...prev, pid]);
+                setConnectedPlayers(prev => ({
+                    ...prev,
+                    [pid]: { pid, name: defaultPlayerName(pid) },
+                }));
                 conn.send({ type: 'assigned', playerID: pid });
 
                 conn.on('data', (data: any) => {
+                    if (data.type === 'hello') {
+                        setConnectedPlayers(prev => ({
+                            ...prev,
+                            [pid]: {
+                                pid,
+                                name: normalizePlayerName(String(data.name ?? ''), defaultPlayerName(pid)),
+                            },
+                        }));
+                        return;
+                    }
                     if (data.type === 'move') {
                         const hostClient = clientsRef.current[0];
                         const state = hostClient?.getState();
@@ -534,7 +602,11 @@ function HostLobby({ onBack }: { onBack: () => void }) {
 
                 conn.on('close', () => {
                     connectionsRef.current.delete(pid);
-                    setConnectedPlayers(prev => prev.filter(p => p !== pid));
+                    setConnectedPlayers(prev => {
+                        const next = { ...prev };
+                        delete next[pid];
+                        return next;
+                    });
                 });
             });
         });
@@ -544,10 +616,11 @@ function HostLobby({ onBack }: { onBack: () => void }) {
 
     // ゲーム開始
     const startGame = useCallback(() => {
+        const playerNames = buildPlayerNames(numPlayers, hostName, connectedPlayers);
         // Glory対応: setupDataにversionを渡すためのラッパー
         const gameWithVersion = {
             ...NationalEconomy,
-            setup: (ctx: any) => NationalEconomy.setup!(ctx, { version, isOnline: true }),
+            setup: (ctx: any) => NationalEconomy.setup!(ctx, { version, isOnline: true, playerNames }),
         };
 
         const localMP = Local();
@@ -583,13 +656,13 @@ function HostLobby({ onBack }: { onBack: () => void }) {
 
         // ゲーム開始を全クライアントに通知（バージョン情報も送信）
         for (const [, conn] of connectionsRef.current) {
-            conn.send({ type: 'gameStart', numPlayers, version });
+            conn.send({ type: 'gameStart', numPlayers, version, playerNames });
         }
 
         soundManager.playRandomBGM();
         setGameStarted(true);
         setShowStartNotification(true);
-    }, [numPlayers, version]);
+    }, [connectedPlayers, hostName, numPlayers, version]);
 
 
 
@@ -624,8 +697,8 @@ function HostLobby({ onBack }: { onBack: () => void }) {
             <>
                 {showStartNotification && (
                     <StartNotification
-                        playerNum={0}
-                        startPlayer={hostState.G.startPlayer}
+                        playerName={getResolvedPlayerName(hostState.G.playerNames, '0')}
+                        startPlayerName={getResolvedPlayerName(hostState.G.playerNames, hostState.G.startPlayer)}
                         onDismiss={() => setShowStartNotification(false)}
                     />
                 )}
@@ -634,10 +707,14 @@ function HostLobby({ onBack }: { onBack: () => void }) {
         );
     }
 
-    // 開始条件: 全人数揃ったら
-    const humanSlots = connectedPlayers.length + 1; // +1 はホスト
+    const connectedGuestCount = Object.keys(connectedPlayers).length;
+    const humanSlots = connectedGuestCount + 1; // +1 はホスト
     const canStart = humanSlots >= numPlayers;
     const missingCount = numPlayers - humanSlots;
+    const hostDisplayName = normalizePlayerName(hostName, defaultPlayerName(0));
+    const handleSetLobbyNumPlayers = (nextNumPlayers: number) => {
+        setNumPlayers(Math.max(nextNumPlayers, connectedGuestCount + 1));
+    };
 
     return (
         <div className="game-bg" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', padding: 16, overflowY: 'auto' }}>
@@ -652,6 +729,28 @@ function HostLobby({ onBack }: { onBack: () => void }) {
                     <div style={{ marginBottom: 16 }}>
                         <span style={{ color: 'var(--text-secondary)', fontSize: 'var(--fs-xl2)' }}>ステータス: </span>
                         <span style={{ color: 'var(--teal)', fontSize: 'var(--fs-xl3)', fontWeight: 600 }}>{status}</span>
+                    </div>
+
+                    <div style={{ marginBottom: 16 }}>
+                        <div style={{ color: 'var(--text-dim)', fontSize: 'var(--fs-xl)', marginBottom: 6 }}>あなたの名前</div>
+                        <input
+                            type="text"
+                            value={hostName}
+                            onChange={e => setHostName(e.target.value)}
+                            placeholder="プレイヤー名を入力"
+                            maxLength={20}
+                            style={{
+                                width: '100%',
+                                background: 'rgba(255,255,255,0.05)',
+                                border: '1px solid var(--glass-border)',
+                                borderRadius: 12,
+                                padding: '12px 16px',
+                                color: 'var(--text-primary)',
+                                textAlign: 'center',
+                                fontSize: 'var(--fs-2xl)',
+                                outline: 'none',
+                            }}
+                        />
                     </div>
 
                     {peerID && (
@@ -674,13 +773,15 @@ function HostLobby({ onBack }: { onBack: () => void }) {
                         <span style={{ color: 'var(--text-secondary)', fontSize: 'var(--fs-xl2)' }}>接続中: </span>
                         <span style={{ color: 'var(--teal)', fontWeight: 700 }}>{humanSlots}/{numPlayers}人</span>
                         <div style={{ fontSize: 'var(--fs-xl)', color: 'var(--text-dim)', marginTop: 4 }}>
-                            P1: あなた（ホスト） {autoPlay && <IconRobot size={'1em'} />}
+                            <div>
+                                P1: {hostDisplayName}（ホスト） {autoPlay && <IconRobot size={'1em'} />}
+                            </div>
                             {Array.from({ length: numPlayers - 1 }, (_, i) => {
                                 const pid = String(i + 1);
-                                const isConnected = connectedPlayers.includes(pid);
+                                const guest = connectedPlayers[pid];
                                 return (
                                     <div key={pid}>
-                                        P{i + 2}: {isConnected ? '接続済み ✅' : '待機中...'}
+                                        P{i + 2}: {guest ? `${guest.name} 接続済み ✅` : '待機中...'}
                                     </div>
                                 );
                             })}
@@ -692,7 +793,7 @@ function HostLobby({ onBack }: { onBack: () => void }) {
                 <div className="glass-card" style={{ padding: 24, marginBottom: 16 }}>
                     <h2 style={{ fontSize: 'var(--fs-2xl)', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 16, textAlign: 'center', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}><IconGear size={'1em'} /> ゲーム設定</h2>
                     <GameSettingsPanel
-                        numPlayers={numPlayers} setNumPlayers={setNumPlayers}
+                        numPlayers={numPlayers} setNumPlayers={handleSetLobbyNumPlayers}
                         version={version} setVersion={setVersion}
                         showCpuSettings={false}
                     />
@@ -747,6 +848,7 @@ function HostLobby({ onBack }: { onBack: () => void }) {
 function JoinLobby({ onBack }: { onBack: () => void }) {
     const [hostID, setHostID] = useState('');
     const [status, setStatus] = useState('接続準備中...');
+    const [playerName, setPlayerName] = useState(() => loadStoredPlayerName(GUEST_NAME_STORAGE_KEY));
     const [playerID, setPlayerID] = useState<string | null>(null);
     const [gameStarted, setGameStarted] = useState(false);
     const [gameState, setGameState] = useState<{ G: GameState; ctx: Ctx } | null>(null);
@@ -764,19 +866,30 @@ function JoinLobby({ onBack }: { onBack: () => void }) {
         return () => { peer.destroy(); };
     }, []);
 
+    useEffect(() => {
+        localStorage.setItem(GUEST_NAME_STORAGE_KEY, playerName);
+    }, [playerName]);
+
     const connect = useCallback(() => {
         if (!peerRef.current || !hostID.trim()) return;
+        setConnected(true);
         setStatus('ホストに接続中...');
 
         const conn = peerRef.current.connect(hostID.trim());
         connRef.current = conn;
 
         conn.on('open', () => {
+            conn.send({ type: 'hello', name: playerName.trim() });
             setStatus('接続完了、ゲーム開始を待機中...');
         });
 
         conn.on('data', (data: any) => {
             switch (data.type) {
+                case 'rejected':
+                    setStatus(data.reason || '接続を拒否されました');
+                    setConnected(false);
+                    conn.close();
+                    break;
                 case 'assigned':
                     setPlayerID(data.playerID);
                     setStatus(`P${parseInt(data.playerID) + 1}として接続完了。ゲーム開始を待機中...`);
@@ -792,14 +905,16 @@ function JoinLobby({ onBack }: { onBack: () => void }) {
         });
 
         conn.on('close', () => {
-            setStatus('ホストとの接続が切断されました');
+            setStatus(prev => (prev.includes('拒否') || prev.includes('満員')) ? prev : 'ホストとの接続が切断されました');
+            setConnected(false);
             setGameStarted(false);
         });
 
         conn.on('error', (err) => {
             setStatus(`接続エラー: ${err.type}`);
+            setConnected(false);
         });
-    }, [hostID]);
+    }, [hostID, playerName]);
 
     // ゲスト側のmovesプロキシ（ホストへ転送）
     const remoteMoves = useMemo(() => {
@@ -825,8 +940,8 @@ function JoinLobby({ onBack }: { onBack: () => void }) {
             <>
                 {showStartNotification && (
                     <StartNotification
-                        playerNum={parseInt(playerID)}
-                        startPlayer={gameState.G.startPlayer}
+                        playerName={getResolvedPlayerName(gameState.G.playerNames, playerID)}
+                        startPlayerName={getResolvedPlayerName(gameState.G.playerNames, gameState.G.startPlayer)}
                         onDismiss={() => setShowStartNotification(false)}
                     />
                 )}
@@ -846,6 +961,20 @@ function JoinLobby({ onBack }: { onBack: () => void }) {
                         <span style={{ color: 'var(--text-secondary)', fontSize: 'var(--fs-xl2)' }}>ステータス: </span>
                         <span style={{ color: 'var(--teal)', fontSize: 'var(--fs-xl3)', fontWeight: 600 }}>{status}</span>
                     </div>
+
+                    <input
+                        type="text"
+                        value={playerName}
+                        onChange={e => setPlayerName(e.target.value)}
+                        placeholder="あなたの名前"
+                        maxLength={20}
+                        style={{
+                            width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)',
+                            borderRadius: 12, padding: '12px 16px', color: 'var(--text-primary)',
+                            textAlign: 'center', fontSize: 'var(--fs-2xl)',
+                            marginBottom: 12, outline: 'none',
+                        }}
+                    />
 
                     <input
                         type="text"
@@ -876,7 +1005,7 @@ function JoinLobby({ onBack }: { onBack: () => void }) {
                         </div>
                     )}
 
-                    <button onClick={() => { setConnected(true); connect(); }} disabled={!hostID.trim() || connected} style={{
+                    <button onClick={connect} disabled={!hostID.trim() || connected} style={{
                         width: '100%', padding: '12px', borderRadius: 12, fontWeight: 700, fontSize: 'var(--fs-3xl)',
                         background: (hostID.trim() && !connected) ? 'var(--teal)' : 'rgba(255,255,255,0.05)',
                         color: (hostID.trim() && !connected) ? '#000' : 'var(--text-dim)',

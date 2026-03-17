@@ -41,6 +41,25 @@ const cEffect = (defId: string) => {
     if (defId === CONSUMABLE_DEF_ID) return '';
     return getCardDef(defId).effectText;
 };
+function getPlayerDisplayName(playerNames: GameState['playerNames'] | undefined, playerId: string | number): string {
+    const pid = String(playerId);
+    const fallback = `P${Number(pid) + 1}`;
+    const rawName = playerNames?.[pid];
+    if (typeof rawName !== 'string') return fallback;
+    const trimmed = rawName.trim();
+    return trimmed || fallback;
+}
+function shortenPlayerDisplayName(name: string, maxLength: number = 10): string {
+    if (name.length <= maxLength) return name;
+    return `${name.slice(0, Math.max(1, maxLength - 1))}…`;
+}
+const opponentConsumableCardStyle: React.CSSProperties = {
+    background: 'linear-gradient(170deg, rgba(87, 83, 78, 1) 0%, rgba(50, 46, 42, 1) 100%)',
+    borderColor: 'rgba(168, 162, 158, 0.15)',
+};
+const opponentRevealedCardStyle: React.CSSProperties = {
+    background: 'linear-gradient(135deg, var(--teal-15), rgba(30,30,40,0.9))',
+};
 
 /** ラウンドごとの追加職場名マッピング (game.ts getRoundWorkplaceInfoから取得) */
 function getRoundWorkplaceName(round: number): string {
@@ -173,22 +192,39 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     type PreviewData =
         | { type: 'card'; defId: string }
         | { type: 'workplace'; wpId: string; name: string; effectText: string; multipleAllowed: boolean };
+    type HoverPreviewMode = 'auto' | 'above-hand';
+    type PlacementDelta =
+        | { playerId: string; moveName: 'placeWorker'; targetId: string }
+        | { playerId: string; moveName: 'placeWorkerOnBuilding'; targetId: string };
     const [previewData, setPreviewData] = useState<PreviewData | null>(null);
     const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     // pressingCardIdxはuseRefで管理（再レンダリングによるonPointerLeave発火を防ぐ）
     const pressingCardIdxRef = useRef<number | null>(null);
+    const hoverPreviewModeRef = useRef<HoverPreviewMode>('auto');
     // ホバープレビュー中かどうかのフラグ（閉じ方の制御用）
     const isHoverPreviewRef = useRef(false);
     // ホバープレビュー元カードの位置（カーソル離脱検知用）
     const hoverCardRectRef = useRef<DOMRect | null>(null);
+    const animationRectCacheRef = useRef<{
+        players: Record<string, DOMRect>;
+        workplaces: Record<string, DOMRect>;
+        buildings: Record<string, DOMRect>;
+    }>({
+        players: {},
+        workplaces: {},
+        buildings: {},
+    });
+    const handledPlacementAnimationSeqRef = useRef(rawG.lastPlacementEvent?.seq ?? 0);
+    const activePlacementAnimationSeqRef = useRef<number | null>(null);
     const clearPreviewTimer = () => {
         if (previewTimerRef.current) { clearTimeout(previewTimerRef.current); previewTimerRef.current = null; }
     };
     // カード用プレビュー開始
-    const startCardPreview = (defId: string, cardIdx: number) => {
+    const startCardPreview = (defId: string, cardIdx?: number, previewMode: HoverPreviewMode = 'auto') => {
         clearPreviewTimer();
         isHoverPreviewRef.current = false;
-        pressingCardIdxRef.current = cardIdx;
+        hoverPreviewModeRef.current = previewMode;
+        pressingCardIdxRef.current = cardIdx ?? null;
         previewTimerRef.current = setTimeout(() => {
             setPreviewData({ type: 'card', defId });
         }, TIMING.LONG_PRESS_MS);
@@ -197,6 +233,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     const startWorkplacePreview = (wp: { id: string; name: string; effectText: string; multipleAllowed: boolean; fromBuildingDefId?: string }, cardIdx: number) => {
         clearPreviewTimer();
         isHoverPreviewRef.current = false;
+        hoverPreviewModeRef.current = 'auto';
         pressingCardIdxRef.current = cardIdx;
         previewTimerRef.current = setTimeout(() => {
             // 売却建物（fromBuildingDefIdあり）はCardDefフォーマットで表示
@@ -217,6 +254,22 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
             setPreviewData(null);
         }
         hoverCardRectRef.current = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        hoverPreviewModeRef.current = 'auto';
+        pressingCardIdxRef.current = cardIdx;
+        previewTimerRef.current = setTimeout(() => {
+            isHoverPreviewRef.current = true;
+            setPreviewData({ type: 'card', defId });
+        }, TIMING.HOVER_PREVIEW_MS);
+    };
+    const startHoverCardPreviewWithMode = (defId: string, cardIdx: number, e: React.PointerEvent, hoverMode: HoverPreviewMode) => {
+        if (!featureFlags.HOVER_PREVIEW) return;
+        clearPreviewTimer();
+        if (isHoverPreviewRef.current) {
+            isHoverPreviewRef.current = false;
+            setPreviewData(null);
+        }
+        hoverCardRectRef.current = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        hoverPreviewModeRef.current = hoverMode;
         pressingCardIdxRef.current = cardIdx;
         previewTimerRef.current = setTimeout(() => {
             isHoverPreviewRef.current = true;
@@ -232,6 +285,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
             setPreviewData(null);
         }
         hoverCardRectRef.current = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        hoverPreviewModeRef.current = 'auto';
         pressingCardIdxRef.current = cardIdx;
         previewTimerRef.current = setTimeout(() => {
             isHoverPreviewRef.current = true;
@@ -260,6 +314,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
         pressingCardIdxRef.current = null;
         if (isHoverPreviewRef.current && !featureFlags.DARKEN_ON_PREVIEW) {
             isHoverPreviewRef.current = false;
+            hoverPreviewModeRef.current = 'auto';
             hoverCardRectRef.current = null;
             setPreviewData(null);
         }
@@ -273,6 +328,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
         clearPreviewTimer();
         pressingCardIdxRef.current = null;
         isHoverPreviewRef.current = false;
+        hoverPreviewModeRef.current = 'auto';
         hoverCardRectRef.current = null;
         setPreviewData(null);
     };
@@ -469,6 +525,12 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     useEffect(() => {
         if (rawG.round !== prevRoundRef.current) {
             prevRoundRef.current = rawG.round;
+            const pendingOpponentPlacementSeq = isOnline
+                && rawG.lastPlacementEvent
+                && rawG.lastPlacementEvent.playerId !== myPid
+                && rawG.lastPlacementEvent.seq > handledPlacementAnimationSeqRef.current
+                ? rawG.lastPlacementEvent.seq
+                : null;
             const startSequence = () => {
                 // デッキ位置を事前取得
                 const deckRect = roundDeckRef.current?.getBoundingClientRect() ?? null;
@@ -505,9 +567,15 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
 
                 return { moveTimer, announceTimer, doneTimer };
             };
-            if (drawAnimRef.current) {
+            if (drawAnimRef.current || pendingOpponentPlacementSeq !== null) {
                 const poll = setInterval(() => {
-                    if (!drawAnimRef.current) {
+                    if (
+                        !drawAnimRef.current
+                        && (
+                            pendingOpponentPlacementSeq === null
+                            || handledPlacementAnimationSeqRef.current >= pendingOpponentPlacementSeq
+                        )
+                    ) {
                         clearInterval(poll);
                         startSequence();
                     }
@@ -518,10 +586,10 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                 return () => { clearTimeout(moveTimer); clearTimeout(announceTimer); clearTimeout(doneTimer); };
             }
         }
-    }, [rawG.round]);
+    }, [isOnline, myPid, rawG.lastPlacementEvent, rawG.round]);
 
     // ====== アニメーション管理 ======
-    const { triggerRipple, triggerDraw, isDrawAnimating, AnimationOverlay } = useAnimations();
+    const { triggerRipple, triggerMeepleFlight, triggerDraw, isDrawAnimating, AnimationOverlay } = useAnimations();
 
     const handAreaRef = useRef<HTMLDivElement>(null);
     const handFanContainerRef = useRef<HTMLDivElement>(null);
@@ -715,6 +783,104 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
         }
         return slots;
     }, []);
+
+    const snapshotAnimationRects = useCallback(() => {
+        const players: Record<string, DOMRect> = {};
+        const workplaces: Record<string, DOMRect> = {};
+        const buildings: Record<string, DOMRect> = {};
+
+        document.querySelectorAll<HTMLElement>('[data-player-id]').forEach((el) => {
+            const pid = el.dataset.playerId;
+            if (pid) players[pid] = el.getBoundingClientRect();
+        });
+        document.querySelectorAll<HTMLElement>('[data-workplace-id]').forEach((el) => {
+            const workplaceId = el.dataset.workplaceId;
+            if (workplaceId) workplaces[workplaceId] = el.getBoundingClientRect();
+        });
+        document.querySelectorAll<HTMLElement>('[data-building-uid]').forEach((el) => {
+            const buildingUid = el.dataset.buildingUid;
+            if (buildingUid) buildings[buildingUid] = el.getBoundingClientRect();
+        });
+
+        animationRectCacheRef.current = { players, workplaces, buildings };
+    }, []);
+
+    const getWorkerAnimationStartRect = useCallback((pid: string, preferPlayerPanel: boolean = false): DOMRect | null => {
+        const workerToken = !preferPlayerPanel
+            ? document.querySelector(`[data-player-id="${pid}"] .worker-token:not(.used)`) as HTMLElement | null
+            : null;
+        const originEl =
+            workerToken
+            ?? document.querySelector(`[data-player-id="${pid}"] [data-player-origin="${pid}"]`) as HTMLElement | null
+            ?? document.querySelector(`[data-player-id="${pid}"]`) as HTMLElement | null;
+
+        return originEl?.getBoundingClientRect() ?? animationRectCacheRef.current.players[pid] ?? null;
+    }, []);
+
+    const getPlacementTargetRect = useCallback((placement: PlacementDelta): DOMRect | null => {
+        if (placement.moveName === 'placeWorker') {
+            const el = document.querySelector(`[data-workplace-id="${placement.targetId}"]`) as HTMLElement | null;
+            return el?.getBoundingClientRect() ?? animationRectCacheRef.current.workplaces[placement.targetId] ?? null;
+        }
+
+        const el = document.querySelector(`[data-building-uid="${placement.targetId}"]`) as HTMLElement | null;
+        return el?.getBoundingClientRect() ?? animationRectCacheRef.current.buildings[placement.targetId] ?? null;
+    }, []);
+
+    const playWorkerPlacementAnimation = useCallback(async (
+        pid: string,
+        placement: PlacementDelta,
+        options?: { preferPlayerPanel?: boolean; rippleColor?: string }
+    ): Promise<boolean> => {
+        const startRect = getWorkerAnimationStartRect(pid, options?.preferPlayerPanel ?? false);
+        const targetRect = getPlacementTargetRect(placement);
+        if (!startRect || !targetRect) return false;
+
+        await triggerMeepleFlight(startRect, targetRect, getMeepleSrc(parseInt(pid)));
+        triggerRipple(
+            targetRect.left + targetRect.width / 2,
+            targetRect.top + targetRect.height / 2,
+            '',
+            options?.rippleColor ?? 'var(--teal-60)'
+        );
+        return true;
+    }, [getPlacementTargetRect, getWorkerAnimationStartRect, getMeepleSrc, triggerMeepleFlight, triggerRipple]);
+
+    const detectPlacementDelta = useCallback((prevState: GameState, nextState: GameState): PlacementDelta | null => {
+        for (const nextWp of nextState.publicWorkplaces) {
+            const prevWp = prevState.publicWorkplaces.find(wp => wp.id === nextWp.id);
+            if (!prevWp) continue;
+            if (nextWp.workers.length > prevWp.workers.length) {
+                const placedPid = nextWp.workers[nextWp.workers.length - 1];
+                return {
+                    playerId: String(placedPid),
+                    moveName: 'placeWorker',
+                    targetId: nextWp.id,
+                };
+            }
+        }
+
+        for (const pid of Object.keys(nextState.players)) {
+            const prevBuildings = prevState.players[pid]?.buildings ?? [];
+            const nextBuildings = nextState.players[pid]?.buildings ?? [];
+            for (const nextSlot of nextBuildings) {
+                const prevSlot = prevBuildings.find(slot => slot.card.uid === nextSlot.card.uid);
+                if (prevSlot && !prevSlot.workerPlaced && nextSlot.workerPlaced) {
+                    return {
+                        playerId: pid,
+                        moveName: 'placeWorkerOnBuilding',
+                        targetId: nextSlot.card.uid,
+                    };
+                }
+            }
+        }
+
+        return null;
+    }, []);
+
+    useLayoutEffect(() => {
+        snapshotAnimationRects();
+    });
 
     // スケーリングはCSSのみで実現（.game-scalerクラスで制御）
     // JSによるtransform設定は不要。フェーズ遷移時の再マウントでも安定動作する。
@@ -955,6 +1121,35 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
         };
     }, [G, curPid, cpuConfig, moves, showCpuSettings, playerID, drawAnimTick]);
 
+    useEffect(() => {
+        const placement = rawG.lastPlacementEvent;
+        if (!placement) return;
+        if (placement.seq <= handledPlacementAnimationSeqRef.current) return;
+        if (activePlacementAnimationSeqRef.current === placement.seq) return;
+
+        if (!isOnline || placement.playerId === myPid) {
+            handledPlacementAnimationSeqRef.current = placement.seq;
+            return;
+        }
+
+        const rippleColor = placement.moveName === 'placeWorker'
+            ? 'var(--teal-60)'
+            : 'var(--gold-60)';
+
+        activePlacementAnimationSeqRef.current = placement.seq;
+        void (async () => {
+            try {
+                await playWorkerPlacementAnimation(placement.playerId, placement, {
+                    preferPlayerPanel: true,
+                    rippleColor,
+                });
+            } finally {
+                handledPlacementAnimationSeqRef.current = placement.seq;
+                activePlacementAnimationSeqRef.current = null;
+            }
+        })();
+    }, [isOnline, myPid, playWorkerPlacementAnimation, rawG.lastPlacementEvent]);
+
     // ===== ①②③ ポップアップ廃止: payday/cleanup/discard はメインボード上でインライン操作 =====
     // 給料日（建物売却）: メインボードの建物カードから直接選択
     const isPaydayPhase = G.phase === 'payday' && G.paydayState;
@@ -976,6 +1171,14 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     // ホットシートでカレントプレイヤー = 自分
     const myIdx = parseInt(myPid);
     const myPlayer = G.players[myPid];
+    const playerName = (pid: string | number) => getPlayerDisplayName(G.playerNames, pid);
+    const playerChipLabel = (pid: string | number) => shortenPlayerDisplayName(playerName(pid), 8);
+    const renderWorkerChip = (pid: number, key: React.Key) => (
+        <span key={key} className="worker-chip" title={playerName(pid)}>
+            <img src={getMeepleSrc(pid)} className="worker-chip-icon" alt="" />
+            {playerChipLabel(pid)}
+        </span>
+    );
 
     // ====== ワーカードラッグ: documentレベルのPointerMove/Up/Cancel処理 ======
     // マウント時1回だけリスナー登録。Refで最新値を参照するためレースコンディションなし
@@ -1045,7 +1248,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
             <div className="game-bg" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', padding: 16 }}>
                 <div className="glass-card animate-slide-up" style={{ padding: 40, maxWidth: 420, width: '100%', textAlign: 'center' }}>
                     <div style={{ fontSize: 'var(--fs-icon)', marginBottom: 16, animation: 'pulse 2s ease-in-out infinite' }}>⏳</div>
-                    <h2 style={{ fontSize: 'var(--fs-4xl)', fontWeight: 700, color: 'var(--gold)', marginBottom: 8 }}>P{G.activePlayer + 1} が操作中...</h2>
+                    <h2 style={{ fontSize: 'var(--fs-4xl)', fontWeight: 700, color: 'var(--gold)', marginBottom: 8 }}>{playerName(G.activePlayer)} が操作中...</h2>
                     <p style={{ color: 'var(--text-secondary)', marginBottom: 4 }}>{phaseLabels[G.phase] || G.phase}を行っています</p>
                     <p style={{ color: 'var(--text-dim)', fontSize: 'var(--fs-xl2)', marginTop: 16 }}>しばらくお待ちください</p>
                 </div>
@@ -1141,6 +1344,25 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                     top = Math.max(4, Math.min(top, window.innerHeight - ph - 4));
                     return { position: 'fixed' as const, left, top, width: pw, zIndex: 10000 };
                 })() : null;
+                const previewStyle = hoverPreviewModeRef.current === 'above-hand' && hoverCardRectRef.current && handAreaRef.current
+                    ? (() => {
+                        const cardRect = hoverCardRectRef.current!;
+                        const handRect = handAreaRef.current!.getBoundingClientRect();
+                        const previewWidth = Math.min(280, window.innerWidth * 0.7);
+                        const gap = Math.max(4, Math.min(12, handRect.height * 0.06));
+                        const availableAbove = Math.max(0, handRect.top - gap - 8);
+                        let left = cardRect.left + (cardRect.width - previewWidth) / 2;
+                        left = Math.max(8, Math.min(left, window.innerWidth - previewWidth - 8));
+                        return {
+                            position: 'fixed' as const,
+                            left,
+                            bottom: Math.max(8, window.innerHeight - handRect.top + gap),
+                            width: previewWidth,
+                            maxHeight: availableAbove,
+                            zIndex: 10000,
+                        };
+                    })()
+                    : hoverPos;
 
                 if (previewData.type === 'card') {
                     // カード（建物 / 売却建物）フォーマット
@@ -1150,7 +1372,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                     const tagLabel = pDef.tags.includes('farm') ? '🌿 農場' : pDef.tags.includes('factory') ? '🏭 工場' : '🏢 施設';
                     return (
                         <div className={`card-preview-overlay${featureFlags.DARKEN_ON_PREVIEW ? '' : ' no-darken'}`} onPointerUp={closePreview} onClick={closePreview} onPointerMove={handlePreviewPointerMove}>
-                            <div className="card-preview-card" style={hoverPos || undefined}>
+                            <div className="card-preview-card" style={previewStyle || undefined}>
                                 <div className="card-preview-image">
                                     {imgSrc && <img src={imgSrc} alt={pDef.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
                                 </div>
@@ -1196,7 +1418,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                     const wpImgSrc = wpImg ? `${import.meta.env.BASE_URL}${getThemedWorkplaceImagePath(wpImg)}` : null;
                     return (
                         <div className={`card-preview-overlay${featureFlags.DARKEN_ON_PREVIEW ? '' : ' no-darken'}`} onPointerUp={closePreview} onClick={closePreview} onPointerMove={handlePreviewPointerMove}>
-                            <div className="card-preview-card" style={hoverPos || undefined}>
+                            <div className="card-preview-card" style={previewStyle || undefined}>
                                 <div className="card-preview-image">
                                     {wpImgSrc && <img src={wpImgSrc} alt={previewData.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
                                 </div>
@@ -1279,7 +1501,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                         {/* ターン表示 */}
                         <div className="turn-bar" style={{ marginBottom: 2, fontSize: 'var(--fs-lg)' }}>
                             {cpuConfig?.enabled && cpuConfig.cpuPlayers.includes(displayCurPid) ? <IconRobot size={"calc(var(--fs) * 1.33)"} /> : <IconPlayer size={"calc(var(--fs) * 1.33)"} />}
-                            <span><b style={{ color: 'var(--gold-light)' }}>P{displayCurIdx + 1}</b> のターン</span>
+                            <span title={playerName(displayCurPid)}><b style={{ color: 'var(--gold-light)' }}>{playerName(displayCurPid)}</b> のターン</span>
                             {cpuConfig?.enabled && cpuConfig.cpuPlayers.includes(displayCurPid) && (
                                 <span style={{
                                     marginLeft: 4, fontSize: 'var(--fs-md)', color: 'var(--teal)',
@@ -1317,9 +1539,11 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                 return (
                                     <div key={pid} data-player-id={pid} className={`opponent-card ${active ? 'opponent-card-active' : 'opponent-card-inactive'}`}>
                                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2, flexShrink: 0 }}>
-                                            <span style={{ fontWeight: 700, fontSize: 'var(--fs-lg)', color: active ? 'var(--teal)' : 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 3 }}>
+                                            <span data-player-origin={pid} style={{ fontWeight: 700, fontSize: 'var(--fs-lg)', color: active ? 'var(--teal)' : 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 3 }}>
                                                 {isCpu ? <IconRobot size={"calc(var(--fs) * 1.11)"} /> : <IconPlayer size={"calc(var(--fs) * 1.11)"} />}
-                                                P{i + 1}
+                                                <span title={playerName(pid)} style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '11ch' }}>
+                                                    {playerName(pid)}
+                                                </span>
                                                 {i === G.startPlayer && <span style={{ color: 'var(--orange)', fontSize: 'var(--fs-md)' }}>★</span>}
                                             </span>
                                             {/* ステータスバッジ + NPC手札トグル */}
@@ -1355,40 +1579,37 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
 
                                         {/* 手札（ミニ直線配置）: NPC手札トグルで表示切替 */}
                                         <div className="opponent-hand-fan" style={{ display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
-                                            {isNpcHandShown
-                                                ? p.hand.map((c, ci) => (
+                                            {p.hand.map((c: Card, ci: number) => {
+                                                const isVisibleCard = isNpcHandShown && !isHidden(c);
+                                                return (
                                                     <div key={c.uid}
-                                                        onPointerDown={() => { if (!isHidden(c)) startCardPreview(c.defId, 4000 + i * 100 + ci); }}
+                                                        onPointerDown={() => { if (isVisibleCard) startCardPreview(c.defId, 4000 + i * 100 + ci); }}
                                                         onPointerUp={endPreview}
                                                         onPointerLeave={() => { endPreview(); endHoverPreview(); }}
-                                                        onPointerEnter={(e) => { if (!isHidden(c)) startHoverCardPreview(c.defId, 4000 + i * 100 + ci, e); }}
+                                                        onPointerEnter={(e) => { if (isVisibleCard) startHoverCardPreview(c.defId, 4000 + i * 100 + ci, e); }}
                                                         className="opponent-hand-card"
                                                         style={{
                                                             marginLeft: ci === 0 ? 0 : getCardOverlapMargin(p.hand.length, false),
                                                             zIndex: ci + 1,
-                                                            background: isConsumable(c)
-                                                                ? 'linear-gradient(135deg, rgba(251,146,60,0.25), var(--bg-secondary))'
-                                                                : 'linear-gradient(135deg, var(--teal-15), rgba(30,30,40,0.9))',
+                                                            ...(isConsumable(c)
+                                                                ? opponentConsumableCardStyle
+                                                                : isVisibleCard
+                                                                    ? opponentRevealedCardStyle
+                                                                    : {}),
                                                             display: 'flex',
                                                             alignItems: 'center',
                                                             justifyContent: 'center',
                                                             padding: '1px',
                                                             overflow: 'hidden',
                                                         }}>
-                                                        {!isHidden(c) && (
+                                                        {isVisibleCard && (
                                                             <div style={{ fontSize: 'var(--fs-xs)', fontWeight: 700, color: 'var(--text-primary)', textAlign: 'center', lineHeight: 1.1, wordBreak: 'break-all' }}>
                                                                 {cName(c.defId)}
                                                             </div>
                                                         )}
                                                     </div>
-                                                ))
-                                                : Array.from({ length: p.hand.length }).map((_, ci) => (
-                                                    <div key={ci} className="opponent-hand-card" style={{
-                                                        marginLeft: ci === 0 ? 0 : getCardOverlapMargin(p.hand.length, false),
-                                                        zIndex: ci + 1,
-                                                    }} />
-                                                ))
-                                            }
+                                                );
+                                            })}
                                         </div>
 
                                         {/* 建物（カードスプライト・水平スクロール） */}
@@ -1605,7 +1826,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                         {wp.multipleAllowed && <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--purple)', position: 'relative', zIndex: 1 }}>∞ 複数可</div>}
                                                         {wp.workers.length > 0 && (
                                                             <div style={{ marginTop: 2, display: 'flex', gap: 1, flexWrap: 'wrap', position: 'relative', zIndex: 1 }}>
-                                                                {wp.workers.map((w, i) => <span key={i} className="worker-chip"><img src={getMeepleSrc(w)} className="worker-chip-icon" alt="" />P{w + 1}</span>)}
+                                                                {wp.workers.map((w, i) => renderWorkerChip(w, i))}
                                                             </div>
                                                         )}
                                                     </div>
@@ -1634,7 +1855,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                         <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', marginTop: 1, lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{wp.effectText}</div>
                                                         {wp.workers.length > 0 && (
                                                             <div style={{ marginTop: 2, display: 'flex', gap: 1, position: 'relative', zIndex: 1 }}>
-                                                                {wp.workers.map((w, i) => <span key={i} className="worker-chip"><img src={getMeepleSrc(w)} className="worker-chip-icon" alt="" />P{w + 1}</span>)}
+                                                                {wp.workers.map((w, i) => renderWorkerChip(w, i))}
                                                             </div>
                                                         )}
                                                     </div>
@@ -1675,7 +1896,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                     {wp.multipleAllowed && <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--purple)', position: 'relative', zIndex: 1 }}>∞ 複数可</div>}
                                                     {wp.workers.length > 0 && (
                                                         <div style={{ marginTop: 2, display: 'flex', gap: 1, flexWrap: 'wrap', position: 'relative', zIndex: 1 }}>
-                                                            {wp.workers.map((w, i) => <span key={i} className="worker-chip"><img src={getMeepleSrc(w)} className="worker-chip-icon" alt="" />P{w + 1}</span>)}
+                                                            {wp.workers.map((w, i) => renderWorkerChip(w, i))}
                                                         </div>
                                                     )}
                                                 </div>
@@ -1768,7 +1989,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                             {!def && <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', marginTop: 1, lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{wp.effectText}</div>}
                                                             {wp.workers.length > 0 && (
                                                                 <div style={{ marginTop: 2, display: 'flex', gap: 1, position: 'relative', zIndex: 1 }}>
-                                                                    {wp.workers.map((w, i) => <span key={i} className="worker-chip"><img src={getMeepleSrc(w)} className="worker-chip-icon" alt="" />P{w + 1}</span>)}
+                                                                    {wp.workers.map((w, i) => renderWorkerChip(w, i))}
                                                                 </div>
                                                             )}
                                                         </div>
@@ -1971,10 +2192,10 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                             return (
                                                 <div key={c.uid}
                                                     onClick={() => { if (canClick && clickAction && !previewData) { soundManager.playSFX('click'); clickAction(); } }}
-                                                    onPointerDown={() => { if (!isCons) startCardPreview(c.defId, ci); }}
+                                                    onPointerDown={() => { if (!isCons) startCardPreview(c.defId, ci, 'above-hand'); }}
                                                     onPointerUp={endPreview}
                                                     onPointerLeave={() => { endPreview(); endHoverPreview(); }}
-                                                    onPointerEnter={(e) => { if (!isCons) startHoverCardPreview(c.defId, ci, e); }}
+                                                    onPointerEnter={(e) => { if (!isCons) startHoverCardPreviewWithMode(c.defId, ci, e, 'above-hand'); }}
                                                     className={`hand-card ${isCons ? 'hand-card-consumable' : ''} ${canClick || isDragBuildHighlight ? 'hand-card-playable' : ''} ${workerDragRender?.hoveredUid?.startsWith('carpenter') && !isDragBuildHighlight && !isCons ? 'hand-card-drag-dimmed' : ''} ${pressingCardIdxRef.current === ci ? 'hand-card-pressing' : ''}`}
                                                     style={{ marginLeft: ci === 0 ? 0 : overlapMargin, zIndex: ci + 1, ...drawStyle, ...selectedStyle }}>
                                                     <CardBgImage defId={c.defId} />
@@ -2462,6 +2683,7 @@ function DiscardUI({ G, moves, pid, onBeforeConfirm }: { G: GameState; moves: an
 // ============================================================
 function PaydayUI({ G, moves, myPid, isOnline }: { G: GameState; moves: any; myPid: string; isOnline: boolean }) {
     const ps = G.paydayState!;
+    const playerName = (pid: string | number) => getPlayerDisplayName(G.playerNames, pid);
 
     // P2P時: 自分のplayerStatesを使う / ホットシート: currentPlayerIndexを使う
     const targetPid = isOnline ? myPid : String(ps.currentPlayerIndex);
@@ -2477,7 +2699,7 @@ function PaydayUI({ G, moves, myPid, isOnline }: { G: GameState; moves: any; myP
                     <div style={{ fontSize: 'var(--fs-icon)', marginBottom: 16, animation: 'pulse 2s ease-in-out infinite' }}>💰</div>
                     <h2 style={{ fontSize: 'var(--fs-4xl)', fontWeight: 700, color: 'var(--gold)', marginBottom: 8 }}>給料日処理中...</h2>
                     <p style={{ color: 'var(--text-secondary)', marginBottom: 4 }}>あなたの賌金は自動支払い済みです</p>
-                    {waiting.length > 0 && <p style={{ color: 'var(--text-dim)', fontSize: 'var(--fs-xl2)', marginTop: 8 }}>待機中: {waiting.map(([pid]) => `P${parseInt(pid) + 1}`).join(', ')}</p>}
+                    {waiting.length > 0 && <p style={{ color: 'var(--text-dim)', fontSize: 'var(--fs-xl2)', marginTop: 8 }}>待機中: {waiting.map(([pid]) => playerName(pid)).join(', ')}</p>}
                 </div>
             </div>
         );
@@ -2506,7 +2728,7 @@ function PaydayUI({ G, moves, myPid, isOnline }: { G: GameState; moves: any; myP
         <div className="game-bg" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
             <div className="modal-content animate-slide-up" style={{ maxWidth: 640 }}>
                 <h2 style={{ fontSize: 'var(--fs-4xl)', fontWeight: 700, color: 'var(--gold)', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <IconPayment size={"calc(var(--fs) * 2.44)"} color="var(--gold)" /> 給料日 — P{parseInt(targetPid) + 1}
+                    <IconPayment size={"calc(var(--fs) * 2.44)"} color="var(--gold)" /> 給料日 — {playerName(targetPid)}
                 </h2>
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
@@ -2573,6 +2795,7 @@ function PaydayUI({ G, moves, myPid, isOnline }: { G: GameState; moves: any; myP
 // ============================================================
 function CleanupUI({ G, moves, myPid, isOnline }: { G: GameState; moves: any; myPid: string; isOnline: boolean }) {
     const cs = G.cleanupState!;
+    const playerName = (pid: string | number) => getPlayerDisplayName(G.playerNames, pid);
 
     // P2P時: 自分のplayerStatesを使う / ホットシート: currentPlayerIndexを使う
     const targetPid = isOnline ? myPid : String(cs.currentPlayerIndex);
@@ -2588,7 +2811,7 @@ function CleanupUI({ G, moves, myPid, isOnline }: { G: GameState; moves: any; my
                     <div style={{ fontSize: 'var(--fs-icon)', marginBottom: 16, animation: 'pulse 2s ease-in-out infinite' }}>🗑️</div>
                     <h2 style={{ fontSize: 'var(--fs-4xl)', fontWeight: 700, color: 'var(--gold)', marginBottom: 8 }}>精算処理中...</h2>
                     <p style={{ color: 'var(--text-secondary)', marginBottom: 4 }}>あなたの手札整理は完了しています</p>
-                    {waiting.length > 0 && <p style={{ color: 'var(--text-dim)', fontSize: 'var(--fs-xl2)', marginTop: 8 }}>待機中: {waiting.map(([pid]) => `P${parseInt(pid) + 1}`).join(', ')}</p>}
+                    {waiting.length > 0 && <p style={{ color: 'var(--text-dim)', fontSize: 'var(--fs-xl2)', marginTop: 8 }}>待機中: {waiting.map(([pid]) => playerName(pid)).join(', ')}</p>}
                 </div>
             </div>
         );
@@ -2601,7 +2824,7 @@ function CleanupUI({ G, moves, myPid, isOnline }: { G: GameState; moves: any; my
         <div className="game-bg" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
             <div className="modal-content animate-slide-up" style={{ maxWidth: 750 }}>
                 <h2 style={{ fontSize: 'var(--fs-4xl)', fontWeight: 700, color: 'var(--gold)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <IconTrash size={"calc(var(--fs) * 2.44)"} color="var(--gold)" /> 精算 — P{parseInt(targetPid) + 1}
+                    <IconTrash size={"calc(var(--fs) * 2.44)"} color="var(--gold)" /> 精算 — {playerName(targetPid)}
                 </h2>
                 <p style={{ color: 'var(--text-secondary)', marginBottom: 16 }}>
                     手札上限 {p.maxHandSize}枚を超えています。<b style={{ color: 'var(--red)' }}>{excessCount}枚</b>捨ててください（選択中: {selectedIndices.length}枚）
@@ -2697,6 +2920,7 @@ function GameOver({ G }: { G: GameState }) {
     const [expandedPlayer, setExpandedPlayer] = useState<number | null>(null);
     const [expandedDebt, setExpandedDebt] = useState<number | null>(null);
     const [showFinalLog, setShowFinalLog] = useState(false);
+    const playerName = (pid: string | number) => getPlayerDisplayName(G.playerNames, pid);
     useEffect(() => {
         soundManager.playSFX('win');
     }, []);
@@ -2719,7 +2943,7 @@ function GameOver({ G }: { G: GameState }) {
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                                     <span style={{ fontSize: 'var(--fs-4xl)' }}>{['🥇', '🥈', '🥉'][i] || `${i + 1}位`}</span>
-                                    <span style={{ fontWeight: 700, fontSize: 'var(--fs-4xl)' }}>P{s.playerIndex + 1}</span>
+                                    <span style={{ fontWeight: 700, fontSize: 'var(--fs-4xl)' }} title={playerName(s.playerIndex)}>{playerName(s.playerIndex)}</span>
                                 </div>
                                 <span style={{ fontSize: 'var(--fs-4xl)', fontWeight: 900, color: 'var(--gold)' }}>{s.breakdown.total}VP</span>
                             </div>

@@ -18,6 +18,27 @@ function pushLog(G: GameState, text: string) {
     G.log.push({ text, round: G.round });
 }
 
+function recordPlacementEvent(
+    G: GameState,
+    playerId: string,
+    moveName: 'placeWorker' | 'placeWorkerOnBuilding',
+    targetId: string
+) {
+    const nextSeq = (G.lastPlacementEvent?.seq ?? 0) + 1;
+    G.lastPlacementEvent = {
+        seq: nextSeq,
+        playerId,
+        moveName,
+        targetId,
+    };
+}
+
+function normalizePlayerName(name: unknown, fallback: string): string {
+    if (typeof name !== 'string') return fallback;
+    const trimmed = name.trim();
+    return trimmed || fallback;
+}
+
 /** デッキ構築 */
 function buildDeck(version: GameVersion): Card[] {
     const cards: Card[] = [];
@@ -781,9 +802,14 @@ export const NationalEconomy: Game<GameState> = {
     setup: ({ ctx }, setupData): GameState => {
         _uidCounter = 0;
         const version: GameVersion = (setupData && setupData.version) ? setupData.version : 'base';
+        const rawPlayerNames = (setupData && typeof setupData.playerNames === 'object' && setupData.playerNames)
+            ? setupData.playerNames as Record<string, unknown>
+            : {};
         const deck = buildDeck(version);
         const players: { [k: string]: PlayerState } = {};
+        const playerNames: Record<string, string> = {};
         for (let i = 0; i < ctx.numPlayers; i++) {
+            const pid = String(i);
             players[String(i)] = {
                 hand: deck.splice(0, 3),
                 money: 5 + i,
@@ -796,6 +822,7 @@ export const NationalEconomy: Game<GameState> = {
                 vpTokens: 0,
                 robotWorkers: 0,
             };
+            playerNames[pid] = normalizePlayerName(rawPlayerNames[pid], `P${i + 1}`);
         }
         const initialLog: GameState['log'] = [{ text: `=== ラウンド 1 開始（${ctx.numPlayers}人プレイ / Version: ${version}） ===`, round: 1 }];
 
@@ -807,6 +834,7 @@ export const NationalEconomy: Game<GameState> = {
         return {
             version,
             players,
+            playerNames,
             publicWorkplaces: createInitialWorkplaces(ctx.numPlayers, version),
             household: 0, round: 1, phase: 'work', startPlayer: 0,
             deck, discard: [], consumableCounter: 0,
@@ -815,6 +843,7 @@ export const NationalEconomy: Game<GameState> = {
             designOfficeState: null, dualConstructionState: null,
             activePlayer: 0,
             log: initialLog,
+            lastPlacementEvent: null,
             finalScores: null,
             isOnline: !!(setupData && setupData.isOnline),
             stats,
@@ -861,6 +890,7 @@ export const NationalEconomy: Game<GameState> = {
 
             wp.workers.push(parseInt(pid));
             p.availableWorkers -= workerCost;
+            recordPlacementEvent(G, pid, 'placeWorker', workplaceId);
 
             pushLog(G, `P${parseInt(pid) + 1}が[${wp.name}]に配置 (残りワーカー: ${p.availableWorkers}, 所持金: $${p.money})`);
 
@@ -896,6 +926,7 @@ export const NationalEconomy: Game<GameState> = {
 
             slot.workerPlaced = true;
             p.availableWorkers -= workerCost;
+            recordPlacementEvent(G, pid, 'placeWorkerOnBuilding', cardUid);
 
             pushLog(G, `P${parseInt(pid) + 1}が自分の[${def.name}]に配置 (残りワーカー: ${p.availableWorkers}, 所持金: $${p.money})`);
             return applyBuildingEffect(G, ctx, events, pid, defId);
@@ -1601,7 +1632,7 @@ export const NationalEconomy: Game<GameState> = {
             if (pid !== playerID) {
                 filtered.players[pid].hand = filtered.players[pid].hand.map((c: any) => ({
                     uid: c.uid,
-                    defId: 'HIDDEN',
+                    defId: c.defId === CONSUMABLE_DEF_ID ? CONSUMABLE_DEF_ID : 'HIDDEN',
                 }));
             }
         }
