@@ -15,6 +15,7 @@ import type { AIDifficulty } from './bots';
 import type { GameVersion, GameState } from './types';
 import { soundManager } from './SoundManager';
 import { LogoFactory, IconRobot, IconPlayer, IconHammer, IconTrophy, IconGamepad, IconGlobe, IconWrench, IconHome, IconLink, IconDice, IconRocket, IconClipboard, IconGear, IconWave, IconCheck } from './components/Icons';
+import { FullscreenToggleButton } from './components/FullscreenToggleButton';
 import { DevCardGallery } from './DevCardGallery';
 
 // ============================================================
@@ -38,6 +39,8 @@ type LobbyPlayerInfo = {
 
 const HOST_NAME_STORAGE_KEY = 'ne-host-player-name';
 const GUEST_NAME_STORAGE_KEY = 'ne-guest-player-name';
+const ROOM_ID_LENGTH = 6;
+const ROOM_ID_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 function defaultPlayerName(playerId: string | number): string {
     return `P${Number(playerId) + 1}`;
@@ -50,6 +53,22 @@ function normalizePlayerName(name: string, fallback: string): string {
 
 function loadStoredPlayerName(storageKey: string): string {
     return localStorage.getItem(storageKey) ?? '';
+}
+
+function generateRoomId(): string {
+    let token = '';
+    for (let i = 0; i < ROOM_ID_LENGTH; i++) {
+        token += ROOM_ID_ALPHABET[Math.floor(Math.random() * ROOM_ID_ALPHABET.length)];
+    }
+    return `NE-${token}`;
+}
+
+function sanitizeRoomId(value: string): string {
+    const normalized = value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (normalized.startsWith('NE')) {
+        return `NE-${normalized.slice(2, 2 + ROOM_ID_LENGTH)}`.slice(0, 3 + ROOM_ID_LENGTH);
+    }
+    return value.toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 3 + ROOM_ID_LENGTH);
 }
 
 function getAvailableGuestPid(connections: Map<string, DataConnection>, numPlayers: number): string | null {
@@ -339,6 +358,7 @@ function MainMenuScreen({ onLocal, onOnline, onDevGallery, theme, onCycleTheme }
     const themeInfo = THEME_INFO[theme];
     return (
         <div className="game-bg" style={{ position: 'relative', display: 'flex', flexDirection: 'column' as const, height: '100vh', padding: 0, overflow: 'hidden' }}>
+            <FullscreenToggleButton className="menu-fullscreen-toggle" />
 
             {/* ロゴエリア: 画面上部より（黄金比付近） */}
             <div className="animate-slide-up" style={{ flex: '1 1 0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -437,7 +457,8 @@ function LocalSetupScreen({ onStart, onBack }: {
     };
 
     return (
-        <div className="game-bg" style={{ display: 'flex', flexDirection: 'column' as const, height: '100vh', overflow: 'auto' }}>
+        <div className="game-bg" style={{ position: 'relative', display: 'flex', flexDirection: 'column' as const, height: '100vh', overflow: 'auto' }}>
+            <FullscreenToggleButton className="menu-fullscreen-toggle" />
             {/* 上部: 戻るボタン + タイトル */}
             <div className="animate-slide-up" style={{ textAlign: 'center', paddingTop: 'calc(var(--fs) * 3)', paddingBottom: 'calc(var(--fs) * 1.5)' }}>
                 <h1 style={{ fontSize: 'var(--fs-4xl)', fontWeight: 900, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
@@ -482,7 +503,8 @@ function LocalSetupScreen({ onStart, onBack }: {
 // ============================================================
 function OnlineMenuScreen({ onHost, onJoin, onBack }: { onHost: () => void; onJoin: () => void; onBack: () => void }) {
     return (
-        <div className="game-bg" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', padding: 16 }}>
+        <div className="game-bg" style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', padding: 16 }}>
+            <FullscreenToggleButton className="menu-fullscreen-toggle" />
             <div className="animate-slide-up" style={{ maxWidth: 420, width: '100%' }}>
                 <div style={{ textAlign: 'center', marginBottom: 32 }}>
                     <LogoFactory size={"calc(var(--fs) * 6.67)"} color="var(--gold)" />
@@ -546,7 +568,7 @@ function HostLobby({ onBack }: { onBack: () => void }) {
     }, [hostName]);
 
     useEffect(() => {
-        const peer = new Peer(iceConfig);
+        const peer = new Peer(generateRoomId(), iceConfig);
         peerRef.current = peer;
 
         peer.on('open', (id) => {
@@ -755,7 +777,7 @@ function HostLobby({ onBack }: { onBack: () => void }) {
 
                     {peerID && (
                         <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: 12, padding: 16, marginBottom: 16 }}>
-                            <div style={{ color: 'var(--text-dim)', fontSize: 'var(--fs-xl)', marginBottom: 6 }}>あなたのID（友達に共有）:</div>
+                            <div style={{ color: 'var(--text-dim)', fontSize: 'var(--fs-xl)', marginBottom: 6 }}>Room ID</div>
                             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                                 <code style={{ color: 'var(--gold)', fontSize: 'var(--fs-xl2)', fontFamily: 'monospace', flex: 1, wordBreak: 'break-all' as const }}>{peerID}</code>
                                 <button onClick={() => navigator.clipboard.writeText(peerID)} style={{
@@ -871,11 +893,12 @@ function JoinLobby({ onBack }: { onBack: () => void }) {
     }, [playerName]);
 
     const connect = useCallback(() => {
-        if (!peerRef.current || !hostID.trim()) return;
+        const roomId = sanitizeRoomId(hostID);
+        if (!peerRef.current || !roomId.trim()) return;
         setConnected(true);
         setStatus('ホストに接続中...');
 
-        const conn = peerRef.current.connect(hostID.trim());
+        const conn = peerRef.current.connect(roomId.trim());
         connRef.current = conn;
 
         conn.on('open', () => {
@@ -979,8 +1002,9 @@ function JoinLobby({ onBack }: { onBack: () => void }) {
                     <input
                         type="text"
                         value={hostID}
-                        onChange={e => setHostID(e.target.value)}
-                        placeholder="ホストのIDをペースト"
+                        onChange={e => setHostID(sanitizeRoomId(e.target.value))}
+                        placeholder="Room ID"
+                        autoCapitalize="characters"
                         style={{
                             width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)',
                             borderRadius: 12, padding: '12px 16px', color: 'var(--text-primary)',
@@ -1059,6 +1083,17 @@ export default function App() {
         setConfig({ numPlayers, version, cpuConfig });
         setScreen('playing');
     };
+
+    useEffect(() => {
+        const shouldWarnBeforeUnload = screen === 'playing' || screen === 'host' || screen === 'join';
+        if (!shouldWarnBeforeUnload) return;
+        const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+            event.preventDefault();
+            event.returnValue = '';
+        };
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    }, [screen]);
 
     // 画面ルーティング
     switch (screen) {

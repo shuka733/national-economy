@@ -7,6 +7,7 @@ import { BASE_CARD_DEFS } from './base_cards';
 import { GLORY_CARD_DEFS } from './glory_cards';
 import type { CardDef } from './types';
 import { getThemedCardImagePath } from './themeUtils';
+import { FullscreenToggleButton } from './components/FullscreenToggleButton';
 
 // ============================================================
 // カードIDから画像パスへのマッピング
@@ -282,7 +283,8 @@ export function DevCardGallery({ onBack }: { onBack: () => void }) {
     });
 
     return (
-        <div className="game-bg" style={{ minHeight: '100vh', padding: 16, overflowY: 'auto' }}>
+        <div className="game-bg" style={{ position: 'relative', minHeight: '100vh', padding: 16, overflowY: 'auto' }}>
+            <FullscreenToggleButton className="menu-fullscreen-toggle" />
             {/* ヘッダー */}
             <div style={{ maxWidth: 1200, margin: '0 auto' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
@@ -306,7 +308,7 @@ export function DevCardGallery({ onBack }: { onBack: () => void }) {
                     </div>
 
                     {/* オプショントグル */}
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginRight: 44 }}>
                         <button onClick={() => setShowImage(!showImage)} style={{
                             ...tabStyle(showImage, '#60a5fa'),
                             fontSize: 'var(--fs-xl)',

@@ -70,10 +70,15 @@ export interface BuildSelectState {
 }
 
 /** 給料日 個別プレイヤー状態 */
+export type SettlementStep = 'payday' | 'cleanup' | 'done';
+
 export interface PaydayPlayerState {
+    step: SettlementStep;
     totalWage: number;
     needsSelling: boolean;       // 売却操作が必要か
     selectedBuildingIndices: number[]; // 売却選択中の建物インデックス
+    excessCount: number;
+    selectedIndices: number[];
     confirmed: boolean;          // 操作完了したか
 }
 

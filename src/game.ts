@@ -3,7 +3,7 @@
 // ============================================================
 import type { Game, Ctx } from 'boardgame.io';
 import { INVALID_MOVE, Stage } from 'boardgame.io/core';
-import type { GameState, PlayerState, Workplace, Card, BuildingVPDetail, ScoreBreakdown, GameVersion, GameStats } from './types';
+import type { GameState, PlayerState, Workplace, Card, BuildingVPDetail, ScoreBreakdown, GameVersion, GameStats, PaydayPlayerState } from './types';
 import { getCardDef, getDeckDefs, CONSUMABLE_DEF_ID } from './cards';
 
 // ============================================================
@@ -102,6 +102,52 @@ export function getWagePerWorker(round: number): number {
 /** 全プレイヤーの残りワーカー合計 */
 function totalAvailableWorkers(G: GameState): number {
     return Object.values(G.players).reduce((sum, p) => sum + p.availableWorkers, 0);
+}
+
+function syncPaydayTurnState(G: GameState): string | null {
+    if (!G.paydayState) return null;
+    const nextPending = Object.entries(G.paydayState.playerStates)
+        .find(([, ps]) => !ps.confirmed && ps.step !== 'done');
+    if (!nextPending) return null;
+    const [nextPid, nextState] = nextPending;
+    G.paydayState.currentPlayerIndex = parseInt(nextPid);
+    G.paydayState.totalWage = nextState.totalWage;
+    G.paydayState.selectedBuildingIndices = [...nextState.selectedBuildingIndices];
+    G.activePlayer = parseInt(nextPid);
+    return nextPid;
+}
+
+function resolvePaydayPayment(G: GameState, pid: string, pps: PaydayPlayerState) {
+    const p = G.players[pid];
+    if (p.money >= pps.totalWage) {
+        p.money -= pps.totalWage;
+        G.household += pps.totalWage;
+        pushLog(G, `P${parseInt(pid) + 1}: 給料$${pps.totalWage}を支払い (所持金: $${p.money})`);
+        return;
+    }
+
+    const paid = p.money;
+    G.household += paid;
+    p.money = 0;
+    const debt = pps.totalWage - paid;
+    p.unpaidDebts += debt;
+    pushLog(G, `P${parseInt(pid) + 1}: 給料$${pps.totalWage}不足 ($${paid}のみ支払い, $${debt}が未払い)`);
+}
+
+function advancePaydayPlayerStep(G: GameState, pid: string, pps: PaydayPlayerState) {
+    const p = G.players[pid];
+    const excessCount = Math.max(0, p.hand.length - p.maxHandSize);
+    pps.needsSelling = false;
+    pps.selectedBuildingIndices = [];
+    pps.excessCount = excessCount;
+    pps.selectedIndices = [];
+    if (excessCount > 0) {
+        pps.step = 'cleanup';
+        pps.confirmed = false;
+    } else {
+        pps.step = 'done';
+        pps.confirmed = true;
+    }
 }
 
 /** 次の手番プレイヤー検索 */
@@ -443,41 +489,75 @@ function advanceTurnOrPhase(G: GameState, ctx: Ctx, events: any) {
 
 function startPayday(G: GameState, _ctx: Ctx, _events: any) {
     G.phase = 'payday';
+    G.cleanupState = null;
     const wage = getWagePerWorker(G.round);
     pushLog(G, `--- 給料日（賌金$${wage}/人） ---`);
 
     // 全プレイヤーの給料日状態を同時に初期化
-    const playerStates: { [pid: string]: import('./types').PaydayPlayerState } = {};
+    const playerStates: { [pid: string]: PaydayPlayerState } = {};
     let firstNeedsSelling = -1;
 
     for (let i = 0; i < Object.keys(G.players).length; i++) {
-        const p = G.players[String(i)];
+        const pid = String(i);
+        const p = G.players[pid];
         const payingWorkers = Math.max(0, p.workers - p.robotWorkers);
         const total = wage * payingWorkers;
+        const playerState: PaydayPlayerState = {
+            step: 'payday',
+            totalWage: total,
+            needsSelling: false,
+            selectedBuildingIndices: [],
+            excessCount: 0,
+            selectedIndices: [],
+            confirmed: false,
+        };
 
         if (p.money >= total) {
+            resolvePaydayPayment(G, pid, playerState);
+            advancePaydayPlayerStep(G, pid, playerState);
+            playerStates[pid] = playerState;
+            continue;
+            /*
             // 自動支払い
             p.money -= total;
             G.household += total;
             pushLog(G, `P${i + 1}: 賌金$${total}を支払い（残金$${p.money}）`);
             playerStates[String(i)] = {
+                step: 'done',
                 totalWage: total,
                 needsSelling: false,
                 selectedBuildingIndices: [],
+                excessCount: 0,
+                selectedIndices: [],
                 confirmed: true,
             };
+            */
         } else {
             const hasSellable = p.buildings.some(b => !getCardDef(b.card.defId).unsellable);
             if (hasSellable) {
+                playerState.step = 'payday';
+                playerState.needsSelling = true;
+                playerStates[pid] = playerState;
+                continue;
+                /*
                 // 売却が必要→操作待ち
                 playerStates[String(i)] = {
+                    step: 'payday',
                     totalWage: total,
                     needsSelling: true,
                     selectedBuildingIndices: [],
+                    excessCount: 0,
+                    selectedIndices: [],
                     confirmed: false,
                 };
                 if (firstNeedsSelling < 0) firstNeedsSelling = i;
+                */
             } else {
+                resolvePaydayPayment(G, pid, playerState);
+                advancePaydayPlayerStep(G, pid, playerState);
+                playerStates[pid] = playerState;
+                continue;
+                /*
                 // 売却可能な建物なし→自動で負債処理
                 const paid = p.money;
                 G.household += paid;
@@ -486,48 +566,50 @@ function startPayday(G: GameState, _ctx: Ctx, _events: any) {
                 p.unpaidDebts += debt;
                 pushLog(G, `P${i + 1}: 賌金$${total}不足（$${paid}のみ支払）、$${debt}が未払い（負債合計: ${p.unpaidDebts}）`);
                 playerStates[String(i)] = {
+                    step: 'done',
                     totalWage: total,
                     needsSelling: false,
                     selectedBuildingIndices: [],
+                    excessCount: 0,
+                    selectedIndices: [],
                     confirmed: true,
                 };
+                */
             }
         }
     }
 
+    const firstPendingPid = Object.entries(playerStates).find(([, ps]) => !ps.confirmed && ps.step !== 'done')?.[0] ?? '0';
     G.paydayState = {
         wagePerWorker: wage,
         playerStates,
         // 後方互換用
-        currentPlayerIndex: firstNeedsSelling >= 0 ? firstNeedsSelling : 0,
-        totalWage: firstNeedsSelling >= 0 ? playerStates[String(firstNeedsSelling)].totalWage : 0,
-        selectedBuildingIndices: [],
+        currentPlayerIndex: parseInt(firstPendingPid),
+        totalWage: playerStates[firstPendingPid]?.totalWage ?? 0,
+        selectedBuildingIndices: [...(playerStates[firstPendingPid]?.selectedBuildingIndices ?? [])],
     };
-    G.activePlayer = firstNeedsSelling >= 0 ? firstNeedsSelling : 0;
+    G.activePlayer = parseInt(firstPendingPid);
 
     // 全員が自動処理済みなら即座に次へ
-    const allConfirmed = Object.values(playerStates).every(ps => ps.confirmed);
-    if (allConfirmed) {
+    if (!syncPaydayTurnState(G)) {
         finishPayday(G, _ctx, _events);
-    } else {
-        if (G.isOnline) {
+    } else if (G.isOnline) {
             // P2P対応: 全未確認プレイヤーが同時にMoveを送信できるようにする
             _events.setActivePlayers({ all: Stage.NULL });
         } else {
             // ホットシート: ctx.currentPlayerをcurrentPlayerIndexに同期
             _events.endTurn({ next: String(G.paydayState.currentPlayerIndex) });
         }
-    }
 }
 
 /** 給料日の続行: 全員confirmedなら次のフェーズへ、そうでなければ次の未確認プレイヤーに切り替え */
 function continuePayday(G: GameState, ctx: Ctx, events: any) {
     if (!G.paydayState) return;
-    const allConfirmed = Object.values(G.paydayState.playerStates).every(ps => ps.confirmed);
-    if (allConfirmed) {
-        G.paydayState = null;
+    if (!syncPaydayTurnState(G)) {
         finishPayday(G, ctx, events);
-    } else {
+        return;
+    }
+    if (!G.isOnline) {
         // 次の未確認プレイヤーにcurrentPlayerIndexを更新
         const nextUnconfirmed = Object.entries(G.paydayState.playerStates)
             .find(([, ps]) => !ps.confirmed);
@@ -548,7 +630,7 @@ function continuePayday(G: GameState, ctx: Ctx, events: any) {
 
 function finishPayday(G: GameState, ctx: Ctx, events: any) {
     G.paydayState = null;
-    startCleanup(G, ctx, events);
+    finishCleanup(G, ctx, events);
 }
 
 function startCleanup(G: GameState, _ctx: Ctx, events: any) {
@@ -948,6 +1030,16 @@ export const NationalEconomy: Game<GameState> = {
 
         // ============ カード捨て選択トグル ============
         toggleDiscard: ({ G, ctx, playerID }, cardIndex: number) => {
+            if (G.phase === 'payday' && G.paydayState) {
+                const pid = (playerID !== undefined && playerID !== null) ? String(playerID) : String(G.paydayState.currentPlayerIndex);
+                const pps = G.paydayState.playerStates[pid];
+                if (pps?.step === 'cleanup' && !pps.confirmed) {
+                    const idx = pps.selectedIndices.indexOf(cardIndex);
+                    if (idx >= 0) pps.selectedIndices.splice(idx, 1);
+                    else pps.selectedIndices.push(cardIndex);
+                    return;
+                }
+            }
             // 精算フェーズの場合は個別playerStateを操作
             if (G.cleanupState) {
                 // P2P対応: playerIDから操作元プレイヤーを特定
@@ -969,6 +1061,26 @@ export const NationalEconomy: Game<GameState> = {
 
         // ============ カード捨て確定 ============
         confirmDiscard: ({ G, ctx, events, playerID }) => {
+            if (G.phase === 'payday' && G.paydayState) {
+                const pid = (playerID !== undefined && playerID !== null) ? String(playerID) : String(G.paydayState.currentPlayerIndex);
+                const pps = G.paydayState.playerStates[pid];
+                if (pps?.step === 'cleanup' && !pps.confirmed) {
+                    if (pps.selectedIndices.length !== pps.excessCount) return INVALID_MOVE;
+                    const p = G.players[pid];
+                    const sorted = [...pps.selectedIndices].sort((a, b) => b - a);
+                    for (const i of sorted) {
+                        discardCard(G, p.hand[i]);
+                        p.hand.splice(i, 1);
+                    }
+                    pushLog(G, `P${parseInt(pid) + 1}縺檎ｲｾ邂励〒${pps.excessCount}譫壹ｒ謐ｨ縺ｦ縺・(謇区惆: ${p.hand.length}譫・`);
+                    pps.selectedIndices = [];
+                    pps.excessCount = 0;
+                    pps.step = 'done';
+                    pps.confirmed = true;
+                    continuePayday(G, ctx, events);
+                    return;
+                }
+            }
             if (G.phase === 'cleanup' && G.cleanupState) {
                 // P2P対応: playerIDから操作元プレイヤーを特定
                 const pid = (playerID !== undefined && playerID !== null) ? String(playerID) : String(G.cleanupState.currentPlayerIndex);
@@ -1491,7 +1603,7 @@ export const NationalEconomy: Game<GameState> = {
             // P2P対応: playerIDから操作元プレイヤーを特定
             const pid = (playerID !== undefined && playerID !== null) ? String(playerID) : String(ps.currentPlayerIndex);
             const pps = ps.playerStates[pid];
-            if (!pps || pps.confirmed || !pps.needsSelling) return INVALID_MOVE;
+            if (!pps || pps.confirmed || pps.step !== 'payday' || !pps.needsSelling) return INVALID_MOVE;
 
             const p = G.players[pid];
             if (buildingIndex < 0 || buildingIndex >= p.buildings.length) return INVALID_MOVE;
@@ -1520,7 +1632,7 @@ export const NationalEconomy: Game<GameState> = {
             // P2P対応: playerIDから操作元プレイヤーを特定
             const pid = (playerID !== undefined && playerID !== null) ? String(playerID) : String(ps.currentPlayerIndex);
             const pps = ps.playerStates[pid];
-            if (!pps || pps.confirmed) return INVALID_MOVE;
+            if (!pps || pps.confirmed || pps.step !== 'payday') return INVALID_MOVE;
             const p = G.players[pid];
 
             const selectedVPs = pps.selectedBuildingIndices.map(bi => getCardDef(p.buildings[bi].card.defId).vp);
@@ -1575,8 +1687,9 @@ export const NationalEconomy: Game<GameState> = {
                 pushLog(G, `P${parseInt(pid) + 1}: 賌金$${pps.totalWage}不足（$${paid}のみ支払）、$${debt}が未払い`);
             }
 
-            pps.confirmed = true;
+            advancePaydayPlayerStep(G, pid, pps);
             continuePayday(G, ctx, events);
+            return;
         },
 
         // ============ 給料日: 売却なしで確定 ============
@@ -1585,10 +1698,9 @@ export const NationalEconomy: Game<GameState> = {
             // P2P対応: playerIDから操作元プレイヤーを特定
             const pid = (playerID !== undefined && playerID !== null) ? String(playerID) : String(G.paydayState.currentPlayerIndex);
             const pps = G.paydayState.playerStates[pid];
-            if (!pps) return INVALID_MOVE;
-            if (!pps.confirmed) {
-                pps.confirmed = true;
-            }
+            if (!pps || pps.confirmed || pps.step !== 'payday' || pps.needsSelling) return INVALID_MOVE;
+            resolvePaydayPayment(G, pid, pps);
+            advancePaydayPlayerStep(G, pid, pps);
             continuePayday(G, ctx, events);
         },
 

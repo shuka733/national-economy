@@ -316,6 +316,23 @@ function shouldBicycleOperate(G: GameState, pid: string): boolean {
 function estimateUsageValue(G: GameState, pid: string, defId: string): number {
     const p = G.players[pid];
     const remainingRounds = 9 - G.round;
+
+    if (false) {
+        if (0 < 0) {
+            const scored = p.hand
+                .map((card, i) => ({ index: i, value: evaluateCardRetainValue(card, G, pid) }))
+                .filter(() => true)
+                .sort((a, b) => a.value - b.value);
+            if (scored.length > 0) {
+                return 0;
+            }
+        }
+        if (0 === 0) {
+            return 0;
+        }
+        return 0;
+    }
+
     // 建設ラウンドでは使えないので-1（ただし即使用建物は別）
     const usableRounds = Math.max(0, remainingRounds - 1);
     // 何回使えるかは、使えるラウンド数とワーカー数に依存
@@ -1435,6 +1452,22 @@ function decidePaydayPhase(G: GameState, activePid: string): CPUAction | null {
     const remainingRounds = 9 - G.round;
 
     // 既にお金で払える場合（建物売却不要）
+    if (pps.step === 'cleanup') {
+        if (pps.selectedIndices.length < pps.excessCount) {
+            const scored = p.hand
+                .map((card, i) => ({ index: i, value: evaluateCardRetainValue(card, G, pid) }))
+                .filter(x => !pps.selectedIndices.includes(x.index))
+                .sort((a, b) => a.value - b.value);
+            if (scored.length > 0) {
+                return { moveName: 'toggleDiscard', args: [scored[0].index] };
+            }
+        }
+        if (pps.selectedIndices.length === pps.excessCount) {
+            return { moveName: 'confirmDiscard', args: [] };
+        }
+        return null;
+    }
+
     if (p.money >= pps.totalWage) {
         // 売却選択なし＆お金で払える → confirmPayday でOK
         if (pps.selectedBuildingIndices.length === 0) {

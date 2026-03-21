@@ -192,6 +192,24 @@ export const IconSoundOff: React.FC<IconProps> = (props) => (
     </DefaultIcon>
 );
 
+export const IconFullscreen: React.FC<IconProps> = (props) => (
+    <DefaultIcon {...props}>
+        <polyline points="8 3 3 3 3 8" />
+        <polyline points="16 3 21 3 21 8" />
+        <polyline points="3 16 3 21 8 21" />
+        <polyline points="16 21 21 21 21 16" />
+    </DefaultIcon>
+);
+
+export const IconFullscreenExit: React.FC<IconProps> = (props) => (
+    <DefaultIcon {...props}>
+        <polyline points="9 3 9 9 3 9" />
+        <polyline points="15 3 15 9 21 9" />
+        <polyline points="3 15 9 15 9 21" />
+        <polyline points="15 21 15 15 21 15" />
+    </DefaultIcon>
+);
+
 export const LogoFactory: React.FC<IconProps> = (props) => (
     <DefaultIcon {...props} viewBox="0 0 100 100" strokeWidth="4">
         <path d="M10 90h80" />

@@ -3,7 +3,7 @@
 // ============================================================
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
 import type { BoardProps } from 'boardgame.io/react';
-import type { GameState, Card, PlayerState } from './types';
+import type { GameState, Card, PlayerState, Workplace, PaydayPlayerState } from './types';
 import { getConstructionCost, isConsumable, getWagePerWorker, canBuildAnything, canBuildFarmFree, canDualConstruct, canPlaceOnBuilding, getRoundWorkplaceInfo } from './game';
 import { TIMING, FEATURE_DEFAULTS } from './constants';
 import type { FeatureFlags } from './constants';
@@ -21,7 +21,8 @@ import './cpu-anim.css';
 import {
     IconMoney, IconWorker, IconHouse, IconDeck, IconDiscard, IconLog,
     IconHammer, IconRobot, IconPlayer, IconSearch, IconTrash, IconPayment,
-    IconTrophy, IconSoundOn, IconSoundOff, TagFarm, TagFactory, TagLock
+    IconTrophy, IconSoundOn, IconSoundOff, IconFullscreen, IconFullscreenExit,
+    TagFarm, TagFactory, TagLock
 } from './components/Icons';
 
 import { getCardDef, CONSUMABLE_DEF_ID } from './cards';
@@ -60,6 +61,21 @@ const opponentConsumableCardStyle: React.CSSProperties = {
 const opponentRevealedCardStyle: React.CSSProperties = {
     background: 'linear-gradient(135deg, var(--teal-15), rgba(30,30,40,0.9))',
 };
+const MOBILE_TOUCH_UI_QUERY = '(max-width: 900px) and (pointer: coarse)';
+function matchesMobileTouchUi(): boolean {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
+    return window.matchMedia(MOBILE_TOUCH_UI_QUERY).matches;
+}
+
+type FullscreenCapableDocument = Document & {
+    webkitFullscreenElement?: Element | null;
+    webkitFullscreenEnabled?: boolean;
+    webkitExitFullscreen?: () => Promise<void> | void;
+};
+
+type FullscreenCapableElement = HTMLElement & {
+    webkitRequestFullscreen?: () => Promise<void> | void;
+};
 
 /** ラウンドごとの追加職場名マッピング (game.ts getRoundWorkplaceInfoから取得) */
 function getRoundWorkplaceName(round: number): string {
@@ -67,11 +83,11 @@ function getRoundWorkplaceName(round: number): string {
 }
 
 /** タグバッジ JSX */
-function TagBadges({ defId }: { defId: string }) {
+function TagBadges({ defId, compact = false }: { defId: string; compact?: boolean }) {
     if (defId === CONSUMABLE_DEF_ID) return null;
     const d = getCardDef(defId);
     return (
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4, position: 'relative', zIndex: 1 }}>
+        <div style={{ display: 'flex', gap: compact ? 2 : 4, flexWrap: 'wrap', marginTop: compact ? 2 : 4, position: 'relative', zIndex: 1 }}>
             {d.tags.includes('farm') && <span className="tag-badge tag-farm"><TagFarm size={"calc(var(--fs) * 1.11)"} /> 農園</span>}
             {d.tags.includes('factory') && <span className="tag-badge tag-factory"><TagFactory size={"calc(var(--fs) * 1.11)"} /> 工場</span>}
             {d.unsellable && <span className="tag-badge tag-lock"><TagLock size={"calc(var(--fs) * 1.11)"} /> 売却不可</span>}
@@ -161,7 +177,14 @@ function computeCpuStateSignature(G: GameState, activePid: string): string {
     if (G.discardState) parts.push('ds', String(G.discardState.count), ...G.discardState.selectedIndices.map(String));
     if (G.paydayState) {
         const pps = G.paydayState.playerStates[activePid];
-        if (pps) parts.push('ps', String(pps.confirmed), ...pps.selectedBuildingIndices.map(String));
+        if (pps) parts.push(
+            'ps',
+            pps.step,
+            String(pps.confirmed),
+            String(pps.excessCount),
+            ...pps.selectedBuildingIndices.map(String),
+            ...pps.selectedIndices.map(i => `d${i}`)
+        );
     }
     if (G.cleanupState) {
         const cps = G.cleanupState.playerStates[activePid];
@@ -187,6 +210,10 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     // フィーチャーフラグ (デバッグパネルでリアルタイム切替可能)
     const [featureFlags, setFeatureFlags] = useState<FeatureFlags>({ ...FEATURE_DEFAULTS });
     const [showDebugPanel, setShowDebugPanel] = useState(false);
+    const [isMobileTouchUi, setIsMobileTouchUi] = useState(matchesMobileTouchUi);
+    const [isFullscreen, setIsFullscreen] = useState(false);
+    const [isFullscreenSupported, setIsFullscreenSupported] = useState(false);
+    const boardLayoutRef = useRef<HTMLDivElement | null>(null);
     // 手札長押し/ホバープレビュー用
     // プレビューデータ型: カード or 公共職場
     type PreviewData =
@@ -197,7 +224,10 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
         | { playerId: string; moveName: 'placeWorker'; targetId: string }
         | { playerId: string; moveName: 'placeWorkerOnBuilding'; targetId: string };
     const [previewData, setPreviewData] = useState<PreviewData | null>(null);
+    const previewDataRef = useRef<PreviewData | null>(null);
     const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const previewSourceRef = useRef<'press' | 'hover' | null>(null);
+    const isMobileTouchUiRef = useRef(isMobileTouchUi);
     // pressingCardIdxはuseRefで管理（再レンダリングによるonPointerLeave発火を防ぐ）
     const pressingCardIdxRef = useRef<number | null>(null);
     const hoverPreviewModeRef = useRef<HoverPreviewMode>('auto');
@@ -216,6 +246,77 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     });
     const handledPlacementAnimationSeqRef = useRef(rawG.lastPlacementEvent?.seq ?? 0);
     const activePlacementAnimationSeqRef = useRef<number | null>(null);
+    useEffect(() => {
+        previewDataRef.current = previewData;
+    }, [previewData]);
+    useEffect(() => {
+        isMobileTouchUiRef.current = isMobileTouchUi;
+    }, [isMobileTouchUi]);
+    useEffect(() => {
+        if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+        const media = window.matchMedia(MOBILE_TOUCH_UI_QUERY);
+        const update = () => setIsMobileTouchUi(media.matches);
+        update();
+        if (typeof media.addEventListener === 'function') {
+            media.addEventListener('change', update);
+            return () => media.removeEventListener('change', update);
+        }
+        media.addListener(update);
+        return () => media.removeListener(update);
+    }, []);
+    const syncFullscreenState = useCallback(() => {
+        if (typeof document === 'undefined') return;
+        const doc = document as FullscreenCapableDocument;
+        const target = boardLayoutRef.current as FullscreenCapableElement | null;
+        setIsFullscreen(Boolean(doc.fullscreenElement ?? doc.webkitFullscreenElement));
+        setIsFullscreenSupported(Boolean(
+            doc.fullscreenEnabled ||
+            doc.webkitFullscreenEnabled ||
+            target?.requestFullscreen ||
+            target?.webkitRequestFullscreen
+        ));
+    }, []);
+    useEffect(() => {
+        if (typeof document === 'undefined') return;
+        const update = () => syncFullscreenState();
+        update();
+        document.addEventListener('fullscreenchange', update);
+        document.addEventListener('webkitfullscreenchange', update as EventListener);
+        return () => {
+            document.removeEventListener('fullscreenchange', update);
+            document.removeEventListener('webkitfullscreenchange', update as EventListener);
+        };
+    }, [syncFullscreenState]);
+    const toggleFullscreen = useCallback(async () => {
+        if (typeof document === 'undefined') return;
+        const doc = document as FullscreenCapableDocument;
+        const target = boardLayoutRef.current as FullscreenCapableElement | null;
+        if (!target) return;
+        soundManager.playSFX('click');
+        try {
+            if (doc.fullscreenElement ?? doc.webkitFullscreenElement) {
+                if (doc.exitFullscreen) {
+                    await doc.exitFullscreen();
+                } else if (doc.webkitExitFullscreen) {
+                    await doc.webkitExitFullscreen();
+                }
+                return;
+            }
+            if (target.requestFullscreen) {
+                try {
+                    await target.requestFullscreen({ navigationUI: 'hide' });
+                } catch {
+                    await target.requestFullscreen();
+                }
+                return;
+            }
+            if (target.webkitRequestFullscreen) {
+                await target.webkitRequestFullscreen();
+            }
+        } catch (error) {
+            console.warn('Failed to toggle fullscreen mode.', error);
+        }
+    }, []);
     const clearPreviewTimer = () => {
         if (previewTimerRef.current) { clearTimeout(previewTimerRef.current); previewTimerRef.current = null; }
     };
@@ -224,6 +325,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
         clearPreviewTimer();
         isHoverPreviewRef.current = false;
         hoverPreviewModeRef.current = previewMode;
+        previewSourceRef.current = 'press';
         pressingCardIdxRef.current = cardIdx ?? null;
         previewTimerRef.current = setTimeout(() => {
             setPreviewData({ type: 'card', defId });
@@ -234,6 +336,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
         clearPreviewTimer();
         isHoverPreviewRef.current = false;
         hoverPreviewModeRef.current = 'auto';
+        previewSourceRef.current = 'press';
         pressingCardIdxRef.current = cardIdx;
         previewTimerRef.current = setTimeout(() => {
             // 売却建物（fromBuildingDefIdあり）はCardDefフォーマットで表示
@@ -255,6 +358,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
         }
         hoverCardRectRef.current = (e.currentTarget as HTMLElement).getBoundingClientRect();
         hoverPreviewModeRef.current = 'auto';
+        previewSourceRef.current = 'hover';
         pressingCardIdxRef.current = cardIdx;
         previewTimerRef.current = setTimeout(() => {
             isHoverPreviewRef.current = true;
@@ -270,6 +374,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
         }
         hoverCardRectRef.current = (e.currentTarget as HTMLElement).getBoundingClientRect();
         hoverPreviewModeRef.current = hoverMode;
+        previewSourceRef.current = 'hover';
         pressingCardIdxRef.current = cardIdx;
         previewTimerRef.current = setTimeout(() => {
             isHoverPreviewRef.current = true;
@@ -286,6 +391,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
         }
         hoverCardRectRef.current = (e.currentTarget as HTMLElement).getBoundingClientRect();
         hoverPreviewModeRef.current = 'auto';
+        previewSourceRef.current = 'hover';
         pressingCardIdxRef.current = cardIdx;
         previewTimerRef.current = setTimeout(() => {
             isHoverPreviewRef.current = true;
@@ -312,6 +418,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     const endHoverPreview = () => {
         clearPreviewTimer();
         pressingCardIdxRef.current = null;
+        if (previewSourceRef.current === 'hover') previewSourceRef.current = null;
         if (isHoverPreviewRef.current && !featureFlags.DARKEN_ON_PREVIEW) {
             isHoverPreviewRef.current = false;
             hoverPreviewModeRef.current = 'auto';
@@ -322,6 +429,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     const endPreview = () => {
         clearPreviewTimer();
         pressingCardIdxRef.current = null;
+        if (previewSourceRef.current === 'press' && !previewDataRef.current) previewSourceRef.current = null;
         // プレビュー表示済みの場合は閉じない（オーバーレイのクリックで閉じる）
     };
     const closePreview = () => {
@@ -330,6 +438,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
         isHoverPreviewRef.current = false;
         hoverPreviewModeRef.current = 'auto';
         hoverCardRectRef.current = null;
+        previewSourceRef.current = null;
         setPreviewData(null);
     };
     // no-darkenモードのホバープレビュー中: documentクリックで閉じる
@@ -340,6 +449,28 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
         document.addEventListener('pointerdown', handler);
         return () => document.removeEventListener('pointerdown', handler);
     });
+    useEffect(() => {
+        const handlePressPreviewRelease = () => {
+            if (previewSourceRef.current !== 'press') return;
+            clearPreviewTimer();
+            pressingCardIdxRef.current = null;
+            if (isMobileTouchUiRef.current && previewDataRef.current) {
+                isHoverPreviewRef.current = false;
+                hoverPreviewModeRef.current = 'auto';
+                hoverCardRectRef.current = null;
+                previewSourceRef.current = null;
+                setPreviewData(null);
+                return;
+            }
+            if (!previewDataRef.current) previewSourceRef.current = null;
+        };
+        document.addEventListener('pointerup', handlePressPreviewRelease, true);
+        document.addEventListener('pointercancel', handlePressPreviewRelease, true);
+        return () => {
+            document.removeEventListener('pointerup', handlePressPreviewRelease, true);
+            document.removeEventListener('pointercancel', handlePressPreviewRelease, true);
+        };
+    }, []);
     // クリック配置モード: 職場を直接クリックするだけでワーカーを配置
     const handleWorkplaceClickPlace = (wpId: string) => {
         if (!featureFlags.CLICK_PLACE_WORKER) return;
@@ -449,13 +580,11 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
         ? lastHumanPidRef.current
         : (drawAnimRef.current ? displayCurPid : curPid));
     const isOnline = playerID !== null && playerID !== undefined;
+    const isModalPhase = false;
 
     // モーダルフェーズ中の操作者判定
     // payday/cleanup は同時処理対応: P2Pでは全員が自分の操作をする
     // build/discard/designOffice/dualConstruction は手番プレイヤーの操作なので ctx.currentPlayer を使用
-    const modalPhases = ['payday', 'cleanup', 'discard', 'build', 'designOffice', 'dualConstruction'];
-    const isModalPhase = modalPhases.includes(displayPhase);
-
     // payday/cleanupでは各プレイヤーが自分を操作
     // P2P時: 給料日/精算は自分のplayerStatesに基づく
     let effectivePlayer: string;
@@ -463,7 +592,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     if (G.phase === 'payday' && G.paydayState) {
         if (isOnline) {
             const pps = G.paydayState.playerStates[myPid];
-            isMyTurn = !!pps && !pps.confirmed && pps.needsSelling;
+            isMyTurn = !!pps && !pps.confirmed && pps.step !== 'done';
             effectivePlayer = myPid;
         } else {
             effectivePlayer = String(G.activePlayer);
@@ -802,7 +931,13 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
             if (buildingUid) buildings[buildingUid] = el.getBoundingClientRect();
         });
 
-        animationRectCacheRef.current = { players, workplaces, buildings };
+        if (
+            Object.keys(players).length > 0 ||
+            Object.keys(workplaces).length > 0 ||
+            Object.keys(buildings).length > 0
+        ) {
+            animationRectCacheRef.current = { players, workplaces, buildings };
+        }
     }, []);
 
     const getWorkerAnimationStartRect = useCallback((pid: string, preferPlayerPanel: boolean = false): DOMRect | null => {
@@ -832,8 +967,13 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
         placement: PlacementDelta,
         options?: { preferPlayerPanel?: boolean; rippleColor?: string }
     ): Promise<boolean> => {
-        const startRect = getWorkerAnimationStartRect(pid, options?.preferPlayerPanel ?? false);
-        const targetRect = getPlacementTargetRect(placement);
+        let startRect = getWorkerAnimationStartRect(pid, options?.preferPlayerPanel ?? false);
+        let targetRect = getPlacementTargetRect(placement);
+        if (!startRect || !targetRect) {
+            await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+            startRect = getWorkerAnimationStartRect(pid, options?.preferPlayerPanel ?? false);
+            targetRect = getPlacementTargetRect(placement);
+        }
         if (!startRect || !targetRect) return false;
 
         await triggerMeepleFlight(startRect, targetRect, getMeepleSrc(parseInt(pid)));
@@ -1003,13 +1143,12 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
         let activePid = curPid;
         if (G.phase === 'payday' && G.paydayState) {
             // 未確認のCPUプレイヤーを探す
-            const unconfirmed = Object.entries(G.paydayState.playerStates)
-                .find(([pid, ps]) => !ps.confirmed && cpuConfig.cpuPlayers.includes(pid));
-            activePid = unconfirmed ? unconfirmed[0] : String(G.paydayState.currentPlayerIndex);
-        } else if (G.phase === 'cleanup' && G.cleanupState) {
-            const unconfirmed = Object.entries(G.cleanupState.playerStates)
-                .find(([pid, ps]) => !ps.confirmed && cpuConfig.cpuPlayers.includes(pid));
-            activePid = unconfirmed ? unconfirmed[0] : String(G.cleanupState.currentPlayerIndex);
+            const unconfirmedPid = Object.keys(G.paydayState.playerStates)
+                .find((pid) => {
+                    const ps = G.paydayState!.playerStates[pid] as PaydayPlayerState | undefined;
+                    return !!ps && !ps.confirmed && ps.step !== 'done' && cpuConfig.cpuPlayers.includes(pid);
+                });
+            activePid = unconfirmedPid ?? String(G.paydayState.currentPlayerIndex);
         }
 
         if (!cpuConfig.cpuPlayers.includes(activePid)) return;
@@ -1154,16 +1293,16 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     // 給料日（建物売却）: メインボードの建物カードから直接選択
     const isPaydayPhase = G.phase === 'payday' && G.paydayState;
     const paydayPlayerState = isPaydayPhase
-        ? G.paydayState!.playerStates[isOnline ? myPid : String(G.paydayState!.currentPlayerIndex)]
+        ? G.paydayState!.playerStates[isOnline ? myPid : String(G.activePlayer)]
         : null;
-    const needsPaydaySelling = paydayPlayerState && !paydayPlayerState.confirmed && paydayPlayerState.needsSelling;
+    const needsPaydaySelling = !!(paydayPlayerState && !paydayPlayerState.confirmed && paydayPlayerState.step === 'payday' && paydayPlayerState.needsSelling);
 
     // 精算（手札クリーンアップ）: メインボードの手札から直接選択
-    const isCleanupPhase = G.phase === 'cleanup' && G.cleanupState;
+    const isCleanupPhase = false;
     const cleanupPlayerState = isCleanupPhase
         ? G.cleanupState!.playerStates[isOnline ? myPid : String(G.cleanupState!.currentPlayerIndex)]
-        : null;
-    const needsCleanup = cleanupPlayerState && !cleanupPlayerState.confirmed && cleanupPlayerState.excessCount > 0;
+        : paydayPlayerState;
+    const needsCleanup = !!(cleanupPlayerState && !cleanupPlayerState.confirmed && cleanupPlayerState.step === 'cleanup' && cleanupPlayerState.excessCount > 0);
 
     // 捨てカード選択: メインボードの手札から直接選択
     const isDiscardPhase = rawG.phase === 'discard' && rawG.discardState;
@@ -1179,6 +1318,20 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
             {playerChipLabel(pid)}
         </span>
     );
+    const getOpponentActivityLabel = (pid: string): string | null => {
+        if (G.phase === 'payday' && G.paydayState) {
+            const pps = G.paydayState.playerStates[pid];
+            if (pps && !pps.confirmed && pps.step !== 'done') return '清算中...';
+        }
+        if (
+            isOnline &&
+            pid === curPid &&
+            ['discard', 'build', 'designOffice', 'dualConstruction', 'choice_village', 'choice_automaton', 'choice_modernism', 'choice_teleporter', 'choice_skyscraper'].includes(G.phase)
+        ) {
+            return '選択中...';
+        }
+        return null;
+    };
 
     // ====== ワーカードラッグ: documentレベルのPointerMove/Up/Cancel処理 ======
     // マウント時1回だけリスナー登録。Refで最新値を参照するためレースコンディションなし
@@ -1257,17 +1410,17 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     }
 
     // 設計事務所モーダル（rawGで判定: ドロー1_下完了後に表示するためアニメーション中は非表示）
-    if (rawG.phase === 'designOffice' && rawG.designOfficeState && !drawAnimRef.current) return <DesignOfficeUI G={rawG} moves={moves} onBeforeSelect={() => prepareDrawDetection(0, true)} />;
+    if (rawG.phase === 'designOffice' && rawG.designOfficeState && !drawAnimRef.current && isMyTurn) return <DesignOfficeUI G={rawG} moves={moves} onBeforeSelect={() => prepareDrawDetection(0, true)} />;
 
     // 二胡市建設モーダル
-    if (G.phase === 'dualConstruction' && G.dualConstructionState) return <DualConstructionUI G={G} moves={moves} pid={curPid} />;
+    if (G.phase === 'dualConstruction' && G.dualConstructionState && isMyTurn) return <DualConstructionUI G={G} moves={moves} pid={curPid} />;
 
     // 対戦相手（自分以外）
     const opponents = Array.from({ length: ctx.numPlayers }, (_, i) => i)
         .filter(i => String(i) !== myPid);
 
     // 家計ボックスのプレッシャー判定（ラウンド7以降で家計が少ない場合）
-    const totalWorkers = Object.values(G.players).reduce((sum, p) => sum + p.workers, 0);
+    const totalWorkers = Object.keys(G.players).reduce((sum, pid) => sum + G.players[pid].workers, 0);
     const wagePressure = G.round >= 7 && G.household < totalWorkers * wage;
 
     // 建設フェーズ判定
@@ -1275,17 +1428,49 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     const canInteract = (!isOnline || isMyTurn);
 
     // 売却建物（公共職場のうちfromBuilding=true）
-    const fixedWorkplaces = G.publicWorkplaces.filter(wp => !wp.fromBuilding);
-    const soldWorkplaces = G.publicWorkplaces.filter(wp => wp.fromBuilding);
+    const publicWorkplaces = G.publicWorkplaces as Workplace[];
+    const fixedWorkplaces = publicWorkplaces.filter((wp) => !wp.fromBuilding);
+    const soldWorkplaces = publicWorkplaces.filter((wp) => wp.fromBuilding);
 
     // 手札カードの動的重なり計算（コンテナ幅に自動フィット）
     // ResizeObserverで取得したcontainerSizeを使用（レンダリング中のDOM読み取り排除）
+    const getMobileBaseCardH = () => {
+        const mobileViewportW = typeof window !== 'undefined' ? window.innerWidth : containerSize.w;
+        const mobilePubCardW = Math.min(54, Math.max(28, (mobileViewportW - 340) / 8));
+        return mobilePubCardW * 88 / 63;
+    };
+    const getMyHandLayout = (total: number) => {
+        const horizontalInset = isMobileTouchUi ? 2 : 16;
+        const containerW = Math.max(0, containerSize.w - horizontalInset);
+        const mobileBaseCardH = getMobileBaseCardH();
+        const mobileVerticalGutter = 2;
+        const maxCardH = isMobileTouchUi
+            ? Math.max(mobileBaseCardH, Math.max(0, containerSize.h - mobileVerticalGutter * 2))
+            : Math.max(0, containerSize.h * handCardScale);
+        const maxCardW = maxCardH * 63 / 88;
+        if (total <= 0) {
+            return {
+                cardH: maxCardH,
+                cardW: maxCardW,
+                overlapMargin: 0,
+                paddingLeft: Math.max(0, (containerW - maxCardW) / 2),
+            };
+        }
+
+        const cardW = maxCardW;
+        const cardH = maxCardH;
+        const step = total <= 1 ? 0 : Math.min(cardW, Math.max(0, (containerW - cardW) / (total - 1)));
+        const overlapMargin = total <= 1 ? 0 : step - cardW;
+        const totalCardsWidth = total <= 1 ? cardW : cardW + (total - 1) * step;
+        const paddingLeft = Math.max(0, (containerW - totalCardsWidth) / 2);
+        return { cardH, cardW, overlapMargin, paddingLeft };
+    };
     const getCardOverlapMargin = (total: number, isMyHand: boolean) => {
         if (total <= 1) return 0;
         if (isMyHand) {
             // containerSizeはResizeObserverで追跡済み（padding 8px*2を除く）
             const containerW = containerSize.w - 16;
-            const cardH = containerSize.h * 0.84;
+            const cardH = containerSize.h * handCardScale;
             const cardW = cardH * 63 / 88;
             const neededSpacing = (containerW - cardW) / (total - 1);
             return Math.min(neededSpacing, cardW) - cardW;
@@ -1305,8 +1490,23 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
         return 'has-depth';
     };
 
+    const boardLayoutClassName = `game-bg game-layout${isMobileTouchUi ? ' mobile-touch-ui' : ''}`;
+    const gameScalerClassName = `game-scaler${isMobileTouchUi ? ' mobile-touch-ui' : ''}`;
+    const handCardScale = isMobileTouchUi ? 0.9 : 0.84;
+    const myHandSource = drawAnimRef.current ? (rawG.players[myPid]?.hand ?? myPlayer.hand) : myPlayer.hand;
+    const myHandLayout = getMyHandLayout(myHandSource.length);
+    const mobileBaseCardH = getMobileBaseCardH();
+    const mobileHandScale = isMobileTouchUi && mobileBaseCardH > 0 ? myHandLayout.cardH / mobileBaseCardH : 1;
+    const mobileHandAreaWidthPercent = Math.min(70, Math.max(35, 35 * mobileHandScale));
+    const mobileMyFieldStyle = isMobileTouchUi
+        ? ({
+            '--mobile-self-card-height': `${myHandLayout.cardH}px`,
+            '--mobile-hand-area-width': `${mobileHandAreaWidthPercent}%`,
+        } as React.CSSProperties)
+        : undefined;
+
     return (
-        <div className="game-bg game-layout">
+        <div className={boardLayoutClassName} ref={boardLayoutRef}>
             <AnimationOverlay />
             {/* ワーカードラッグ中のゴーストミープル */}
             {workerDragRender && (
@@ -1449,7 +1649,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                 }
             })()}
             {showDiscard && <DiscardPileModal discard={G.discard} onClose={() => setShowDiscard(false)} />}
-            <div className="game-scaler">
+            <div className={gameScalerClassName}>
                 {/* ラウンドアナウンスオーバーレイ */}
                 {roundAnnounce !== null && (
                     <div className="round-announce-overlay" key={`round-${roundAnnounce}`}>
@@ -1535,19 +1735,21 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                 const active = pid === displayCurPid;
                                 const isCpu = cpuConfig?.enabled && cpuConfig.cpuPlayers.includes(pid);
                                 const isNpcHandShown = !!(isCpu && npcHandVisible[pid]);
+                                const opponentActivityLabel = getOpponentActivityLabel(pid);
                                 // CPUミープル飛行アニメーション用: opponent-cardにプレイヤーIDを付与
                                 return (
                                     <div key={pid} data-player-id={pid} className={`opponent-card ${active ? 'opponent-card-active' : 'opponent-card-inactive'}`}>
-                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2, flexShrink: 0 }}>
-                                            <span data-player-origin={pid} style={{ fontWeight: 700, fontSize: 'var(--fs-lg)', color: active ? 'var(--teal)' : 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 3 }}>
+                                        <div className="opponent-card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2, flexShrink: 0 }}>
+                                            <span className="opponent-player-tag" data-player-origin={pid} style={{ fontWeight: 700, fontSize: 'var(--fs-lg)', color: active ? 'var(--teal)' : 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 3 }}>
                                                 {isCpu ? <IconRobot size={"calc(var(--fs) * 1.11)"} /> : <IconPlayer size={"calc(var(--fs) * 1.11)"} />}
                                                 <span title={playerName(pid)} style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '11ch' }}>
                                                     {playerName(pid)}
                                                 </span>
+                                                {opponentActivityLabel && <span style={{ color: 'var(--gold-dim)', fontSize: 'var(--fs-sm)', whiteSpace: 'nowrap' }}>{opponentActivityLabel}</span>}
                                                 {i === G.startPlayer && <span style={{ color: 'var(--orange)', fontSize: 'var(--fs-md)' }}>★</span>}
                                             </span>
                                             {/* ステータスバッジ + NPC手札トグル */}
-                                            <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+                                            <div className="opponent-header-stats" style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
                                                 <span className="stat-badge" style={{ fontSize: 'var(--fs-md)', padding: '1px 4px' }}>
                                                     <IconMoney size={"calc(var(--fs) * 0.89)"} color="var(--gold-light)" /><b style={{ color: 'var(--gold-light)' }}>${p.money}</b>
                                                 </span>
@@ -1633,7 +1835,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                                 <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', fontWeight: 600 }}>C{def.cost}</span>
                                                                 <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--gold-dim)', fontWeight: 600 }}>{def.vp}VP</span>
                                                             </div>
-                                                            <TagBadges defId={b.card.defId} />
+                                                            <TagBadges defId={b.card.defId} compact={isMobileTouchUi} />
                                                             {def.effectText && <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-dim)', marginTop: 'auto', lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{def.effectText}</div>}
                                                             {b.workerPlaced && <img src={getMeepleSrc(parseInt(pid))} className="worker-on-building-icon" alt="配置済み" />}
                                                         </div>
@@ -1666,21 +1868,21 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                     <div className="area-public" style={{ border: '1px solid var(--glass-border)', borderRadius: 4 }}>
                         {/* 家計 */}
                         <div className={`household-box ${wagePressure ? 'wage-pressure' : ''}`}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, zIndex: 1 }}>
+                            <div className="household-main" style={{ display: 'flex', alignItems: 'center', gap: 8, zIndex: 1 }}>
                                 <IconHouse size={"calc(var(--fs) * 1.78)"} color={wagePressure ? 'var(--red)' : 'var(--teal)'} />
-                                <div>
-                                    <div style={{ fontSize: 'var(--fs-md)', color: 'var(--text-dim)', fontWeight: 600 }}>HOUSEHOLD</div>
-                                    <div style={{ fontSize: 'var(--fs-4xl)', fontWeight: 900, color: wagePressure ? 'var(--red)' : 'var(--green)', lineHeight: 1 }}>${G.household}</div>
+                                <div className="household-summary">
+                                    <div className="household-title" style={{ fontSize: 'var(--fs-md)', color: 'var(--text-dim)', fontWeight: 600 }}>HOUSEHOLD</div>
+                                    <div className="household-total" style={{ fontSize: 'var(--fs-4xl)', fontWeight: 900, color: wagePressure ? 'var(--red)' : 'var(--green)', lineHeight: 1 }}>${G.household}</div>
                                 </div>
                             </div>
-                            <div style={{ display: 'flex', gap: 10, zIndex: 1 }}>
-                                <div style={{ textAlign: 'center' }}>
-                                    <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)' }}>WAGE</div>
-                                    <div style={{ fontSize: 'var(--fs-xl3)', fontWeight: 700, color: 'var(--teal)' }}>${wage}</div>
+                            <div className="household-meta" style={{ display: 'flex', gap: 10, zIndex: 1 }}>
+                                <div className="household-meta-item" style={{ textAlign: 'center' }}>
+                                    <div className="household-meta-label" style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)' }}>WAGE</div>
+                                    <div className="household-meta-value" style={{ fontSize: 'var(--fs-xl3)', fontWeight: 700, color: 'var(--teal)' }}>${wage}</div>
                                 </div>
-                                <div style={{ textAlign: 'center' }}>
-                                    <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)' }}>ROUND</div>
-                                    <div style={{ fontSize: 'var(--fs-xl3)', fontWeight: 700, color: 'var(--blue)' }}>{G.round}/9</div>
+                                <div className="household-meta-item" style={{ textAlign: 'center' }}>
+                                    <div className="household-meta-label" style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)' }}>ROUND</div>
+                                    <div className="household-meta-value" style={{ fontSize: 'var(--fs-xl3)', fontWeight: 700, color: 'var(--blue)' }}>{G.round}/9</div>
                                 </div>
                             </div>
                         </div>
@@ -1952,7 +2154,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                 {/* 売却建物 */}
                                 {soldWorkplaces.length > 0 && (
                                     <div style={{ position: 'relative', zIndex: 3 }}>
-                                        <div className="workplaces-row-label" style={{ color: 'var(--green)' }}>
+                                        <div className="workplaces-row-label sold-buildings-label" style={{ color: 'var(--green)' }}>
                                             <IconHouse size={"calc(var(--fs) * 0.89)"} color="var(--green)" /> 売却建物
                                         </div>
                                         <div className="sold-buildings-area">
@@ -1982,7 +2184,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                                         <span style={{ fontSize: 'var(--fs-md)', color: 'var(--text-dim)', fontWeight: 600 }}>C{def.cost}</span>
                                                                         <span style={{ fontSize: 'var(--fs-md)', color: 'var(--gold-dim)', fontWeight: 600 }}>{def.vp}VP</span>
                                                                     </div>
-                                                                    <TagBadges defId={wp.fromBuildingDefId!} />
+                                                                    <TagBadges defId={wp.fromBuildingDefId!} compact={isMobileTouchUi} />
                                                                     {def.effectText && <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-dim)', marginTop: 'auto', lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{def.effectText}</div>}
                                                                 </>
                                                             )}
@@ -2006,7 +2208,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                 </div >
 
                 {/* ====== 下段: 自分の場 ====== */}
-                < div className="area-my-field" data-player-id={myPid} >
+                < div className="area-my-field" data-player-id={myPid} style={mobileMyFieldStyle} >
                     {/* 左: ワーカーコマ + 手札 */}
                     < div className="my-hand-section" ref={handAreaRef} >
                         {/* ワーカーコマ */}
@@ -2087,25 +2289,17 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                 );
                                 // ドローアニメーション中はrawG（リアル）の手札を使用
                                 // frozenGの手札はドロー前のカウントなのでdrawAnimSlotsとの整合性が取れない
-                                const handSource = drawAnimRef.current ? (rawG.players[myPid]?.hand ?? myPlayer.hand) : myPlayer.hand;
-                                const visibleCards = handSource;
+                                const visibleCards = myHandSource;
                                 // ドロー1_下中は旧枚数のmarginで既存カードの位置をキープ
                                 // ドロー2_上開始時(drawAnimSlots=0)に新枚数のmarginに切替→CSSトランジションで滑らかに移動
-                                const oldCount = lastMoveRef.current?.handCount ?? visibleCards.length;
-                                const overlapForNew = getCardOverlapMargin(visibleCards.length, true);
+                                const overlapForNew = myHandLayout.overlapMargin;
                                 // ドローアニメーション中は常に新枚数のmarginを使用
                                 // Phase1でmargin/paddingを事前シフト→Phase2で新カードが最終横位置にそのまま登場
                                 const overlapMargin = overlapForNew;
 
                                 // --- paddingLeft 計算: 常に新枚数(visibleCards.length)ベースで中央揃え ---
                                 // ドロー時は追加後の枚数で先行計算→既存カードが滑らかに左へ寄る
-                                const containerW = containerSize.w - 16; // padding 8px*2
-                                const cardH = containerSize.h * 0.84;
-                                const cardW = cardH * 63 / 88;
-                                const totalCardsWidth = visibleCards.length <= 1
-                                    ? cardW
-                                    : cardW + (visibleCards.length - 1) * (cardW + overlapForNew);
-                                const paddingLeft = Math.max(0, (containerW - totalCardsWidth) / 2);
+                                const paddingLeft = myHandLayout.paddingLeft;
 
                                 return (
                                     <div className="hand-fan" style={{
@@ -2133,7 +2327,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                             if (isHidden(c)) {
                                                 return (
                                                     <div key={`hidden-${ci}`} className="hand-card hand-card-hidden"
-                                                        style={{ marginLeft: ci === 0 ? 0 : overlapMargin, zIndex: ci + 1, ...drawStyle }}>
+                                                        style={{ marginLeft: ci === 0 ? 0 : overlapMargin, zIndex: ci + 1, ...(isMobileTouchUi ? { height: 'var(--mobile-self-card-height)' } : {}), ...drawStyle }}>
                                                         <div style={{ fontWeight: 700, fontSize: 'var(--fs-3xl)', color: 'var(--text-dim)', textAlign: 'center', marginTop: 'auto', marginBottom: 'auto' }}>🂠</div>
                                                     </div>
                                                 );
@@ -2197,7 +2391,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                     onPointerLeave={() => { endPreview(); endHoverPreview(); }}
                                                     onPointerEnter={(e) => { if (!isCons) startHoverCardPreviewWithMode(c.defId, ci, e, 'above-hand'); }}
                                                     className={`hand-card ${isCons ? 'hand-card-consumable' : ''} ${canClick || isDragBuildHighlight ? 'hand-card-playable' : ''} ${workerDragRender?.hoveredUid?.startsWith('carpenter') && !isDragBuildHighlight && !isCons ? 'hand-card-drag-dimmed' : ''} ${pressingCardIdxRef.current === ci ? 'hand-card-pressing' : ''}`}
-                                                    style={{ marginLeft: ci === 0 ? 0 : overlapMargin, zIndex: ci + 1, ...drawStyle, ...selectedStyle }}>
+                                                    style={{ marginLeft: ci === 0 ? 0 : overlapMargin, zIndex: ci + 1, ...(isMobileTouchUi ? { height: 'var(--mobile-self-card-height)' } : {}), ...drawStyle, ...selectedStyle }}>
                                                     <CardBgImage defId={c.defId} />
                                                     <div style={{ fontWeight: 700, fontSize: 'var(--fs-base)', lineHeight: 1.2, color: isCons ? 'var(--text-secondary)' : 'var(--text-primary)', position: 'relative', zIndex: 1 }}>
                                                         {cName(c.defId)}
@@ -2205,13 +2399,13 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                     {def && (
                                                         <>
                                                             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2, position: 'relative', zIndex: 1, opacity: 1 }}>
-                                                                <span style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                                                                <span style={{ fontSize: 'var(--fs-md)', color: 'var(--text-dim)', fontWeight: 600 }}>
                                                                     C{isBuildPhase ? getConstructionCost(myPlayer, c.defId, G.buildState!.costReduction) : def.cost}
                                                                 </span>
-                                                                <span style={{ fontSize: 'var(--fs-lg)', color: 'var(--gold-light)', fontWeight: 600 }}>{def.vp}VP</span>
+                                                                <span style={{ fontSize: 'var(--fs-md)', color: 'var(--gold-dim)', fontWeight: 600 }}>{def.vp}VP</span>
                                                             </div>
-                                                            <div style={{ opacity: 1 }}><TagBadges defId={c.defId} /></div>
-                                                            {def.effectText && <div style={{ fontSize: 'var(--fs-base)', color: 'var(--text-secondary)', marginTop: 'auto', lineHeight: 1.2, position: 'relative', zIndex: 1, opacity: 1 }}>{def.effectText}</div>}
+                                                            <div style={{ opacity: 1 }}><TagBadges defId={c.defId} compact={isMobileTouchUi} /></div>
+                                                            {def.effectText && <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-dim)', marginTop: 'auto', lineHeight: 1.2, position: 'relative', zIndex: 1, opacity: 1 }}>{def.effectText}</div>}
                                                         </>
                                                     )}
                                                     {isCons && <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', marginTop: 2, position: 'relative', zIndex: 1 }}>消費財</div>}
@@ -2268,7 +2462,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                         }
                         {/* payday: 売却不要の待機表示 */}
                         {
-                            isPaydayPhase && paydayPlayerState && !needsPaydaySelling && !paydayPlayerState.confirmed && (
+                            isPaydayPhase && paydayPlayerState && paydayPlayerState.step === 'payday' && !needsPaydaySelling && !paydayPlayerState.confirmed && (
                                 <div className="buildings-info-bar" style={{ borderColor: 'var(--gold)' }}>
                                     <span style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-secondary)' }}>💰 給料は自動支払い済み</span>
                                     <button onClick={() => { soundManager.playSFX('click'); moves.confirmPayday(); }}
@@ -2329,6 +2523,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                         className={`hand-card building-card-in-field ${canActivate || isPaydaySellable ? 'hand-card-playable' : ''} ${b.workerPlaced && !isPaydayPhase ? 'building-placed' : ''} ${workerDragRender?.hoveredUid === b.card.uid && canActivate ? 'worker-drag-hover' : ''}`}
                                         style={{
                                             borderColor: color,
+                                            ...(isMobileTouchUi ? { height: myHandLayout.cardH } : {}),
                                             ...(isPaydaySelected ? { boxShadow: '0 0 12px var(--red-30)' } : {}),
                                             ...(needsPaydaySelling && def.unsellable ? { opacity: 0.5 } : {}),
                                         }}
@@ -2341,7 +2536,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                             <span style={{ fontSize: 'var(--fs-md)', color: 'var(--text-dim)', fontWeight: 600 }}>C{def.cost}</span>
                                             <span style={{ fontSize: 'var(--fs-md)', color: 'var(--gold-dim)', fontWeight: 600 }}>{def.vp}VP</span>
                                         </div>
-                                        <TagBadges defId={b.card.defId} />
+                                        <TagBadges defId={b.card.defId} compact={isMobileTouchUi} />
                                         {def.effectText && <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-dim)', marginTop: 'auto', lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{def.effectText}</div>}
                                         {b.workerPlaced && <img src={getMeepleSrc(parseInt(myPid))} className="worker-on-building-icon" alt="配置済み" />}
                                         {isPaydaySelected && <div style={{ color: 'var(--red)', fontSize: 'var(--fs-md)', fontWeight: 700, position: 'relative', zIndex: 1 }}>💰 売却</div>}
@@ -2360,19 +2555,32 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                             <IconDeck size={"var(--fs)"} color="var(--text-secondary)" /><b style={{ color: 'var(--text-secondary)' }}>{myPlayer.hand.length}/{myPlayer.maxHandSize}</b>
                         </span>
                         {
-                            myPlayer.unpaidDebts > 0 && (
-                                <span className="stat-badge" style={{ fontSize: 'var(--fs-base)', padding: '2px 6px', borderColor: 'var(--red-30)' }}>
-                                    <b style={{ color: 'var(--red)' }}>Debt {myPlayer.unpaidDebts}</b>
-                                </span>
-                            )
-                        }
-                        {
                             myPlayer.vpTokens > 0 && (
                                 <span className="stat-badge" style={{ fontSize: 'var(--fs-base)', padding: '2px 6px' }}>
                                     <IconTrophy size={"var(--fs)"} color="var(--gold)" /><b style={{ color: 'var(--gold)' }}>{myPlayer.vpTokens}</b>
                                 </span>
                             )
                         }
+                        {
+                            myPlayer.unpaidDebts > 0 && (
+                                <span className="stat-badge" style={{ fontSize: 'var(--fs-base)', padding: '2px 6px', borderColor: 'var(--red-30)' }}>
+                                    <b style={{ color: 'var(--red)' }}>Debt {myPlayer.unpaidDebts}</b>
+                                </span>
+                            )
+                        }
+                        {isFullscreenSupported && (
+                            <button
+                                type="button"
+                                onClick={toggleFullscreen}
+                                className="fullscreen-toggle-button"
+                                title={isFullscreen ? '全画面表示を終了' : '全画面表示'}
+                                aria-label={isFullscreen ? '全画面表示を終了' : '全画面表示'}
+                            >
+                                {isFullscreen
+                                    ? <IconFullscreenExit size={"calc(var(--fs) * 1.44)"} />
+                                    : <IconFullscreen size={"calc(var(--fs) * 1.44)"} />}
+                            </button>
+                        )}
                     </div >
                 </div >
             </div >
@@ -2433,14 +2641,30 @@ function DesignOfficeUI({ G, moves, onBeforeSelect }: { G: GameState; moves: any
     const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
     // 長押しプレビュー用
     const [previewDefId, setPreviewDefId] = useState<string | null>(null);
+    const previewDefIdRef = useRef<string | null>(null);
     const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const clearTimer = () => { if (previewTimer.current) { clearTimeout(previewTimer.current); previewTimer.current = null; } };
+    useEffect(() => {
+        previewDefIdRef.current = previewDefId;
+    }, [previewDefId]);
     const startCardPreview = (defId: string) => {
         clearTimer();
         previewTimer.current = setTimeout(() => { setPreviewDefId(defId); }, 300);
     };
     const endCardPreview = () => { clearTimer(); };
     const closeCardPreview = () => { clearTimer(); setPreviewDefId(null); };
+    useEffect(() => {
+        const handlePreviewRelease = () => {
+            clearTimer();
+            if (matchesMobileTouchUi() && previewDefIdRef.current) setPreviewDefId(null);
+        };
+        document.addEventListener('pointerup', handlePreviewRelease, true);
+        document.addEventListener('pointercancel', handlePreviewRelease, true);
+        return () => {
+            document.removeEventListener('pointerup', handlePreviewRelease, true);
+            document.removeEventListener('pointercancel', handlePreviewRelease, true);
+        };
+    }, []);
 
     return (
         <div className="game-bg" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
