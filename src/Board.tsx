@@ -1302,7 +1302,13 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     const cleanupPlayerState = isCleanupPhase
         ? G.cleanupState!.playerStates[isOnline ? myPid : String(G.cleanupState!.currentPlayerIndex)]
         : paydayPlayerState;
-    const needsCleanup = !!(cleanupPlayerState && !cleanupPlayerState.confirmed && cleanupPlayerState.step === 'cleanup' && cleanupPlayerState.excessCount > 0);
+    const needsCleanup = !!(
+        cleanupPlayerState
+        && 'step' in cleanupPlayerState
+        && !cleanupPlayerState.confirmed
+        && cleanupPlayerState.step === 'cleanup'
+        && cleanupPlayerState.excessCount > 0
+    );
 
     // 捨てカード選択: メインボードの手札から直接選択
     const isDiscardPhase = rawG.phase === 'discard' && rawG.discardState;
