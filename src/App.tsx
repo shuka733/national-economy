@@ -39,8 +39,9 @@ type LobbyPlayerInfo = {
 
 const HOST_NAME_STORAGE_KEY = 'ne-host-player-name';
 const GUEST_NAME_STORAGE_KEY = 'ne-guest-player-name';
-const ROOM_ID_LENGTH = 6;
-const ROOM_ID_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const ROOM_ID_PREFIX = 'NE-';
+const ROOM_ID_LENGTH = 4;
+const ROOM_ID_ALPHABET = '0123456789';
 
 function defaultPlayerName(playerId: string | number): string {
     return `P${Number(playerId) + 1}`;
@@ -55,20 +56,28 @@ function loadStoredPlayerName(storageKey: string): string {
     return localStorage.getItem(storageKey) ?? '';
 }
 
-function generateRoomId(): string {
+function generateRoomToken(): string {
     let token = '';
     for (let i = 0; i < ROOM_ID_LENGTH; i++) {
         token += ROOM_ID_ALPHABET[Math.floor(Math.random() * ROOM_ID_ALPHABET.length)];
     }
-    return `NE-${token}`;
+    return token;
+}
+
+function toInternalRoomId(token: string): string {
+    return `${ROOM_ID_PREFIX}${token}`;
+}
+
+function extractRoomToken(value: string): string {
+    const normalized = value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (normalized.startsWith('NE')) {
+        return normalized.slice(2, 2 + ROOM_ID_LENGTH);
+    }
+    return normalized.replace(/\D/g, '').slice(0, ROOM_ID_LENGTH);
 }
 
 function sanitizeRoomId(value: string): string {
-    const normalized = value.toUpperCase().replace(/[^A-Z0-9]/g, '');
-    if (normalized.startsWith('NE')) {
-        return `NE-${normalized.slice(2, 2 + ROOM_ID_LENGTH)}`.slice(0, 3 + ROOM_ID_LENGTH);
-    }
-    return value.toUpperCase().replace(/[^A-Z0-9-]/g, '').slice(0, 3 + ROOM_ID_LENGTH);
+    return extractRoomToken(value);
 }
 
 function getAvailableGuestPid(connections: Map<string, DataConnection>, numPlayers: number): string | null {
@@ -554,6 +563,7 @@ function HostLobby({ onBack }: { onBack: () => void }) {
     const [gameStarted, setGameStarted] = useState(false);
     const [hostState, setHostState] = useState<{ G: GameState; ctx: Ctx } | null>(null);
     const [showStartNotification, setShowStartNotification] = useState(false);
+    const [peerSeed, setPeerSeed] = useState(0);
     const peerRef = useRef<Peer | null>(null);
     const connectionsRef = useRef<Map<string, DataConnection>>(new Map());
     const clientsRef = useRef<any[]>([]);
@@ -568,15 +578,20 @@ function HostLobby({ onBack }: { onBack: () => void }) {
     }, [hostName]);
 
     useEffect(() => {
-        const peer = new Peer(generateRoomId(), iceConfig);
+        const peer = new Peer(toInternalRoomId(generateRoomToken()), iceConfig);
         peerRef.current = peer;
 
         peer.on('open', (id) => {
-            setPeerID(id);
+            setPeerID(extractRoomToken(id));
             setStatus('接続待機中');
         });
 
         peer.on('error', (err) => {
+            if (err.type === 'unavailable-id') {
+                setStatus('繝ｫ繝ｼ繝ID繧呈｢ｺ菫昴＠縺ｦ縺・∪縺・..');
+                setPeerSeed(seed => seed + 1);
+                return;
+            }
             setStatus(`エラー: ${err.type}`);
         });
 
@@ -607,15 +622,23 @@ function HostLobby({ onBack }: { onBack: () => void }) {
                         return;
                     }
                     if (data.type === 'move') {
-                        const hostClient = clientsRef.current[0];
-                        const state = hostClient?.getState();
+                        if (data.playerID !== undefined && String(data.playerID) !== pid) {
+                            return;
+                        }
+                        const client = clientsRef.current[parseInt(pid, 10)];
+                        if (client?.moves[data.name]) {
+                            client.moves[data.name](...(data.args || []));
+                        }
+                        return;
+                    }
+                    /*
+                    if (data.type === 'move') {
+                        if (data.playerID !== undefined && String(data.playerID) !== pid) {
+                            return;
+                        }
+                        const client = clientsRef.current[parseInt(pid, 10)];
+                        if (client?.moves[data.name]) {
                         // P2P同時操作対応: payday/cleanupでは送信元のplayerIDのclientからMoveを発行
-                        const phase = state?.G?.phase;
-                        const isSimultaneous = phase === 'payday' || phase === 'cleanup';
-                        const targetPid = isSimultaneous && data.playerID !== undefined
-                            ? parseInt(data.playerID)
-                            : parseInt(state?.ctx?.currentPlayer ?? '0');
-                        const client = clientsRef.current[targetPid];
                         if (client?.moves[data.name]) {
                             client.moves[data.name](...(data.args || []));
                         }
@@ -629,12 +652,13 @@ function HostLobby({ onBack }: { onBack: () => void }) {
                         delete next[pid];
                         return next;
                     });
+                    */
                 });
             });
         });
 
         return () => { peer.destroy(); };
-    }, []);
+    }, [peerSeed]);
 
     // ゲーム開始
     const startGame = useCallback(() => {
@@ -696,13 +720,8 @@ function HostLobby({ onBack }: { onBack: () => void }) {
         return new Proxy({}, {
             get: (_target, name: string) => {
                 return (...args: any[]) => {
-                    const state = clientsRef.current[0]?.getState();
-                    if (!state) return;
+                    const client = clientsRef.current[0];
                     // P2P同時操作対応: payday/cleanupではホスト自身のclient(0)からMoveを発行
-                    const phase = state?.G?.phase;
-                    const isSimultaneous = phase === 'payday' || phase === 'cleanup';
-                    const targetIdx = isSimultaneous ? 0 : parseInt(state?.ctx?.currentPlayer ?? '0');
-                    const client = clientsRef.current[targetIdx];
                     if (client?.moves[name]) client.moves[name](...args);
                 };
             },
@@ -898,7 +917,7 @@ function JoinLobby({ onBack }: { onBack: () => void }) {
         setConnected(true);
         setStatus('ホストに接続中...');
 
-        const conn = peerRef.current.connect(roomId.trim());
+        const conn = peerRef.current.connect(toInternalRoomId(roomId.trim()));
         connRef.current = conn;
 
         conn.on('open', () => {

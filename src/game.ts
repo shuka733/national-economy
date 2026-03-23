@@ -39,6 +39,13 @@ function normalizePlayerName(name: unknown, fallback: string): string {
     return trimmed || fallback;
 }
 
+function getAuthorizedSequentialPlayerId(ctx: Ctx, playerID: string | null | undefined): string | null {
+    const pid = (playerID !== undefined && playerID !== null)
+        ? String(playerID)
+        : String(ctx.currentPlayer);
+    return pid === String(ctx.currentPlayer) ? pid : null;
+}
+
 /** デッキ構築 */
 function buildDeck(version: GameVersion): Card[] {
     const cards: Card[] = [];
@@ -54,18 +61,35 @@ function buildDeck(version: GameVersion): Card[] {
     return cards;
 }
 
+function shuffleCardsInPlace(cards: Card[]) {
+    for (let i = cards.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [cards[i], cards[j]] = [cards[j], cards[i]];
+    }
+}
+
+function recycleDiscardIntoDeck(G: GameState, protectedDiscardUids?: Set<string>): boolean {
+    const recyclable = protectedDiscardUids && protectedDiscardUids.size > 0
+        ? G.discard.filter(card => !protectedDiscardUids.has(card.uid))
+        : [...G.discard];
+    if (recyclable.length === 0) return false;
+
+    G.deck = recyclable;
+    if (protectedDiscardUids && protectedDiscardUids.size > 0) {
+        G.discard = G.discard.filter(card => protectedDiscardUids.has(card.uid));
+    } else {
+        G.discard = [];
+    }
+    shuffleCardsInPlace(G.deck);
+    return true;
+}
+
 /** カードを山札から引く（枯渇時リシャッフル） */
-function drawCards(G: GameState, count: number): Card[] {
+function drawCards(G: GameState, count: number, options?: { protectedDiscardUids?: Set<string> }): Card[] {
     const drawn: Card[] = [];
     for (let i = 0; i < count; i++) {
         if (G.deck.length === 0) {
-            if (G.discard.length === 0) break;
-            G.deck = [...G.discard];
-            G.discard = [];
-            for (let j = G.deck.length - 1; j > 0; j--) {
-                const k = Math.floor(Math.random() * (j + 1));
-                [G.deck[j], G.deck[k]] = [G.deck[k], G.deck[j]];
-            }
+            if (!recycleDiscardIntoDeck(G, options?.protectedDiscardUids)) break;
         }
         if (G.deck.length > 0) drawn.push(G.deck.pop()!);
     }
@@ -913,17 +937,19 @@ export const NationalEconomy: Game<GameState> = {
             stats.players[String(i)] = [];
         }
 
+        const initialStartPlayer = Math.floor(Math.random() * ctx.numPlayers);
+
         return {
             version,
             players,
             playerNames,
             publicWorkplaces: createInitialWorkplaces(ctx.numPlayers, version),
-            household: 0, round: 1, phase: 'work', startPlayer: 0,
+            household: 0, round: 1, phase: 'work', startPlayer: initialStartPlayer,
             deck, discard: [], consumableCounter: 0,
             numPlayers: ctx.numPlayers,
             discardState: null, buildState: null, paydayState: null, cleanupState: null,
             designOfficeState: null, dualConstructionState: null,
-            activePlayer: 0,
+            activePlayer: initialStartPlayer,
             log: initialLog,
             lastPlacementEvent: null,
             finalScores: null,
@@ -934,9 +960,10 @@ export const NationalEconomy: Game<GameState> = {
 
     moves: {
         // ============ ワーカー配置（公共職場） ============
-        placeWorker: ({ G, ctx, events }, workplaceId: string) => {
+        placeWorker: ({ G, ctx, events, playerID }, workplaceId: string) => {
             if (G.phase !== 'work') return INVALID_MOVE;
-            const pid = ctx.currentPlayer;
+            const pid = getAuthorizedSequentialPlayerId(ctx, playerID);
+            if (!pid) return INVALID_MOVE;
             const p = G.players[pid];
             if (p.availableWorkers <= 0) return INVALID_MOVE;
 
@@ -990,9 +1017,10 @@ export const NationalEconomy: Game<GameState> = {
         },
 
         // ============ ワーカー配置（個人建物） ============
-        placeWorkerOnBuilding: ({ G, ctx, events }, cardUid: string) => {
+        placeWorkerOnBuilding: ({ G, ctx, events, playerID }, cardUid: string) => {
             if (G.phase !== 'work') return INVALID_MOVE;
-            const pid = ctx.currentPlayer;
+            const pid = getAuthorizedSequentialPlayerId(ctx, playerID);
+            if (!pid) return INVALID_MOVE;
             const p = G.players[pid];
             if (p.availableWorkers <= 0) return INVALID_MOVE;
 
@@ -1052,6 +1080,8 @@ export const NationalEconomy: Game<GameState> = {
                 return;
             }
             if (!G.discardState) return INVALID_MOVE;
+            const pid = getAuthorizedSequentialPlayerId(ctx, playerID);
+            if (!pid) return INVALID_MOVE;
             const state = G.discardState;
 
             const idx = state.selectedIndices.indexOf(cardIndex);
@@ -1097,7 +1127,8 @@ export const NationalEconomy: Game<GameState> = {
             }
             if (!G.discardState) return INVALID_MOVE;
             const ds = G.discardState;
-            const pid = ctx.currentPlayer;
+            const pid = getAuthorizedSequentialPlayerId(ctx, playerID);
+            if (!pid) return INVALID_MOVE;
             const p = G.players[pid];
 
             // Modernism Check: Consumables count as 2
@@ -1134,6 +1165,9 @@ export const NationalEconomy: Game<GameState> = {
                 discardCard(G, c);
                 p.hand.splice(i, 1);
             }
+            const protectedDiscardUids = new Set(
+                discardedCards.filter(card => !isConsumable(card)).map(card => card.uid)
+            );
 
             const action = ds.callbackAction;
             const data = ds.callbackData;
@@ -1151,7 +1185,7 @@ export const NationalEconomy: Game<GameState> = {
                 }
                 case 'draw': {
                     const count = data.count as number;
-                    p.hand.push(...drawCards(G, count));
+                    p.hand.push(...drawCards(G, count, { protectedDiscardUids }));
                     pushLog(G, `P${parseInt(pid) + 1}が${ds.count}枚を捨てて${count}枚ドロー (手札: ${p.hand.length}枚)`);
                     G.phase = 'work';
                     advanceTurnOrPhase(G, ctx, events);
@@ -1194,7 +1228,7 @@ export const NationalEconomy: Game<GameState> = {
                     const buildAction = G.buildState?.action;
 
                     if (bd.drawAfterBuild > 0) {
-                        const drawn = drawCards(G, bd.drawAfterBuild);
+                        const drawn = drawCards(G, bd.drawAfterBuild, { protectedDiscardUids });
                         p.hand.push(...drawn);
                         logMsg += ` & ${drawn.length}枚ドロー`;
                     }
@@ -1241,9 +1275,10 @@ export const NationalEconomy: Game<GameState> = {
         },
 
         // ============ 建設カード選択 ============
-        selectBuildCard: ({ G, ctx, events }, cardIndex: number) => {
+        selectBuildCard: ({ G, ctx, events, playerID }, cardIndex: number) => {
             if (G.phase !== 'build' || !G.buildState) return INVALID_MOVE;
-            const pid = ctx.currentPlayer;
+            const pid = getAuthorizedSequentialPlayerId(ctx, playerID);
+            if (!pid) return INVALID_MOVE;
             const p = G.players[pid];
             if (cardIndex < 0 || cardIndex >= p.hand.length) return INVALID_MOVE;
 
@@ -1325,8 +1360,9 @@ export const NationalEconomy: Game<GameState> = {
         },
 
         // ============ アクションキャンセル ============
-        cancelAction: ({ G, ctx, events }) => {
-            const pid = ctx.currentPlayer;
+        cancelAction: ({ G, ctx, events, playerID }) => {
+            const pid = getAuthorizedSequentialPlayerId(ctx, playerID);
+            if (!pid) return INVALID_MOVE;
             const p = G.players[pid];
 
             if (G.phase === 'build' && G.buildState) {
@@ -1501,12 +1537,13 @@ export const NationalEconomy: Game<GameState> = {
         },
 
         // ============ 設計事務所: カード選択 ============
-        selectDesignOfficeCard: ({ G, ctx, events }, cardIndex: number) => {
+        selectDesignOfficeCard: ({ G, ctx, events, playerID }, cardIndex: number) => {
             if (G.phase !== 'designOffice' || !G.designOfficeState) return INVALID_MOVE;
             const dos = G.designOfficeState;
             if (cardIndex < 0 || cardIndex >= dos.revealedCards.length) return INVALID_MOVE;
 
-            const pid = ctx.currentPlayer;
+            const pid = getAuthorizedSequentialPlayerId(ctx, playerID);
+            if (!pid) return INVALID_MOVE;
             const p = G.players[pid];
 
             const chosen = dos.revealedCards[cardIndex];
@@ -1522,9 +1559,10 @@ export const NationalEconomy: Game<GameState> = {
         },
 
         // ============ 二胡市建設: カード選択トグル ============
-        toggleDualCard: ({ G, ctx }, cardIndex: number) => {
+        toggleDualCard: ({ G, ctx, playerID }, cardIndex: number) => {
             if (G.phase !== 'dualConstruction' || !G.dualConstructionState) return INVALID_MOVE;
-            const pid = ctx.currentPlayer;
+            const pid = getAuthorizedSequentialPlayerId(ctx, playerID);
+            if (!pid) return INVALID_MOVE;
             const p = G.players[pid];
             if (cardIndex < 0 || cardIndex >= p.hand.length) return INVALID_MOVE;
 
@@ -1551,9 +1589,10 @@ export const NationalEconomy: Game<GameState> = {
         },
 
         // ============ 二胡市建設: 確定 ============
-        confirmDualConstruction: ({ G, ctx, events }) => {
+        confirmDualConstruction: ({ G, ctx, events, playerID }) => {
             if (G.phase !== 'dualConstruction' || !G.dualConstructionState) return INVALID_MOVE;
-            const pid = ctx.currentPlayer;
+            const pid = getAuthorizedSequentialPlayerId(ctx, playerID);
+            if (!pid) return INVALID_MOVE;
             const p = G.players[pid];
             const ds = G.dualConstructionState;
             if (ds.selectedCardIndices.length !== 2) return INVALID_MOVE;
@@ -1739,10 +1778,10 @@ export const NationalEconomy: Game<GameState> = {
     // オンラインプレイ用: 他プレイヤーの手札を隠蔽
     playerView: ({ G, ctx, playerID }) => {
         if (!playerID) return G;
-        const filtered = JSON.parse(JSON.stringify(G));
+        const filtered = JSON.parse(JSON.stringify(G)) as GameState;
         for (const pid of Object.keys(filtered.players)) {
             if (pid !== playerID) {
-                filtered.players[pid].hand = filtered.players[pid].hand.map((c: any) => ({
+                filtered.players[pid].hand = filtered.players[pid].hand.map((c) => ({
                     uid: c.uid,
                     defId: c.defId === CONSUMABLE_DEF_ID ? CONSUMABLE_DEF_ID : 'HIDDEN',
                 }));
@@ -1750,6 +1789,38 @@ export const NationalEconomy: Game<GameState> = {
         }
         // デッキと捨て山の内容も隠蔽（枚数のみ公開）
         filtered.deck = filtered.deck.map(() => ({ uid: 'x', defId: 'HIDDEN' }));
+        if (String(playerID) !== String(ctx.currentPlayer)) {
+            filtered.discardState = null;
+            filtered.buildState = null;
+            filtered.designOfficeState = null;
+            filtered.dualConstructionState = null;
+        }
+        if (filtered.paydayState) {
+            for (const pid of Object.keys(filtered.paydayState.playerStates)) {
+                if (pid === playerID) continue;
+                const pps = filtered.paydayState.playerStates[pid];
+                filtered.paydayState.playerStates[pid] = {
+                    step: pps.step,
+                    totalWage: 0,
+                    needsSelling: false,
+                    selectedBuildingIndices: [],
+                    excessCount: 0,
+                    selectedIndices: [],
+                    confirmed: pps.confirmed,
+                };
+            }
+        }
+        if (filtered.cleanupState) {
+            for (const pid of Object.keys(filtered.cleanupState.playerStates)) {
+                if (pid === playerID) continue;
+                const cps = filtered.cleanupState.playerStates[pid];
+                filtered.cleanupState.playerStates[pid] = {
+                    excessCount: 0,
+                    selectedIndices: [],
+                    confirmed: cps.confirmed,
+                };
+            }
+        }
         return filtered;
     },
 };

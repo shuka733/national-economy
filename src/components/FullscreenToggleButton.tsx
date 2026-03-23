@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { soundManager } from '../SoundManager';
 import { IconFullscreen, IconFullscreenExit } from './Icons';
+import { getFullscreenFallbackMessage, isLikelyIOSBrowser } from '../browserPlatform';
 
 type FullscreenCapableDocument = Document & {
     webkitFullscreenElement?: Element | null;
@@ -23,6 +24,7 @@ export function FullscreenToggleButton({
 }) {
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [isFullscreenSupported, setIsFullscreenSupported] = useState(false);
+    const [showFallbackButton, setShowFallbackButton] = useState(false);
 
     const syncFullscreenState = useCallback(() => {
         if (typeof document === 'undefined') return;
@@ -35,6 +37,7 @@ export function FullscreenToggleButton({
             target?.requestFullscreen ||
             target?.webkitRequestFullscreen
         ));
+        setShowFallbackButton(isLikelyIOSBrowser());
     }, [targetRef]);
 
     useEffect(() => {
@@ -74,13 +77,20 @@ export function FullscreenToggleButton({
             }
             if (target.webkitRequestFullscreen) {
                 await target.webkitRequestFullscreen();
+                return;
+            }
+            if (showFallbackButton && typeof window !== 'undefined') {
+                window.alert(getFullscreenFallbackMessage());
             }
         } catch (error) {
             console.warn('Failed to toggle fullscreen mode.', error);
+            if (showFallbackButton && typeof window !== 'undefined') {
+                window.alert(getFullscreenFallbackMessage());
+            }
         }
-    }, [targetRef]);
+    }, [showFallbackButton, targetRef]);
 
-    if (!isFullscreenSupported) return null;
+    if (!isFullscreenSupported && !showFallbackButton) return null;
 
     return (
         <button

@@ -16,6 +16,7 @@ import { CPUSettings } from './CPUSettings';
 import { useAnimations } from './components/AnimationLayer';
 import { BgImageOverlay } from './components/BgImageOverlay';
 import { getThemedCardImagePath, getThemedWorkplaceImagePath } from './themeUtils';
+import { getFullscreenFallbackMessage, isLikelyIOSBrowser } from './browserPlatform';
 import './cpu-anim.css';
 // HandScene3D は現在未使用（ポンチ絵ベースのHTMLレイアウトに置換済み）
 import {
@@ -213,6 +214,8 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     const [isMobileTouchUi, setIsMobileTouchUi] = useState(matchesMobileTouchUi);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [isFullscreenSupported, setIsFullscreenSupported] = useState(false);
+    const [showFullscreenFallback, setShowFullscreenFallback] = useState(false);
+    const [showReloadWarningHint, setShowReloadWarningHint] = useState(() => isLikelyIOSBrowser());
     const boardLayoutRef = useRef<HTMLDivElement | null>(null);
     // 手札長押し/ホバープレビュー用
     // プレビューデータ型: カード or 公共職場
@@ -275,6 +278,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
             target?.requestFullscreen ||
             target?.webkitRequestFullscreen
         ));
+        setShowFullscreenFallback(isLikelyIOSBrowser());
     }, []);
     useEffect(() => {
         if (typeof document === 'undefined') return;
@@ -312,11 +316,18 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
             }
             if (target.webkitRequestFullscreen) {
                 await target.webkitRequestFullscreen();
+                return;
+            }
+            if (showFullscreenFallback && typeof window !== 'undefined') {
+                window.alert(getFullscreenFallbackMessage());
             }
         } catch (error) {
             console.warn('Failed to toggle fullscreen mode.', error);
+            if (showFullscreenFallback && typeof window !== 'undefined') {
+                window.alert(getFullscreenFallbackMessage());
+            }
         }
-    }, []);
+    }, [showFullscreenFallback]);
     const clearPreviewTimer = () => {
         if (previewTimerRef.current) { clearTimeout(previewTimerRef.current); previewTimerRef.current = null; }
     };
@@ -654,12 +665,23 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     useEffect(() => {
         if (rawG.round !== prevRoundRef.current) {
             prevRoundRef.current = rawG.round;
+            let cancelled = false;
             const pendingOpponentPlacementSeq = isOnline
                 && rawG.lastPlacementEvent
                 && rawG.lastPlacementEvent.playerId !== myPid
                 && rawG.lastPlacementEvent.seq > handledPlacementAnimationSeqRef.current
                 ? rawG.lastPlacementEvent.seq
                 : null;
+            const resolveRoundTargetRect = async (): Promise<DOMRect | null> => {
+                for (let attempt = 0; attempt < 10; attempt++) {
+                    if (cancelled) return null;
+                    const targetEl = roundWorkplaceRefs.current[rawG.round];
+                    const targetRect = targetEl?.getBoundingClientRect() ?? null;
+                    if (targetRect) return targetRect;
+                    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+                }
+                return null;
+            };
             const startSequence = () => {
                 // デッキ位置を事前取得
                 const deckRect = roundDeckRef.current?.getBoundingClientRect() ?? null;
@@ -670,6 +692,23 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
 
                 // ② 800ms: フリップ完了 → 移動フェーズ
                 const moveTimer = setTimeout(() => {
+                    setFlipRound(null);
+                    void (async () => {
+                        const targetRect = await resolveRoundTargetRect();
+                        if (cancelled) return;
+                        if (!targetRect) {
+                            setRoundCardAnim(null);
+                            return;
+                        }
+                        setRoundCardAnim(prev => prev ? { ...prev, phase: 'move', targetRect } : null);
+                        requestAnimationFrame(() => {
+                            requestAnimationFrame(() => {
+                                if (cancelled) return;
+                                setRoundCardAnim(prev => prev ? { ...prev, phase: 'settled' } : null);
+                            });
+                        });
+                    })();
+                    return;
                     setFlipRound(null); // デッキのフリップを解除（デッキ表示に戻す）
                     // 移動先のDOMRect取得
                     const targetEl = roundWorkplaceRefs.current[rawG.round];
@@ -709,10 +748,18 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                         startSequence();
                     }
                 }, 100);
-                return () => clearInterval(poll);
+                return () => {
+                    cancelled = true;
+                    clearInterval(poll);
+                };
             } else {
                 const { moveTimer, announceTimer, doneTimer } = startSequence();
-                return () => { clearTimeout(moveTimer); clearTimeout(announceTimer); clearTimeout(doneTimer); };
+                return () => {
+                    cancelled = true;
+                    clearTimeout(moveTimer);
+                    clearTimeout(announceTimer);
+                    clearTimeout(doneTimer);
+                };
             }
         }
     }, [isOnline, myPid, rawG.lastPlacementEvent, rawG.round]);
@@ -969,10 +1016,13 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     ): Promise<boolean> => {
         let startRect = getWorkerAnimationStartRect(pid, options?.preferPlayerPanel ?? false);
         let targetRect = getPlacementTargetRect(placement);
-        if (!startRect || !targetRect) {
+        let attempts = 0;
+        while ((!startRect || !targetRect) && attempts < 6) {
             await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+            snapshotAnimationRects();
             startRect = getWorkerAnimationStartRect(pid, options?.preferPlayerPanel ?? false);
             targetRect = getPlacementTargetRect(placement);
+            attempts += 1;
         }
         if (!startRect || !targetRect) return false;
 
@@ -984,7 +1034,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
             options?.rippleColor ?? 'var(--teal-60)'
         );
         return true;
-    }, [getPlacementTargetRect, getWorkerAnimationStartRect, getMeepleSrc, triggerMeepleFlight, triggerRipple]);
+    }, [getPlacementTargetRect, getWorkerAnimationStartRect, getMeepleSrc, snapshotAnimationRects, triggerMeepleFlight, triggerRipple]);
 
     const detectPlacementDelta = useCallback((prevState: GameState, nextState: GameState): PlacementDelta | null => {
         for (const nextWp of nextState.publicWorkplaces) {
@@ -1421,9 +1471,11 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     // 二胡市建設モーダル
     if (G.phase === 'dualConstruction' && G.dualConstructionState && isMyTurn) return <DualConstructionUI G={G} moves={moves} pid={curPid} />;
 
-    // 対戦相手（自分以外）
-    const opponents = Array.from({ length: ctx.numPlayers }, (_, i) => i)
-        .filter(i => String(i) !== myPid);
+    // 対戦相手は、自分の次手番プレイヤーから順に循環順で並べる
+    const myPidNumber = Number(myPid);
+    const opponents = Number.isNaN(myPidNumber)
+        ? Array.from({ length: ctx.numPlayers }, (_, i) => String(i)).filter(pid => pid !== myPid)
+        : Array.from({ length: Math.max(0, ctx.numPlayers - 1) }, (_, offset) => String((myPidNumber + offset + 1) % ctx.numPlayers));
 
     // 家計ボックスのプレッシャー判定（ラウンド7以降で家計が少ない場合）
     const totalWorkers = Object.keys(G.players).reduce((sum, pid) => sum + G.players[pid].workers, 0);
@@ -1513,6 +1565,37 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
 
     return (
         <div className={boardLayoutClassName} ref={boardLayoutRef}>
+            {showReloadWarningHint && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        top: 12,
+                        left: '50%',
+                        transform: 'translateX(-50%)',
+                        zIndex: 260,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        padding: '8px 12px',
+                        borderRadius: 999,
+                        background: 'rgba(14, 18, 28, 0.92)',
+                        border: '1px solid rgba(255,255,255,0.12)',
+                        color: 'var(--text-secondary)',
+                        fontSize: 'var(--fs-base)',
+                        boxShadow: '0 8px 20px rgba(0,0,0,0.3)',
+                    }}
+                >
+                    <span>iPhone では再読み込み確認が出ない場合があります</span>
+                    <button
+                        type="button"
+                        onClick={() => setShowReloadWarningHint(false)}
+                        className="btn-ghost"
+                        style={{ padding: '2px 8px', fontSize: 'var(--fs-base)' }}
+                    >
+                        閉じる
+                    </button>
+                </div>
+            )}
             <AnimationOverlay />
             {/* ワーカードラッグ中のゴーストミープル */}
             {workerDragRender && (
@@ -1735,9 +1818,9 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
 
                         {/* 相手プレイヤー */}
                         <div className="opponents-container">
-                            {opponents.map(i => {
-                                const pid = String(i);
+                            {opponents.map(pid => {
                                 const p = G.players[pid];
+                                const pidNumber = Number(pid);
                                 const active = pid === displayCurPid;
                                 const isCpu = cpuConfig?.enabled && cpuConfig.cpuPlayers.includes(pid);
                                 const isNpcHandShown = !!(isCpu && npcHandVisible[pid]);
@@ -1752,7 +1835,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                     {playerName(pid)}
                                                 </span>
                                                 {opponentActivityLabel && <span style={{ color: 'var(--gold-dim)', fontSize: 'var(--fs-sm)', whiteSpace: 'nowrap' }}>{opponentActivityLabel}</span>}
-                                                {i === G.startPlayer && <span style={{ color: 'var(--orange)', fontSize: 'var(--fs-md)' }}>★</span>}
+                                                {pidNumber === G.startPlayer && <span style={{ color: 'var(--orange)', fontSize: 'var(--fs-md)' }}>★</span>}
                                             </span>
                                             {/* ステータスバッジ + NPC手札トグル */}
                                             <div className="opponent-header-stats" style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
@@ -1791,10 +1874,10 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                 const isVisibleCard = isNpcHandShown && !isHidden(c);
                                                 return (
                                                     <div key={c.uid}
-                                                        onPointerDown={() => { if (isVisibleCard) startCardPreview(c.defId, 4000 + i * 100 + ci); }}
+                                                        onPointerDown={() => { if (isVisibleCard) startCardPreview(c.defId, 4000 + pidNumber * 100 + ci); }}
                                                         onPointerUp={endPreview}
                                                         onPointerLeave={() => { endPreview(); endHoverPreview(); }}
-                                                        onPointerEnter={(e) => { if (isVisibleCard) startHoverCardPreview(c.defId, 4000 + i * 100 + ci, e); }}
+                                                        onPointerEnter={(e) => { if (isVisibleCard) startHoverCardPreview(c.defId, 4000 + pidNumber * 100 + ci, e); }}
                                                         className="opponent-hand-card"
                                                         style={{
                                                             marginLeft: ci === 0 ? 0 : getCardOverlapMargin(p.hand.length, false),
@@ -1829,10 +1912,10 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                     return (
                                                         <div key={bi}
                                                             data-building-uid={b.card.uid}
-                                                            onPointerDown={() => { startCardPreview(b.card.defId, 3000 + i * 100 + bi); }}
+                                                            onPointerDown={() => { startCardPreview(b.card.defId, 3000 + pidNumber * 100 + bi); }}
                                                             onPointerUp={endPreview}
                                                             onPointerLeave={() => { endPreview(); endHoverPreview(); }}
-                                                            onPointerEnter={(e) => { startHoverCardPreview(b.card.defId, 3000 + i * 100 + bi, e); }}
+                                                            onPointerEnter={(e) => { startHoverCardPreview(b.card.defId, 3000 + pidNumber * 100 + bi, e); }}
                                                             className={`opponent-building-sprite ${b.workerPlaced ? 'building-placed' : ''}`}
                                                             style={{ borderColor }}>
                                                             <CardBgImage defId={b.card.defId} />
@@ -2085,7 +2168,11 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                         // インラインレンダー関数（コンポーネントではない）でDOM安定性を保証
                                         // ※レンダー内でコンポーネントを定義するとstate変更でDOMが再作成されポインタイベントが失われる
                                         const renderWorkplaceCard = (wp: typeof roundAdded[0], ok: boolean) => {
-                                            const isAnimating = roundCardAnim && wp.addedAtRound === roundCardAnim.round;
+                                            const hideForRoundAnimation = !!(
+                                                roundCardAnim
+                                                && wp.addedAtRound === roundCardAnim.round
+                                                && roundCardAnim.targetRect
+                                            );
                                             return (
                                                 <div
                                                     key={wp.id}
@@ -2096,8 +2183,8 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                     onPointerUp={() => { if (!workerDragRender) endPreview(); }}
                                                     onPointerLeave={() => { if (!workerDragRender) endPreview(); endHoverPreview(); }}
                                                     onPointerEnter={(e) => { startHoverWorkplacePreview(wp, 2200 + wp.addedAtRound, e); }}
-                                                    className={`workplace-card ${ok && !isAnimating ? 'workplace-available' : 'game-card-disabled'} ${workerDragRender?.hoveredUid === wp.id ? 'worker-drag-hover' : ''}`}
-                                                    style={{ ...(isAnimating ? { opacity: 0 } : {}), position: 'relative', overflow: 'hidden' }}>
+                                                    className={`workplace-card ${ok && !hideForRoundAnimation ? 'workplace-available' : 'game-card-disabled'} ${workerDragRender?.hoveredUid === wp.id ? 'worker-drag-hover' : ''}`}
+                                                    style={{ ...(hideForRoundAnimation ? { opacity: 0 } : {}), position: 'relative', overflow: 'hidden' }}>
                                                     <WorkplaceBgImage wpId={wp.id} />
                                                     <div style={{ fontWeight: 700, fontSize: 'var(--fs-md)', color: ok ? 'var(--teal)' : 'var(--text-dim)', position: 'relative', zIndex: 1 }}>{wp.name}</div>
                                                     <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', marginTop: 1, lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{wp.effectText}</div>
@@ -2574,7 +2661,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                 </span>
                             )
                         }
-                        {isFullscreenSupported && (
+                        {(isFullscreenSupported || showFullscreenFallback) && (
                             <button
                                 type="button"
                                 onClick={toggleFullscreen}
