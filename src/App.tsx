@@ -39,6 +39,8 @@ type LobbyPlayerInfo = {
 
 const HOST_NAME_STORAGE_KEY = 'ne-host-player-name';
 const GUEST_NAME_STORAGE_KEY = 'ne-guest-player-name';
+const GUEST_SESSION_STORAGE_KEY = 'ne-guest-session-token';
+const GUEST_TAB_STORAGE_KEY = 'ne-guest-tab-token';
 const ROOM_ID_PREFIX = 'NE-';
 const ROOM_ID_LENGTH = 4;
 const ROOM_ID_ALPHABET = '0123456789';
@@ -54,6 +56,53 @@ function normalizePlayerName(name: string, fallback: string): string {
 
 function loadStoredPlayerName(storageKey: string): string {
     return localStorage.getItem(storageKey) ?? '';
+}
+
+function generateGuestSessionToken(): string {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
+    }
+    return `guest-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function loadOrCreateStoredValue(storageKey: string, createValue: () => string): string {
+    const existing = localStorage.getItem(storageKey);
+    if (existing) return existing;
+    const created = createValue();
+    localStorage.setItem(storageKey, created);
+    return created;
+}
+
+function loadOrCreateSessionStoredValue(storageKey: string, createValue: () => string): string {
+    const existing = sessionStorage.getItem(storageKey);
+    if (existing) return existing;
+    const created = createValue();
+    sessionStorage.setItem(storageKey, created);
+    return created;
+}
+
+function getGuestSessionStorageKey(tabToken: string): string {
+    return `${GUEST_SESSION_STORAGE_KEY}:${tabToken}`;
+}
+
+function loadOrCreateGuestSessionToken(tabToken: string): string {
+    return loadOrCreateStoredValue(getGuestSessionStorageKey(tabToken), generateGuestSessionToken);
+}
+
+function persistGuestSessionToken(tabToken: string, sessionToken: string): void {
+    localStorage.setItem(getGuestSessionStorageKey(tabToken), sessionToken);
+}
+
+function normalizeSessionToken(value: unknown): string {
+    if (typeof value !== 'string') return '';
+    return value.trim().replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
+}
+
+function getThemeBackgroundAsset(theme: ThemeName, kind: 'title' | 'game'): string {
+    const suffix = kind === 'title' ? 'bg_title.png' : 'bg_game.png';
+    if (theme === 'default') return '';
+    if (theme === 'steampunk') return suffix;
+    return `${theme}_${suffix}`;
 }
 
 function generateRoomToken(): string {
@@ -80,10 +129,10 @@ function sanitizeRoomId(value: string): string {
     return extractRoomToken(value);
 }
 
-function getAvailableGuestPid(connections: Map<string, DataConnection>, numPlayers: number): string | null {
+function getAvailableGuestPid(connections: Map<string, DataConnection>, numPlayers: number, reservedPids: Set<string> = new Set()): string | null {
     for (let i = 1; i < numPlayers; i++) {
         const pid = String(i);
-        if (!connections.has(pid)) return pid;
+        if (!connections.has(pid) && !reservedPids.has(pid)) return pid;
     }
     return null;
 }
@@ -566,12 +615,29 @@ function HostLobby({ onBack }: { onBack: () => void }) {
     const [peerSeed, setPeerSeed] = useState(0);
     const peerRef = useRef<Peer | null>(null);
     const connectionsRef = useRef<Map<string, DataConnection>>(new Map());
+    const activeTabTokensRef = useRef<Map<string, string>>(new Map());
+    const sessionRegistryRef = useRef<Map<string, LobbyPlayerInfo>>(new Map());
     const clientsRef = useRef<any[]>([]);
     const numPlayersRef = useRef(numPlayers);
+    const versionRef = useRef(version);
+    const gameStartedRef = useRef(gameStarted);
+    const hostStateRef = useRef(hostState);
 
     useEffect(() => {
         numPlayersRef.current = numPlayers;
     }, [numPlayers]);
+
+    useEffect(() => {
+        versionRef.current = version;
+    }, [version]);
+
+    useEffect(() => {
+        gameStartedRef.current = gameStarted;
+    }, [gameStarted]);
+
+    useEffect(() => {
+        hostStateRef.current = hostState;
+    }, [hostState]);
 
     useEffect(() => {
         localStorage.setItem(HOST_NAME_STORAGE_KEY, hostName);
@@ -596,69 +662,125 @@ function HostLobby({ onBack }: { onBack: () => void }) {
         });
 
         peer.on('connection', (conn) => {
-            conn.on('open', () => {
-                const pid = getAvailableGuestPid(connectionsRef.current, numPlayersRef.current);
+            let assignedPid: string | null = null;
+            let assignedSessionToken = '';
+
+            const assignGuest = (sessionToken: string, tabToken: string, guestName: string) => {
+                const normalizedName = normalizePlayerName(guestName, defaultPlayerName(assignedPid ?? '1'));
+                const normalizedToken = normalizeSessionToken(sessionToken) || generateGuestSessionToken();
+                const normalizedTabToken = normalizeSessionToken(tabToken) || generateGuestSessionToken();
+                const reservedPids = gameStartedRef.current
+                    ? new Set(Array.from(sessionRegistryRef.current.values()).map(info => info.pid))
+                    : new Set<string>();
+                let resolvedSessionToken = normalizedToken;
+                let pid = sessionRegistryRef.current.get(normalizedToken)?.pid ?? null;
+
+                if (pid && connectionsRef.current.has(pid) && connectionsRef.current.get(pid) !== conn) {
+                    const activeTabToken = activeTabTokensRef.current.get(pid);
+                    if (activeTabToken === normalizedTabToken) {
+                        const existingConn = connectionsRef.current.get(pid);
+                        if (existingConn && existingConn !== conn) {
+                            try {
+                                existingConn.close();
+                            } catch {
+                                // ignore connection cleanup failure and continue with reconnection
+                            }
+                        }
+                    } else {
+                        resolvedSessionToken = generateGuestSessionToken();
+                        pid = null;
+                    }
+                }
+
+                if (!pid) {
+                    pid = getAvailableGuestPid(connectionsRef.current, numPlayersRef.current, reservedPids);
+                }
+
                 if (!pid) {
                     conn.send({ type: 'rejected', reason: 'ロビーが満員です' });
                     conn.close();
+                    return null;
+                }
+
+                assignedPid = pid;
+                assignedSessionToken = resolvedSessionToken;
+                const info: LobbyPlayerInfo = { pid, name: normalizePlayerName(normalizedName, defaultPlayerName(pid)) };
+                sessionRegistryRef.current.set(resolvedSessionToken, info);
+                connectionsRef.current.set(pid, conn);
+                activeTabTokensRef.current.set(pid, normalizedTabToken);
+                setConnectedPlayers(prev => ({ ...prev, [pid]: info }));
+                conn.send({ type: 'assigned', playerID: pid, sessionToken: resolvedSessionToken, tabToken: normalizedTabToken });
+
+                if (gameStartedRef.current) {
+                    const reconnectClient = clientsRef.current[parseInt(pid, 10)];
+                    const reconnectState = reconnectClient?.getState?.() ?? null;
+                    const fallbackState = hostStateRef.current;
+                    const currentState = reconnectState ?? fallbackState;
+                    const currentVersion = currentState?.G.version ?? versionRef.current;
+                    const currentPlayerNames = currentState?.G.playerNames
+                        ?? buildPlayerNames(
+                            numPlayersRef.current,
+                            hostName,
+                            Object.fromEntries(
+                                Array.from(sessionRegistryRef.current.values()).map((info): [string, LobbyPlayerInfo] => [info.pid, info])
+                            )
+                        );
+                    conn.send({ type: 'gameStart', numPlayers: numPlayersRef.current, version: currentVersion, playerNames: currentPlayerNames });
+                    if (currentState) {
+                        conn.send({ type: 'state', G: currentState.G, ctx: currentState.ctx });
+                    }
+                }
+
+                return pid;
+            };
+
+            conn.on('open', () => {
+                setStatus('ゲスト接続待機中');
+            });
+
+            conn.on('data', (data: any) => {
+                if (data.type === 'hello') {
+                    const nextName = normalizePlayerName(String(data.name ?? ''), defaultPlayerName(assignedPid ?? '1'));
+                    if (!assignedPid) {
+                        assignGuest(String(data.sessionToken ?? ''), String(data.tabToken ?? ''), nextName);
+                        return;
+                    }
+                    const info: LobbyPlayerInfo = { pid: assignedPid, name: normalizePlayerName(nextName, defaultPlayerName(assignedPid)) };
+                    if (assignedSessionToken) {
+                        sessionRegistryRef.current.set(assignedSessionToken, info);
+                    }
+                    setConnectedPlayers(prev => ({ ...prev, [assignedPid!]: info }));
                     return;
                 }
-                connectionsRef.current.set(pid, conn);
-                setConnectedPlayers(prev => ({
-                    ...prev,
-                    [pid]: { pid, name: defaultPlayerName(pid) },
-                }));
-                conn.send({ type: 'assigned', playerID: pid });
 
-                conn.on('data', (data: any) => {
-                    if (data.type === 'hello') {
-                        setConnectedPlayers(prev => ({
-                            ...prev,
-                            [pid]: {
-                                pid,
-                                name: normalizePlayerName(String(data.name ?? ''), defaultPlayerName(pid)),
-                            },
-                        }));
+                if (!assignedPid) return;
+                if (data.type === 'move') {
+                    if (data.playerID !== undefined && String(data.playerID) !== assignedPid) {
                         return;
                     }
-                    if (data.type === 'move') {
-                        if (data.playerID !== undefined && String(data.playerID) !== pid) {
-                            return;
-                        }
-                        const client = clientsRef.current[parseInt(pid, 10)];
-                        if (client?.moves[data.name]) {
-                            client.moves[data.name](...(data.args || []));
-                        }
-                        return;
+                    const client = clientsRef.current[parseInt(assignedPid, 10)];
+                    if (client?.moves[data.name]) {
+                        client.moves[data.name](...(data.args || []));
                     }
-                    /*
-                    if (data.type === 'move') {
-                        if (data.playerID !== undefined && String(data.playerID) !== pid) {
-                            return;
-                        }
-                        const client = clientsRef.current[parseInt(pid, 10)];
-                        if (client?.moves[data.name]) {
-                        // P2P同時操作対応: payday/cleanupでは送信元のplayerIDのclientからMoveを発行
-                        if (client?.moves[data.name]) {
-                            client.moves[data.name](...(data.args || []));
-                        }
-                    }
-                });
+                }
+            });
 
-                conn.on('close', () => {
-                    connectionsRef.current.delete(pid);
+            conn.on('close', () => {
+                if (!assignedPid) return;
+                if (connectionsRef.current.get(assignedPid) === conn) {
+                    connectionsRef.current.delete(assignedPid);
+                    activeTabTokensRef.current.delete(assignedPid);
                     setConnectedPlayers(prev => {
                         const next = { ...prev };
-                        delete next[pid];
+                        delete next[assignedPid!];
                         return next;
                     });
-                    */
-                });
+                }
             });
         });
 
         return () => { peer.destroy(); };
-    }, [peerSeed]);
+    }, [hostName, peerSeed]);
 
     // ゲーム開始
     const startGame = useCallback(() => {
@@ -890,6 +1012,8 @@ function JoinLobby({ onBack }: { onBack: () => void }) {
     const [hostID, setHostID] = useState('');
     const [status, setStatus] = useState('接続準備中...');
     const [playerName, setPlayerName] = useState(() => loadStoredPlayerName(GUEST_NAME_STORAGE_KEY));
+    const [tabToken] = useState(() => loadOrCreateSessionStoredValue(GUEST_TAB_STORAGE_KEY, generateGuestSessionToken));
+    const [sessionToken, setSessionToken] = useState(() => loadOrCreateGuestSessionToken(tabToken));
     const [playerID, setPlayerID] = useState<string | null>(null);
     const [gameStarted, setGameStarted] = useState(false);
     const [gameState, setGameState] = useState<{ G: GameState; ctx: Ctx } | null>(null);
@@ -921,7 +1045,7 @@ function JoinLobby({ onBack }: { onBack: () => void }) {
         connRef.current = conn;
 
         conn.on('open', () => {
-            conn.send({ type: 'hello', name: playerName.trim() });
+            conn.send({ type: 'hello', name: playerName.trim(), sessionToken, tabToken });
             setStatus('接続完了、ゲーム開始を待機中...');
         });
 
@@ -934,6 +1058,11 @@ function JoinLobby({ onBack }: { onBack: () => void }) {
                     break;
                 case 'assigned':
                     setPlayerID(data.playerID);
+                    if (data.sessionToken) {
+                        const nextSessionToken = String(data.sessionToken);
+                        persistGuestSessionToken(tabToken, nextSessionToken);
+                        setSessionToken(nextSessionToken);
+                    }
                     setStatus(`P${parseInt(data.playerID) + 1}として接続完了。ゲーム開始を待機中...`);
                     break;
                 case 'gameStart':
@@ -956,7 +1085,7 @@ function JoinLobby({ onBack }: { onBack: () => void }) {
             setStatus(`接続エラー: ${err.type}`);
             setConnected(false);
         });
-    }, [hostID, playerName]);
+    }, [hostID, playerName, sessionToken, tabToken]);
 
     // ゲスト側のmovesプロキシ（ホストへ転送）
     const remoteMoves = useMemo(() => {
@@ -995,6 +1124,7 @@ function JoinLobby({ onBack }: { onBack: () => void }) {
     // 参加画面
     return (
         <div className="game-bg" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', padding: 16 }}>
+            <FullscreenToggleButton className="menu-fullscreen-toggle" />
             <div className="animate-slide-up" style={{ maxWidth: 420, width: '100%' }}>
                 <div className="glass-card" style={{ padding: 24, textAlign: 'center' }}>
                     <h1 style={{ fontSize: 'var(--fs-4xl)', fontWeight: 900, color: 'var(--gold)', marginBottom: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}><IconLink size={'1em'} /> ゲームに参加</h1>
@@ -1019,10 +1149,15 @@ function JoinLobby({ onBack }: { onBack: () => void }) {
                     />
 
                     <input
-                        type="text"
+                        type="tel"
                         value={hostID}
                         onChange={e => setHostID(sanitizeRoomId(e.target.value))}
                         placeholder="Room ID"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        maxLength={ROOM_ID_LENGTH}
+                        enterKeyHint="done"
+                        autoComplete="off"
                         autoCapitalize="characters"
                         style={{
                             width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)',
@@ -1084,10 +1219,22 @@ export default function App() {
         return 'default';
     });
     useEffect(() => {
+        const titleBackgroundAsset = getThemeBackgroundAsset(theme, 'title');
+        const gameBackgroundAsset = getThemeBackgroundAsset(theme, 'game');
         if (theme === 'default') {
             delete document.documentElement.dataset.theme;
         } else {
             document.documentElement.dataset.theme = theme;
+        }
+        if (titleBackgroundAsset) {
+            document.documentElement.style.setProperty('--theme-title-bg-image', `url('${import.meta.env.BASE_URL}${titleBackgroundAsset}')`);
+        } else {
+            document.documentElement.style.removeProperty('--theme-title-bg-image');
+        }
+        if (gameBackgroundAsset) {
+            document.documentElement.style.setProperty('--theme-game-bg-image', `url('${import.meta.env.BASE_URL}${gameBackgroundAsset}')`);
+        } else {
+            document.documentElement.style.removeProperty('--theme-game-bg-image');
         }
         localStorage.setItem('ne-theme', theme);
     }, [theme]);

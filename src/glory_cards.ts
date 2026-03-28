@@ -338,7 +338,7 @@ export const GLORY_CARD_DEFS: CardDef[] = [
         tags: [],
         unsellable: true,
         consumeOnUse: false,
-        effectText: '終了時、これが唯一の「売却不可」カードなら+30点',
+        effectText: '終了時、これが唯一の[売却不可マーク]カードなら+30点',
         image: '/cards/glory/temple_of_purification.png',
     },
 

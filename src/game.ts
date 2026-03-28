@@ -273,6 +273,7 @@ export function canDualConstruct(p: PlayerState): boolean {
 /** 建物由来の職場に配置可能かチェック (Board.tsx / bots.ts から共有) */
 export function canPlaceOnBuilding(G: GameState, p: PlayerState, defId: string): boolean {
     switch (defId) {
+        case 'orchard': return p.hand.length < 4;
         case 'factory': return p.hand.length >= 2;
         case 'auto_factory': return p.hand.length >= 3;
         case 'restaurant': return p.hand.length >= 1 && G.household >= 15;
@@ -1288,19 +1289,13 @@ export const NationalEconomy: Game<GameState> = {
             const def = getCardDef(card.defId);
             const bs = G.buildState;
 
-            if (bs.action === 'pioneer' && !def.tags.includes('farm')) return INVALID_MOVE;
-
-            const actualCost = getConstructionCost(p, card.defId, bs.costReduction);
             if (bs.action === 'pioneer') {
-                p.hand.splice(cardIndex, 1);
-                p.buildings.push({ card, workerPlaced: false });
-                applyBuildPassiveEffect(G, pid, card.defId);
-                pushLog(G, `P${parseInt(pid) + 1}が[開拓民]で[${def.name}]を無料建設`);
-                G.buildState = null;
-                G.phase = 'work';
-                advanceTurnOrPhase(G, ctx, events);
+                if (!def.tags.includes('farm')) return INVALID_MOVE;
+                bs.selectedCardIndex = bs.selectedCardIndex === cardIndex ? null : cardIndex;
                 return;
             }
+
+            const actualCost = getConstructionCost(p, card.defId, bs.costReduction);
 
             if (bs.action === 'gl_modernism_construction') {
                 let totalValue = 0;
@@ -1357,6 +1352,34 @@ export const NationalEconomy: Game<GameState> = {
                 callbackData: { buildCardUid: card.uid, drawAfterBuild: bs.drawAfterBuild },
                 excludeCardUid: card.uid,
             };
+        },
+
+        confirmBuildSelection: ({ G, ctx, events, playerID }) => {
+            if (G.phase !== 'build' || !G.buildState) return INVALID_MOVE;
+            const pid = getAuthorizedSequentialPlayerId(ctx, playerID);
+            if (!pid) return INVALID_MOVE;
+            const p = G.players[pid];
+            const bs = G.buildState;
+
+            if (bs.action !== 'pioneer') return INVALID_MOVE;
+            if (bs.selectedCardIndex === null || bs.selectedCardIndex === undefined) return INVALID_MOVE;
+
+            const cardIndex = bs.selectedCardIndex;
+            if (cardIndex < 0 || cardIndex >= p.hand.length) return INVALID_MOVE;
+
+            const card = p.hand[cardIndex];
+            if (isConsumable(card)) return INVALID_MOVE;
+
+            const def = getCardDef(card.defId);
+            if (!def.tags.includes('farm')) return INVALID_MOVE;
+
+            p.hand.splice(cardIndex, 1);
+            p.buildings.push({ card, workerPlaced: false });
+            applyBuildPassiveEffect(G, pid, card.defId);
+            pushLog(G, `P${parseInt(pid) + 1}が[開拓民]で[${def.name}]を無料建設`);
+            G.buildState = null;
+            G.phase = 'work';
+            advanceTurnOrPhase(G, ctx, events);
         },
 
         // ============ アクションキャンセル ============
@@ -1870,7 +1893,7 @@ function applyPublicWPEffect(G: GameState, ctx: Ctx, events: any, wp: Workplace,
             break;
         case 'build':
             G.phase = 'build';
-            G.buildState = { costReduction: 0, drawAfterBuild: 0, action: 'build' };
+            G.buildState = { costReduction: 0, drawAfterBuild: 0, action: 'build', selectedCardIndex: null };
             return;
     }
 
@@ -1936,15 +1959,15 @@ function applyBuildingEffect(G: GameState, ctx: Ctx, events: any, pid: string, d
 
         case 'construction_co':
             G.phase = 'build';
-            G.buildState = { costReduction: 1, drawAfterBuild: 0, action: 'construction_co' };
+            G.buildState = { costReduction: 1, drawAfterBuild: 0, action: 'construction_co', selectedCardIndex: null };
             return;
         case 'pioneer':
             G.phase = 'build';
-            G.buildState = { costReduction: 99, drawAfterBuild: 0, action: 'pioneer' };
+            G.buildState = { costReduction: 99, drawAfterBuild: 0, action: 'pioneer', selectedCardIndex: null };
             return;
         case 'general_contractor':
             G.phase = 'build';
-            G.buildState = { costReduction: 0, drawAfterBuild: 2, action: 'general_contractor' };
+            G.buildState = { costReduction: 0, drawAfterBuild: 2, action: 'general_contractor', selectedCardIndex: null };
             return;
 
         // Glory Complex Effects
@@ -1958,19 +1981,19 @@ function applyBuildingEffect(G: GameState, ctx: Ctx, events: any, pid: string, d
             // Hack: Use specific action name to handle consumable draw in generic build callback if possible, 
             // or we might need to extend BuildState.
             // For now let's rely on 'action' string to handle post-build effect.
-            G.buildState = { costReduction: 0, drawAfterBuild: 0, action: 'gl_colonist' };
+            G.buildState = { costReduction: 0, drawAfterBuild: 0, action: 'gl_colonist', selectedCardIndex: null };
             return;
         case 'gl_skyscraper':
             G.phase = 'build';
-            G.buildState = { costReduction: 0, drawAfterBuild: 0, action: 'gl_skyscraper' };
+            G.buildState = { costReduction: 0, drawAfterBuild: 0, action: 'gl_skyscraper', selectedCardIndex: null };
             return;
         case 'gl_modernism_construction':
             G.phase = 'build';
-            G.buildState = { costReduction: 0, drawAfterBuild: 0, action: 'gl_modernism_construction' };
+            G.buildState = { costReduction: 0, drawAfterBuild: 0, action: 'gl_modernism_construction', selectedCardIndex: null };
             return;
         case 'gl_teleporter':
             G.phase = 'build';
-            G.buildState = { costReduction: 99, drawAfterBuild: 0, action: 'gl_teleporter' };
+            G.buildState = { costReduction: 99, drawAfterBuild: 0, action: 'gl_teleporter', selectedCardIndex: null };
             return;
 
         case 'gl_steam_factory':

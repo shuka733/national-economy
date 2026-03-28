@@ -150,7 +150,7 @@ export const BASE_CARD_DEFS: CardDef[] = [
         tags: [],
         unsellable: false,
         consumeOnUse: false,
-        effectText: '手札にある[※農園]マーク付き建物を1つ無料で建設する',
+        effectText: '手札にある[農園マーク]付き建物を1つ無料で建設する',
         image: '/cards/progress/prog_pioneer.png',
     },
     {
@@ -274,7 +274,7 @@ export const BASE_CARD_DEFS: CardDef[] = [
         tags: [],
         unsellable: true,
         consumeOnUse: false,
-        effectText: '終了時、所有する[売却不可]マークにつき+6VP',
+        effectText: '終了時、所有する[売却不可マーク]につき+6VP',
         image: '/cards/progress/prog_headquarters.png',
     },
     {
@@ -298,7 +298,7 @@ export const BASE_CARD_DEFS: CardDef[] = [
         tags: [],
         unsellable: true,
         consumeOnUse: false,
-        effectText: '終了時、所有する[※工場]マークにつき+8VP',
+        effectText: '終了時、所有する[工場マーク]につき+8VP',
         image: '/cards/progress/prog_railroad.png',
     },
 ];

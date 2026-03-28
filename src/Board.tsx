@@ -43,6 +43,30 @@ const cEffect = (defId: string) => {
     if (defId === CONSUMABLE_DEF_ID) return '';
     return getCardDef(defId).effectText;
 };
+type CardTagKind = 'farm' | 'factory' | 'lock';
+const TAG_META: Record<CardTagKind, {
+    label: string;
+    className: string;
+    Icon: typeof TagFarm;
+}> = {
+    farm: { label: '農園', className: 'tag-farm', Icon: TagFarm },
+    factory: { label: '工場', className: 'tag-factory', Icon: TagFactory },
+    lock: { label: '売却不可', className: 'tag-lock', Icon: TagLock },
+};
+function renderTagBadge(kind: CardTagKind, options: { compact?: boolean; size?: number | string } = {}) {
+    const { compact = false, size = "calc(var(--fs) * 1.11)" } = options;
+    const meta = TAG_META[kind];
+    const Icon = meta.Icon;
+    return (
+        <span
+            className={`tag-badge ${meta.className}${compact ? ' tag-badge-compact' : ''} tag-badge-icon-only`}
+            title={meta.label}
+            aria-label={meta.label}
+        >
+            <Icon size={size} />
+        </span>
+    );
+}
 function getPlayerDisplayName(playerNames: GameState['playerNames'] | undefined, playerId: string | number): string {
     const pid = String(playerId);
     const fallback = `P${Number(pid) + 1}`;
@@ -89,9 +113,9 @@ function TagBadges({ defId, compact = false }: { defId: string; compact?: boolea
     const d = getCardDef(defId);
     return (
         <div style={{ display: 'flex', gap: compact ? 2 : 4, flexWrap: 'wrap', marginTop: compact ? 2 : 4, position: 'relative', zIndex: 1 }}>
-            {d.tags.includes('farm') && <span className="tag-badge tag-farm"><TagFarm size={"calc(var(--fs) * 1.11)"} /> 農園</span>}
-            {d.tags.includes('factory') && <span className="tag-badge tag-factory"><TagFactory size={"calc(var(--fs) * 1.11)"} /> 工場</span>}
-            {d.unsellable && <span className="tag-badge tag-lock"><TagLock size={"calc(var(--fs) * 1.11)"} /> 売却不可</span>}
+            {d.tags.includes('farm') && renderTagBadge('farm', { compact })}
+            {d.tags.includes('factory') && renderTagBadge('factory', { compact })}
+            {d.unsellable && renderTagBadge('lock', { compact })}
         </div>
     );
 }
@@ -1482,7 +1506,11 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     const wagePressure = G.round >= 7 && G.household < totalWorkers * wage;
 
     // 建設フェーズ判定
-    const isBuildPhase = G.phase === 'build' && G.buildState;
+    const buildState = G.phase === 'build' && G.buildState ? G.buildState : null;
+    const isBuildPhase = !!buildState;
+    const isPioneerBuild = !!(buildState && buildState.action === 'pioneer');
+    const buildSelectedCardIndex = buildState?.selectedCardIndex ?? null;
+    const buildCanConfirm = isPioneerBuild && buildSelectedCardIndex !== null;
     const canInteract = (!isOnline || isMyTurn);
 
     // 売却建物（公共職場のうちfromBuilding=true）
@@ -3364,3 +3392,4 @@ function canPlacePublic(G: GameState, pid: string, wp: GameState['publicWorkplac
     }
     return true;
 }
+

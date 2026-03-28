@@ -67,6 +67,7 @@ export interface BuildSelectState {
     costReduction: number;
     drawAfterBuild: number;
     action: string; // 'build','construction_co','pioneer','general_contractor','dual_construction'
+    selectedCardIndex?: number | null;
 }
 
 /** 給料日 個別プレイヤー状態 */

@@ -1,113 +1,170 @@
-# Opponent Display Order Plan
+# 実装計画
 
-## 解釈
+## 1. 指示の解釈
 
-相手プレイヤー欄の表示順を、P2P だけでなく全モードで統一して変更する。
+今回の目的は、PC とスマホの両方で「相手が建てた建物が見える状態」に相手エリアを再設計することです。  
+単なる倍率調整ではなく、`LOG` の置き場、相手手札の置き場、相手建物の置き場をまとめて組み替える方針で進めます。
 
-- 一番上: 自分の次に手番が来るプレイヤー
-- その下: さらに次に手番が来るプレイヤー
-- 一番下: その次が自分に戻る直前のプレイヤー
+解釈した要件は以下です。
 
-つまり、相手欄を上から読むとそのまま手番順に進み、一番下の相手の次が自分になる見え方にする。
+- `LOG` は今の左側インライン表示をやめ、公共エリア上部右端の灰色ボタンから開く方式へ移す
+- `HOUSEHOLD` は少し横幅を縮め、その右に `📒LOG` 相当のボタンを置く
+- 相手手札は相手カードの中央付近ではなく、名前直下に作る「仮想手札エリア」に表示する
+- 相手手札エリアは、相手カード横幅の左 30% を使う
+- 相手手札は今の約 70% に縮小し、枚数が増えたらその中で重ねて収める
+- 空いた右側領域に相手建物を表示する
+- 相手建物は、自分の手札や自分の建物と同系のサイズに寄せる
+- 建物は左から積み、見切れたら横スクロールで見る
 
-ここでいう「自分」は、通信対戦の固定プレイヤー ID ではなく、その時点で盤面下部の自分エリアとして表示されているプレイヤーを指す。
+## 2. 現状のコード解析
 
-- P2P: 自分の `playerID`
-- ローカル対戦: 現在操作中として表示されているプレイヤー
-- CPU 戦: 盤面下部の人間プレイヤー表示
+### 2-1. `LOG` が相手エリアの高さを食っている
 
-## 現状調査
+相手エリア全体は [Board.tsx](/C:/Users/k2000/.gemini/antigravity/scratch/national-economy/src/Board.tsx) の `area-opponents` で描画されており、構造は
 
-現在の相手欄は `src/Board.tsx` で、自分以外を単純なプレイヤー番号順で並べている。
+- `turn-bar`
+- `opponents-container`
+- `inline-log`
 
-```ts
-const opponents = Array.from({ length: ctx.numPlayers }, (_, i) => i)
-  .filter(i => String(i) !== myPid);
+の 3 段です。  
+実装箇所は [Board.tsx](/C:/Users/k2000/.gemini/antigravity/scratch/national-economy/src/Board.tsx#L1843) 以降です。
+
+CSS でも [index.css](/C:/Users/k2000/.gemini/antigravity/scratch/national-economy/src/index.css#L1322) で
+
+```css
+grid-template-rows: auto 1fr auto;
 ```
 
-そのため、開始プレイヤーがランダムでも、またローカル対戦で盤面下部のプレイヤーが切り替わっても、相手欄の上下順は手番順と一致しない。
+になっており、ログが常に 1 行ぶんの高さを確保しています。  
+スマホでは [index.css](/C:/Users/k2000/.gemini/antigravity/scratch/national-economy/src/index.css#L2853) で `inline-log` の最大高さをさらに固定しているため、相手カードの高さをかなり圧迫しています。
 
-一方で、`Board.tsx` 内の `myPid` はすでにモードごとの「今この画面で自分として扱うプレイヤー」を表している。
+### 2-2. 相手手札は「中央寄せの独立行」になっている
 
-- P2P: `playerID`
-- ホットシート/ローカル対戦: `ctx.currentPlayer` ベース
-- CPU 戦: 人間側プレイヤーを維持する補正あり
+相手カードの中身は現在
 
-したがって、今回の修正はゲームロジックよりも、主に `Board.tsx` の相手欄の並び替えロジックを直すことで対応できる可能性が高い。
+- ヘッダー
+- `opponent-hand-fan`
+- `opponent-buildings-scroll`
 
-## 修正方針
+の縦積みです。  
+実装箇所は [Board.tsx](/C:/Users/k2000/.gemini/antigravity/scratch/national-economy/src/Board.tsx#L1884) から [Board.tsx](/C:/Users/k2000/.gemini/antigravity/scratch/national-economy/src/Board.tsx#L1973) です。
 
-### 1. 全モード共通の相手表示順を導入する
+そのため、手札がカード中央付近に 1 行として置かれ、建物エリアはその下に押し込まれています。  
+CSS でも [index.css](/C:/Users/k2000/.gemini/antigravity/scratch/national-economy/src/index.css#L1418) の `opponent-hand-fan` は固定高さの横並び行になっており、相手カード内に「手札専用行」が常に存在する作りです。
 
-`Board.tsx` で、相手プレイヤー一覧を `myPid` 基準の循環順で生成する。
+### 2-3. 相手建物サイズは公共カード基準で、自分の場のカードサイズとは別系統
 
-手順:
+相手建物のサイズは [index.css](/C:/Users/k2000/.gemini/antigravity/scratch/national-economy/src/index.css#L1461) で
 
-1. `myPid` を数値化する
-2. `+1` したプレイヤーから `numPlayers - 1` 人ぶん順に拾う
-3. `numPlayers` を超えたら先頭に戻す
+- `width: var(--pub-card-w);`
+- `height: var(--pub-card-h);`
 
-例:
+になっています。
 
-- 4人戦で `myPid = P1`: `P2 -> P3 -> P4`
-- 4人戦で `myPid = P3`: `P4 -> P1 -> P2`
-- 3人戦で `myPid = P2`: `P3 -> P1`
+一方、自分の手札と自分の建物は別系統です。
 
-### 2. 並び替え基準を `myPid` に統一する
+- 自分の手札は `hand-card` 系
+- 自分の建物は `building-card-in-field`
+- スマホでは [Board.tsx](/C:/Users/k2000/.gemini/antigravity/scratch/national-economy/src/Board.tsx#L1616) で `--mobile-self-card-height` を流し込み
+- [index.css](/C:/Users/k2000/.gemini/antigravity/scratch/national-economy/src/index.css#L3095) で自分の建物高さを合わせています
 
-P2P 専用分岐は作らず、盤面表示の基準プレイヤーとしてすでに使っている `myPid` をそのまま利用する。
+つまり今は、相手建物だけ公共カード基準で描いているため、サイズ感も配置思想も自分の場と揃っていません。
 
-これにより、
+### 2-4. `LOG` ボタン用の既存資産はある
 
-- P2P では自分の次手番の相手が上に来る
-- ローカル対戦では今操作中プレイヤーから見た次手番順になる
-- CPU 戦でも下部の人間プレイヤー基準で自然な順になる
+`showLog` state と `LogModal` はすでに存在しています。  
+ログのモーダル開閉は [Board.tsx](/C:/Users/k2000/.gemini/antigravity/scratch/national-economy/src/Board.tsx#L523) と [Board.tsx](/C:/Users/k2000/.gemini/antigravity/scratch/national-economy/src/Board.tsx#L1835) にあります。
 
-という統一した見え方にできる。
+つまり、今回必要なのは新しいログ機能の追加ではなく、
 
-### 3. 相手欄描画を `pid` ベースで安全に扱う
+- 左側の `inline-log` を外す
+- 右上に `showLog` を開くボタンを置く
 
-現在の相手欄描画は `map(i => ...)` の形なので、並び替え後も誤動作しないよう `pid` を中心に扱う形へ整理する。
+という UI 配置変更です。
 
-特に次を確認する。
+## 3. 修正方針
 
-- プレイヤー名の表示
-- 所持金、労働者上限、負債の表示
-- `清算中...` / `選択中...` のステータス
-- `data-player-id` 属性
-- 相手ワーカー配置アニメーションの起点探索
+### 方針A: `LOG` は左カラムから退避し、公共エリア上部右端ボタンに集約する
 
-### 4. スタートプレイヤーの印は正しい相手に残す
+`inline-log` は相手エリアから外します。  
+その代わり、公共エリア上部に `HOUSEHOLD` と横並びの `LOG` ボタンを作り、クリックで既存 `LogModal` を開くようにします。
 
-現在の `★` 表示は数値インデックス前提の比較が残っているため、並び替え後は `Number(pid) === G.startPlayer` ベースで比較する。
+このとき、
 
-これにより、相手欄の順番が変わっても、スタートプレイヤー表示は正しい相手欄に出る。
+- `HOUSEHOLD` は横幅を少し縮める
+- 右に固定幅の灰色ボタンを置く
+- ボタン文言は `📒LOG` 相当
+- 実装上は既存 `IconLog` + `LOG` テキストでも可
 
-## 対象ファイル
+とします。
 
-- `src/Board.tsx`
+### 方針B: 相手カード内部を「左: 手札エリア / 右: 建物エリア」の 2 カラムへ組み替える
 
-## 確認観点
+相手カードは、ヘッダー直下に新しい本文ラッパーを作り、
 
-### P2P
+- 左 30%: 仮想手札エリア
+- 右 70%: 建物表示エリア
 
-- 2人戦で違和感がないこと
-- 3人戦で自分の次手番の相手が一番上に来ること
-- 4人戦で末尾の相手の次が自分になる見え方になっていること
+の 2 カラムに再編します。
 
-### ローカル対戦
+これにより、手札は「名前の下部」に寄り、建物は右側の空いた領域にまとまって見えるようになります。
 
-- ターン交代ごとに、盤面下部のプレイヤー基準で相手欄順が入れ替わること
-- 現在手番プレイヤーの次に動く相手が一番上に来ること
+### 方針C: 相手手札は専用エリア内で中央揃え・縮小表示する
 
-### CPU 戦
+相手手札は新しい `opponent-hand-area` の中に置き、その中で中央揃えにします。  
+手札サイズは現状の約 70% を目標に縮めます。
 
-- 人間プレイヤー基準で相手欄順が自然な循環順になること
-- CPU ターン中でも相手欄の並びが不自然に崩れないこと
+現在の `--opponent-hand-card-w` と `--opponent-hand-fan-h` をそのまま使うのではなく、今回の手札エリア幅に収めやすいよう再計算します。  
+枚数が増えたときは `getCardOverlapMargin` の相手手札用計算を利用しつつ、手札エリア幅に合わせてより強く重なるよう調整します。
 
-### 既存機能への影響
+### 方針D: 相手建物は「自分の場のカードサイズ」に寄せる
 
-- アクティブプレイヤーの強調表示が正しい欄に出ること
-- `清算中...` / `選択中...` が正しい相手名の横に出ること
-- スタートプレイヤーの `★` が正しい相手欄に出ること
-- 相手ワーカー配置アニメーションの起点がずれないこと
+相手建物は一旦 `--pub-card-*` 基準をやめ、自分の場で使っているカードサイズ基準に寄せます。
+
+具体的には、
+
+- PC では自分の手札/自分の建物に近い高さを使う共通変数を新設する
+- スマホでは既存の `--mobile-self-card-height` を再利用する
+
+方向が自然です。
+
+これにより、相手建物だけ妙に小さい状態を避けられます。
+
+### 方針E: 相手建物は右領域で左詰め・横スクロールにする
+
+相手建物は、今のように「手札の下の残り高さに押し込む」のではなく、右側専用領域に左詰めで並べます。  
+見切れたら横スクロールで見える構造にします。
+
+これは既存の `opponent-buildings-scroll` を活かせるので、DOM 全体を大きく増やさずに実現できます。
+
+## 4. 実装ステップ
+
+1. [Board.tsx](/C:/Users/k2000/.gemini/antigravity/scratch/national-economy/src/Board.tsx) の `area-opponents` から `inline-log` を外す
+2. [Board.tsx](/C:/Users/k2000/.gemini/antigravity/scratch/national-economy/src/Board.tsx) の公共エリア上部に `HOUSEHOLD + LOGボタン` の新しい横並びラッパーを追加する
+3. [index.css](/C:/Users/k2000/.gemini/antigravity/scratch/national-economy/src/index.css) で `household-box` を単独 full-width から可変幅へ変更し、右側ボタン用スペースを確保する
+4. [Board.tsx](/C:/Users/k2000/.gemini/antigravity/scratch/national-economy/src/Board.tsx) の相手カード内部に `opponent-card-body`、`opponent-hand-area`、`opponent-buildings-area` を導入する
+5. [index.css](/C:/Users/k2000/.gemini/antigravity/scratch/national-economy/src/index.css) で相手カード本文を `30% / 70%` の 2 カラムに再定義する
+6. 相手手札を新しい `opponent-hand-area` 内で中央揃え表示に変え、サイズを現在の約 70% へ縮める
+7. 相手建物サイズを `--pub-card-*` から切り離し、自分の場と同系のサイズ変数へ寄せる
+8. 相手建物スクロール領域を右カラム専用の横スクロールに整える
+9. PC とスマホそれぞれで、相手 1〜3 人表示時の見え方を確認する
+
+## 5. 対象ファイル
+
+- [Board.tsx](/C:/Users/k2000/.gemini/antigravity/scratch/national-economy/src/Board.tsx)
+- [index.css](/C:/Users/k2000/.gemini/antigravity/scratch/national-economy/src/index.css)
+
+必要に応じて、`LOG` ボタンの見た目を既存部品化したくなった場合のみ、アイコン系ファイルを触る可能性がありますが、第一段階では不要です。
+
+## 6. 確認観点
+
+- PC で `LOG` が左カラムから消え、公共エリア右上のボタンから開けること
+- スマホでも同様に `LOG` が右上導線へ移ること
+- `HOUSEHOLD` が少し狭くなり、右端に `LOG` ボタンが自然に収まること
+- 相手手札が「名前の下」へ移動していること
+- 相手手札エリア幅が相手カードの左 30% 前後になっていること
+- 相手手札が現在より明確に小さくなり、枚数が増えてもエリア内に収まること
+- 相手建物が手札の右側に見えること
+- 相手建物が左から並び、見切れたら横スクロールで見られること
+- PC / スマホともに、相手建物のサイズ感が自分の手札・自分の建物と大きく乖離しないこと
+- P2P、ローカル対戦、CPU戦のいずれでも相手欄の表示が崩れないこと
