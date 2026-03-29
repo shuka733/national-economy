@@ -16,7 +16,13 @@ import { CPUSettings } from './CPUSettings';
 import { useAnimations } from './components/AnimationLayer';
 import { BgImageOverlay } from './components/BgImageOverlay';
 import { getThemedCardImagePath, getThemedWorkplaceImagePath } from './themeUtils';
-import { getFullscreenFallbackMessage, isLikelyIOSBrowser } from './browserPlatform';
+import {
+    canUseHoverInteractions,
+    getFullscreenFallbackMessage,
+    isLikelyIOSBrowser,
+    matchesTouchOptimizedUi,
+    watchInteractionModeChanges,
+} from './browserPlatform';
 import './cpu-anim.css';
 // HandScene3D は現在未使用（ポンチ絵ベースのHTMLレイアウトに置換済み）
 import {
@@ -86,12 +92,6 @@ const opponentConsumableCardStyle: React.CSSProperties = {
 const opponentRevealedCardStyle: React.CSSProperties = {
     background: 'linear-gradient(135deg, var(--teal-15), rgba(30,30,40,0.9))',
 };
-const MOBILE_TOUCH_UI_QUERY = '(max-width: 900px) and (pointer: coarse)';
-function matchesMobileTouchUi(): boolean {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
-    return window.matchMedia(MOBILE_TOUCH_UI_QUERY).matches;
-}
-
 type FullscreenCapableDocument = Document & {
     webkitFullscreenElement?: Element | null;
     webkitFullscreenEnabled?: boolean;
@@ -235,7 +235,8 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     // フィーチャーフラグ (デバッグパネルでリアルタイム切替可能)
     const [featureFlags, setFeatureFlags] = useState<FeatureFlags>({ ...FEATURE_DEFAULTS });
     const [showDebugPanel, setShowDebugPanel] = useState(false);
-    const [isMobileTouchUi, setIsMobileTouchUi] = useState(matchesMobileTouchUi);
+    const [isMobileTouchUi, setIsMobileTouchUi] = useState(matchesTouchOptimizedUi);
+    const [hoverInteractionsEnabled, setHoverInteractionsEnabled] = useState(canUseHoverInteractions);
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [isFullscreenSupported, setIsFullscreenSupported] = useState(false);
     const [showFullscreenFallback, setShowFullscreenFallback] = useState(false);
@@ -280,16 +281,12 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
         isMobileTouchUiRef.current = isMobileTouchUi;
     }, [isMobileTouchUi]);
     useEffect(() => {
-        if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
-        const media = window.matchMedia(MOBILE_TOUCH_UI_QUERY);
-        const update = () => setIsMobileTouchUi(media.matches);
+        const update = () => {
+            setIsMobileTouchUi(matchesTouchOptimizedUi());
+            setHoverInteractionsEnabled(canUseHoverInteractions());
+        };
         update();
-        if (typeof media.addEventListener === 'function') {
-            media.addEventListener('change', update);
-            return () => media.removeEventListener('change', update);
-        }
-        media.addListener(update);
-        return () => media.removeListener(update);
+        return watchInteractionModeChanges(update);
     }, []);
     const syncFullscreenState = useCallback(() => {
         if (typeof document === 'undefined') return;
@@ -384,7 +381,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     };
     // ホバーによるカードプレビュー開始（eから元カードの位置を記録）
     const startHoverCardPreview = (defId: string, cardIdx: number, e: React.PointerEvent) => {
-        if (!featureFlags.HOVER_PREVIEW) return;
+        if (!featureFlags.HOVER_PREVIEW || !hoverInteractionsEnabled) return;
         clearPreviewTimer();
         // 既存のホバープレビューがあれば閉じてから新しいプレビューを開始
         if (isHoverPreviewRef.current) {
@@ -401,7 +398,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
         }, TIMING.HOVER_PREVIEW_MS);
     };
     const startHoverCardPreviewWithMode = (defId: string, cardIdx: number, e: React.PointerEvent, hoverMode: HoverPreviewMode) => {
-        if (!featureFlags.HOVER_PREVIEW) return;
+        if (!featureFlags.HOVER_PREVIEW || !hoverInteractionsEnabled) return;
         clearPreviewTimer();
         if (isHoverPreviewRef.current) {
             isHoverPreviewRef.current = false;
@@ -418,7 +415,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     };
     // ホバーによる職場プレビュー開始（eから元カードの位置を記録）
     const startHoverWorkplacePreview = (wp: { id: string; name: string; effectText: string; multipleAllowed: boolean; fromBuildingDefId?: string }, cardIdx: number, e: React.PointerEvent) => {
-        if (!featureFlags.HOVER_PREVIEW) return;
+        if (!featureFlags.HOVER_PREVIEW || !hoverInteractionsEnabled) return;
         clearPreviewTimer();
         if (isHoverPreviewRef.current) {
             isHoverPreviewRef.current = false;
@@ -2858,7 +2855,7 @@ function DesignOfficeUI({ G, moves, onBeforeSelect }: { G: GameState; moves: any
     useEffect(() => {
         const handlePreviewRelease = () => {
             clearTimer();
-            if (matchesMobileTouchUi() && previewDefIdRef.current) setPreviewDefId(null);
+            if (matchesTouchOptimizedUi() && previewDefIdRef.current) setPreviewDefId(null);
         };
         document.addEventListener('pointerup', handlePreviewRelease, true);
         document.addEventListener('pointercancel', handlePreviewRelease, true);

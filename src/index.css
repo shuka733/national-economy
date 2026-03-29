@@ -1609,9 +1609,11 @@ body {
   transition: transform 0.3s, box-shadow 0.3s;
 }
 
-.deck-top-face:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6);
+@media (hover: hover) and (pointer: fine) {
+  .deck-top-face:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.6);
+  }
 }
 
 /* ラウンドカードデッキ */
@@ -1720,9 +1722,14 @@ body {
   z-index: 10;
 }
 
-.deck-card:hover .deck-count-popup,
 .deck-card:active .deck-count-popup {
   opacity: 1;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .deck-card:hover .deck-count-popup {
+    opacity: 1;
+  }
 }
 
 /* --- 職場エリア（初期配置 + ラウンド追加 + 売却） --- */
@@ -1820,15 +1827,17 @@ body {
   }
 }
 
-.workplace-card.workplace-available:hover {
-  background: linear-gradient(145deg, rgba(20, 78, 74, 0.6) 0%, rgba(30, 34, 53, 0.9) 100%);
-  border-color: rgba(45, 212, 191, 1.0);
-  box-shadow:
-    0 0 10px rgba(45, 212, 191, 0.7),
-    0 0 24px rgba(45, 212, 191, 0.4),
-    0 0 50px rgba(45, 212, 191, 0.15);
-  transform: translateY(-2px) scale(1.03);
-  animation: none;
+@media (hover: hover) and (pointer: fine) {
+  .workplace-card.workplace-available:hover {
+    background: linear-gradient(145deg, rgba(20, 78, 74, 0.6) 0%, rgba(30, 34, 53, 0.9) 100%);
+    border-color: rgba(45, 212, 191, 1.0);
+    box-shadow:
+      0 0 10px rgba(45, 212, 191, 0.7),
+      0 0 24px rgba(45, 212, 191, 0.4),
+      0 0 50px rgba(45, 212, 191, 0.15);
+    transform: translateY(-2px) scale(1.03);
+    animation: none;
+  }
 }
 
 /* 配置不可の職場カード: 暗転表示 */
@@ -1950,9 +1959,11 @@ body {
   cursor: grab;
 }
 
-.worker-token.draggable:hover {
-  transform: scale(1.15);
-  filter: drop-shadow(0 2px 4px rgba(59, 130, 246, 0.5));
+@media (hover: hover) and (pointer: fine) {
+  .worker-token.draggable:hover {
+    transform: scale(1.15);
+    filter: drop-shadow(0 2px 4px rgba(59, 130, 246, 0.5));
+  }
 }
 
 .worker-token.draggable:active {
@@ -2110,15 +2121,19 @@ body {
 }
 
 /* ホバー: 上にスライド（拡大なし、z-index上昇なし） */
-.hand-card:hover {
-  transform: translateY(-10px);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5), 0 8px 20px rgba(0, 0, 0, 0.3);
-  border-color: rgba(255, 255, 255, 0.15);
+@media (hover: hover) and (pointer: fine) {
+  .hand-card:hover {
+    transform: translateY(-10px);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5), 0 8px 20px rgba(0, 0, 0, 0.3);
+    border-color: rgba(255, 255, 255, 0.15);
+  }
 }
 
 /* 売却建物エリア: ホバーで上昇しない */
-.sold-buildings-grid .hand-card:hover {
-  transform: none;
+@media (hover: hover) and (pointer: fine) {
+  .sold-buildings-grid .hand-card:hover {
+    transform: none;
+  }
 }
 
 /* 売却建物エリア: playableで上昇OK（z-index差で解決）、scaleは無効 */
@@ -2126,8 +2141,10 @@ body {
   transform: translateY(-3px);
 }
 
-.sold-buildings-grid .hand-card.hand-card-playable:hover {
-  transform: translateY(-5px);
+@media (hover: hover) and (pointer: fine) {
+  .sold-buildings-grid .hand-card.hand-card-playable:hover {
+    transform: translateY(-5px);
+  }
 }
 
 /* 押下中: カードは上がったまま維持（長押しプレビュー対応） */
@@ -2169,15 +2186,17 @@ body {
   }
 }
 
-.hand-card.hand-card-playable:hover {
-  border-color: var(--gold);
-  box-shadow:
-    0 0 12px rgba(212, 168, 83, 0.7),
-    0 0 30px rgba(212, 168, 83, 0.5),
-    0 0 60px rgba(212, 168, 83, 0.2),
-    var(--glow-gold);
-  animation: none;
-  transform: translateY(-8px) scale(1.04);
+@media (hover: hover) and (pointer: fine) {
+  .hand-card.hand-card-playable:hover {
+    border-color: var(--gold);
+    box-shadow:
+      0 0 12px rgba(212, 168, 83, 0.7),
+      0 0 30px rgba(212, 168, 83, 0.5),
+      0 0 60px rgba(212, 168, 83, 0.2),
+      var(--glow-gold);
+    animation: none;
+    transform: translateY(-8px) scale(1.04);
+  }
 }
 
 /* ワーカードラッグ中に建設不可のカードを薄暗くする */
