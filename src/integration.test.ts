@@ -175,8 +175,8 @@ describe('シナリオ③: 給料日フロー（売却なし）', () => {
             totalWage: 4,
             selectedBuildingIndices: [],
             playerStates: {
-                '0': { totalWage: 2, needsSelling: false, selectedBuildingIndices: [], confirmed: false },
-                '1': { totalWage: 2, needsSelling: false, selectedBuildingIndices: [], confirmed: false },
+                '0': { step: 'payday', totalWage: 2, needsSelling: false, selectedBuildingIndices: [], excessCount: 0, selectedIndices: [], confirmed: false },
+                '1': { step: 'payday', totalWage: 2, needsSelling: false, selectedBuildingIndices: [], excessCount: 0, selectedIndices: [], confirmed: false },
             },
         };
 

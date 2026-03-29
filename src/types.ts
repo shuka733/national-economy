@@ -211,6 +211,7 @@ export interface GameMoves {
     placeWorker: (workplaceId: string) => void;
     placeWorkerOnBuilding: (cardUid: string) => void;
     selectBuildCard: (cardIndex: number) => void;
+    confirmBuildSelection: () => void;
     toggleDiscard: (cardIndex: number) => void;
     confirmDiscard: () => void;
     cancelAction: () => void;

@@ -383,10 +383,13 @@ GitHub Pagesに公開済みのため、URLを共有するだけですぐにプ�
 
 #### 手順
 1. ホストPCで `npm run dev` を実行
-2. ターミナルに表示される **Network** のURL（例: `http://192.168.x.x:5173/`）を確認
+2. ターミナルに表示される **Network** のURL（例: `http://192.168.x.x:5173/national-economy/`）を確認
 3. **ホスト**: `http://localhost:5173/national-economy/` を開く →「🏠 ゲームを作成」→ Peer IDをゲストに共有
 4. **ゲスト**: `http://192.168.x.x:5173/national-economy/` を開く →「🔗 ゲームに参加」→ Peer IDを入力
 5. **ホスト**: 全員の接続を確認後「🚀 ゲーム開始！」
+
+> 2026年3月29日時点で、このPCの同一Wi-Fi向け接続URLは `http://192.168.10.117:5173/national-economy/` です。
+> ルーター再接続やWi-Fi切替でIPアドレスは変わるため、接続できない場合は `npm run dev` 実行時の **Network** 表示を再確認してください。
 
 ---
 

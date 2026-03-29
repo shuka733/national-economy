@@ -1492,9 +1492,6 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     // 設計事務所モーダル（rawGで判定: ドロー1_下完了後に表示するためアニメーション中は非表示）
     if (rawG.phase === 'designOffice' && rawG.designOfficeState && !drawAnimRef.current && isMyTurn) return <DesignOfficeUI G={rawG} moves={moves} onBeforeSelect={() => prepareDrawDetection(0, true)} />;
 
-    // 二胡市建設モーダル
-    if (G.phase === 'dualConstruction' && G.dualConstructionState && isMyTurn) return <DualConstructionUI G={G} moves={moves} pid={curPid} />;
-
     // 対戦相手は、自分の次手番プレイヤーから順に循環順で並べる
     const myPidNumber = Number(myPid);
     const opponents = Number.isNaN(myPidNumber)
@@ -1507,10 +1504,39 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
 
     // 建設フェーズ判定
     const buildState = G.phase === 'build' && G.buildState ? G.buildState : null;
+    const dualConstructionState = G.phase === 'dualConstruction' && G.dualConstructionState ? G.dualConstructionState : null;
     const isBuildPhase = !!buildState;
+    const isDualConstructionPhase = !!dualConstructionState;
     const isPioneerBuild = !!(buildState && buildState.action === 'pioneer');
     const buildSelectedCardIndex = buildState?.selectedCardIndex ?? null;
     const buildCanConfirm = isPioneerBuild && buildSelectedCardIndex !== null;
+    const dualSelectedCardIndices = dualConstructionState?.selectedCardIndices ?? [];
+    const dualSelectableCosts = new Set<number>();
+    if (isDualConstructionPhase) {
+        const costGroups = new Map<number, number>();
+        for (const card of myPlayer.hand) {
+            if (isConsumable(card)) continue;
+            const cost = getCardDef(card.defId).cost;
+            costGroups.set(cost, (costGroups.get(cost) ?? 0) + 1);
+        }
+        for (const [cost, count] of costGroups.entries()) {
+            if (count >= 2) dualSelectableCosts.add(cost);
+        }
+    }
+    const dualFirstSelectedCard = dualSelectedCardIndices.length > 0 ? myPlayer.hand[dualSelectedCardIndices[0]] : null;
+    const dualFirstSelectedCost = dualFirstSelectedCard ? getCardDef(dualFirstSelectedCard.defId).cost : null;
+    let dualCanConfirm = dualSelectedCardIndices.length === 2;
+    if (dualCanConfirm) {
+        const firstSelectedCard = myPlayer.hand[dualSelectedCardIndices[0]];
+        const secondSelectedCard = myPlayer.hand[dualSelectedCardIndices[1]];
+        if (!firstSelectedCard || !secondSelectedCard) {
+            dualCanConfirm = false;
+        } else {
+            const selectedCost = getCardDef(firstSelectedCard.defId).cost;
+            const secondCost = getCardDef(secondSelectedCard.defId).cost;
+            dualCanConfirm = selectedCost === secondCost && (myPlayer.hand.length - 2) >= selectedCost;
+        }
+    }
     const canInteract = (!isOnline || isMyTurn);
 
     // 売却建物（公共職場のうちfromBuilding=true）
@@ -2463,10 +2489,23 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                             // ワーカードラッグ中に大工系職場にホバー → 建設可能カードをプレビュー強調
                                             let isDragBuildHighlight = false;
 
-                                            if (canInteract && isBuildPhase && !isCons && def) {
+                                            if (canInteract && isDualConstructionPhase && !isCons && def) {
+                                                isSelected = dualSelectedCardIndices.includes(ci);
+                                                if (isSelected) {
+                                                    canClick = true;
+                                                } else if (dualSelectedCardIndices.length >= 2) {
+                                                    canClick = false;
+                                                } else if (dualFirstSelectedCost !== null) {
+                                                    canClick = def.cost === dualFirstSelectedCost;
+                                                } else {
+                                                    canClick = dualSelectableCosts.has(def.cost);
+                                                }
+                                                clickAction = () => moves.toggleDualCard(ci);
+                                            } else if (canInteract && isBuildPhase && !isCons && def) {
                                                 const bs = G.buildState!;
                                                 if (bs.action === 'pioneer') {
                                                     canClick = def.tags.includes('farm');
+                                                    isSelected = buildSelectedCardIndex === ci;
                                                 } else {
                                                     const cost = getConstructionCost(myPlayer, c.defId, bs.costReduction);
                                                     canClick = myPlayer.hand.length - 1 >= cost;
@@ -2503,6 +2542,9 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                 : isExcluded
                                                     ? { borderColor: 'var(--gold-40)', opacity: 0.6 }
                                                     : {};
+                                            const selectedLabel = isSelected
+                                                ? ((isBuildPhase || isDualConstructionPhase) ? '✓ 建設候補' : '✓ 捨てる')
+                                                : null;
 
                                             return (
                                                 <div key={c.uid}
@@ -2530,7 +2572,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                         </>
                                                     )}
                                                     {isCons && <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', marginTop: 2, position: 'relative', zIndex: 1 }}>消費財</div>}
-                                                    {isSelected && <div style={{ color: 'var(--red)', fontSize: 'var(--fs-md)', fontWeight: 700, position: 'relative', zIndex: 1 }}>✓ 捨てる</div>}
+                                                    {selectedLabel && <div style={{ color: 'var(--red)', fontSize: 'var(--fs-md)', fontWeight: 700, position: 'relative', zIndex: 1 }}>{selectedLabel}</div>}
                                                     {isExcluded && <div style={{ color: 'var(--gold)', fontSize: 'var(--fs-sm)', position: 'relative', zIndex: 1 }}>建設対象</div>}
                                                 </div>
                                             );
@@ -2598,12 +2640,51 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                             isBuildPhase && (
                                 <div className="buildings-info-bar" style={{ borderColor: 'var(--gold)' }}>
                                     <span style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                                        <IconHammer size={"calc(var(--fs) * 1.11)"} /> 建設するカードを選択
+                                        <IconHammer size={"calc(var(--fs) * 1.11)"} />
+                                        {isPioneerBuild
+                                            ? `農場カードを1枚選択して確定 (${buildSelectedCardIndex !== null ? 1 : 0}/1)`
+                                            : '建設するカードを選択'}
                                     </span>
-                                    <button onClick={() => { soundManager.playSFX('click'); moves.cancelAction(); }}
-                                        className="btn-ghost" style={{ fontSize: 'var(--fs-base)', padding: '2px 8px' }}>
-                                        ✕ キャンセル
-                                    </button>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                        {isPioneerBuild && (
+                                            <button
+                                                onClick={() => { soundManager.playSFX('click'); moves.confirmBuildSelection(); }}
+                                                disabled={!buildCanConfirm}
+                                                className="btn-primary"
+                                                style={{ fontSize: 'var(--fs-base)', padding: '2px 8px' }}
+                                            >
+                                                ✓ 確定
+                                            </button>
+                                        )}
+                                        <button onClick={() => { soundManager.playSFX('click'); moves.cancelAction(); }}
+                                            className="btn-ghost" style={{ fontSize: 'var(--fs-base)', padding: '2px 8px' }}>
+                                            ✕ キャンセル
+                                        </button>
+                                    </div>
+                                </div>
+                            )
+                        }
+                        {
+                            isDualConstructionPhase && (
+                                <div className="buildings-info-bar" style={{ borderColor: 'var(--gold)' }}>
+                                    <span style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                                        <IconHammer size={"calc(var(--fs) * 1.11)"} />
+                                        {`同じコストの建物を2枚選択して確定 (${dualSelectedCardIndices.length}/2)`}
+                                    </span>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                        <button
+                                            onClick={() => { soundManager.playSFX('click'); moves.confirmDualConstruction(); }}
+                                            disabled={!dualCanConfirm}
+                                            className="btn-primary"
+                                            style={{ fontSize: 'var(--fs-base)', padding: '2px 8px' }}
+                                        >
+                                            ✓ 確定
+                                        </button>
+                                        <button onClick={() => { soundManager.playSFX('click'); moves.cancelAction(); }}
+                                            className="btn-ghost" style={{ fontSize: 'var(--fs-base)', padding: '2px 8px' }}>
+                                            ✕ キャンセル
+                                        </button>
+                                    </div>
                                 </div>
                             )
                         }

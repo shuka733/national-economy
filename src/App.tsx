@@ -13,6 +13,11 @@ import { NationalEconomy } from './game';
 import { Board } from './Board';
 import type { AIDifficulty } from './bots';
 import type { GameVersion, GameState } from './types';
+import {
+    loadOrCreateGuestSessionTokenForRoom,
+    persistGuestSessionTokenForRoom,
+    resolveGuestAssignment,
+} from './p2pSession';
 import { soundManager } from './SoundManager';
 import { LogoFactory, IconRobot, IconPlayer, IconHammer, IconTrophy, IconGamepad, IconGlobe, IconWrench, IconHome, IconLink, IconDice, IconRocket, IconClipboard, IconGear, IconWave, IconCheck } from './components/Icons';
 import { FullscreenToggleButton } from './components/FullscreenToggleButton';
@@ -39,7 +44,6 @@ type LobbyPlayerInfo = {
 
 const HOST_NAME_STORAGE_KEY = 'ne-host-player-name';
 const GUEST_NAME_STORAGE_KEY = 'ne-guest-player-name';
-const GUEST_SESSION_STORAGE_KEY = 'ne-guest-session-token';
 const GUEST_TAB_STORAGE_KEY = 'ne-guest-tab-token';
 const ROOM_ID_PREFIX = 'NE-';
 const ROOM_ID_LENGTH = 4;
@@ -81,23 +85,6 @@ function loadOrCreateSessionStoredValue(storageKey: string, createValue: () => s
     return created;
 }
 
-function getGuestSessionStorageKey(tabToken: string): string {
-    return `${GUEST_SESSION_STORAGE_KEY}:${tabToken}`;
-}
-
-function loadOrCreateGuestSessionToken(tabToken: string): string {
-    return loadOrCreateStoredValue(getGuestSessionStorageKey(tabToken), generateGuestSessionToken);
-}
-
-function persistGuestSessionToken(tabToken: string, sessionToken: string): void {
-    localStorage.setItem(getGuestSessionStorageKey(tabToken), sessionToken);
-}
-
-function normalizeSessionToken(value: unknown): string {
-    if (typeof value !== 'string') return '';
-    return value.trim().replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
-}
-
 function getThemeBackgroundAsset(theme: ThemeName, kind: 'title' | 'game'): string {
     const suffix = kind === 'title' ? 'bg_title.png' : 'bg_game.png';
     if (theme === 'default') return '';
@@ -127,14 +114,6 @@ function extractRoomToken(value: string): string {
 
 function sanitizeRoomId(value: string): string {
     return extractRoomToken(value);
-}
-
-function getAvailableGuestPid(connections: Map<string, DataConnection>, numPlayers: number, reservedPids: Set<string> = new Set()): string | null {
-    for (let i = 1; i < numPlayers; i++) {
-        const pid = String(i);
-        if (!connections.has(pid) && !reservedPids.has(pid)) return pid;
-    }
-    return null;
 }
 
 function buildPlayerNames(numPlayers: number, hostName: string, guests: Record<string, LobbyPlayerInfo>): Record<string, string> {
@@ -667,34 +646,17 @@ function HostLobby({ onBack }: { onBack: () => void }) {
 
             const assignGuest = (sessionToken: string, tabToken: string, guestName: string) => {
                 const normalizedName = normalizePlayerName(guestName, defaultPlayerName(assignedPid ?? '1'));
-                const normalizedToken = normalizeSessionToken(sessionToken) || generateGuestSessionToken();
-                const normalizedTabToken = normalizeSessionToken(tabToken) || generateGuestSessionToken();
-                const reservedPids = gameStartedRef.current
-                    ? new Set(Array.from(sessionRegistryRef.current.values()).map(info => info.pid))
-                    : new Set<string>();
-                let resolvedSessionToken = normalizedToken;
-                let pid = sessionRegistryRef.current.get(normalizedToken)?.pid ?? null;
-
-                if (pid && connectionsRef.current.has(pid) && connectionsRef.current.get(pid) !== conn) {
-                    const activeTabToken = activeTabTokensRef.current.get(pid);
-                    if (activeTabToken === normalizedTabToken) {
-                        const existingConn = connectionsRef.current.get(pid);
-                        if (existingConn && existingConn !== conn) {
-                            try {
-                                existingConn.close();
-                            } catch {
-                                // ignore connection cleanup failure and continue with reconnection
-                            }
-                        }
-                    } else {
-                        resolvedSessionToken = generateGuestSessionToken();
-                        pid = null;
-                    }
-                }
-
-                if (!pid) {
-                    pid = getAvailableGuestPid(connectionsRef.current, numPlayersRef.current, reservedPids);
-                }
+                const assignment = resolveGuestAssignment({
+                    requestedSessionToken: sessionToken,
+                    tabToken,
+                    currentConnection: conn,
+                    sessionRegistry: sessionRegistryRef.current,
+                    connections: connectionsRef.current,
+                    numPlayers: numPlayersRef.current,
+                    gameStarted: gameStartedRef.current,
+                    createSessionToken: generateGuestSessionToken,
+                });
+                const pid = assignment.pid;
 
                 if (!pid) {
                     conn.send({ type: 'rejected', reason: 'ロビーが満員です' });
@@ -702,14 +664,22 @@ function HostLobby({ onBack }: { onBack: () => void }) {
                     return null;
                 }
 
+                if (assignment.replacedConnection) {
+                    try {
+                        assignment.replacedConnection.close();
+                    } catch {
+                        // ignore connection cleanup failure and continue with reconnection
+                    }
+                }
+
                 assignedPid = pid;
-                assignedSessionToken = resolvedSessionToken;
+                assignedSessionToken = assignment.sessionToken;
                 const info: LobbyPlayerInfo = { pid, name: normalizePlayerName(normalizedName, defaultPlayerName(pid)) };
-                sessionRegistryRef.current.set(resolvedSessionToken, info);
+                sessionRegistryRef.current.set(assignment.sessionToken, info);
                 connectionsRef.current.set(pid, conn);
-                activeTabTokensRef.current.set(pid, normalizedTabToken);
+                activeTabTokensRef.current.set(pid, assignment.tabToken);
                 setConnectedPlayers(prev => ({ ...prev, [pid]: info }));
-                conn.send({ type: 'assigned', playerID: pid, sessionToken: resolvedSessionToken, tabToken: normalizedTabToken });
+                conn.send({ type: 'assigned', playerID: pid, sessionToken: assignment.sessionToken, tabToken: assignment.tabToken });
 
                 if (gameStartedRef.current) {
                     const reconnectClient = clientsRef.current[parseInt(pid, 10)];
@@ -1013,7 +983,7 @@ function JoinLobby({ onBack }: { onBack: () => void }) {
     const [status, setStatus] = useState('接続準備中...');
     const [playerName, setPlayerName] = useState(() => loadStoredPlayerName(GUEST_NAME_STORAGE_KEY));
     const [tabToken] = useState(() => loadOrCreateSessionStoredValue(GUEST_TAB_STORAGE_KEY, generateGuestSessionToken));
-    const [sessionToken, setSessionToken] = useState(() => loadOrCreateGuestSessionToken(tabToken));
+    const [, setSessionToken] = useState('');
     const [playerID, setPlayerID] = useState<string | null>(null);
     const [gameStarted, setGameStarted] = useState(false);
     const [gameState, setGameState] = useState<{ G: GameState; ctx: Ctx } | null>(null);
@@ -1038,14 +1008,19 @@ function JoinLobby({ onBack }: { onBack: () => void }) {
     const connect = useCallback(() => {
         const roomId = sanitizeRoomId(hostID);
         if (!peerRef.current || !roomId.trim()) return;
+        const nextSessionToken = loadOrCreateGuestSessionTokenForRoom(roomId, generateGuestSessionToken);
+        setSessionToken(nextSessionToken);
         setConnected(true);
         setStatus('ホストに接続中...');
 
+        if (connRef.current && connRef.current.open) {
+            connRef.current.close();
+        }
         const conn = peerRef.current.connect(toInternalRoomId(roomId.trim()));
         connRef.current = conn;
 
         conn.on('open', () => {
-            conn.send({ type: 'hello', name: playerName.trim(), sessionToken, tabToken });
+            conn.send({ type: 'hello', name: playerName.trim(), sessionToken: nextSessionToken, tabToken });
             setStatus('接続完了、ゲーム開始を待機中...');
         });
 
@@ -1059,9 +1034,9 @@ function JoinLobby({ onBack }: { onBack: () => void }) {
                 case 'assigned':
                     setPlayerID(data.playerID);
                     if (data.sessionToken) {
-                        const nextSessionToken = String(data.sessionToken);
-                        persistGuestSessionToken(tabToken, nextSessionToken);
-                        setSessionToken(nextSessionToken);
+                        const assignedSessionToken = String(data.sessionToken);
+                        persistGuestSessionTokenForRoom(roomId, assignedSessionToken);
+                        setSessionToken(assignedSessionToken);
                     }
                     setStatus(`P${parseInt(data.playerID) + 1}として接続完了。ゲーム開始を待機中...`);
                     break;
@@ -1079,13 +1054,15 @@ function JoinLobby({ onBack }: { onBack: () => void }) {
             setStatus(prev => (prev.includes('拒否') || prev.includes('満員')) ? prev : 'ホストとの接続が切断されました');
             setConnected(false);
             setGameStarted(false);
+            connRef.current = null;
         });
 
         conn.on('error', (err) => {
             setStatus(`接続エラー: ${err.type}`);
             setConnected(false);
+            connRef.current = null;
         });
-    }, [hostID, playerName, sessionToken, tabToken]);
+    }, [hostID, playerName, tabToken]);
 
     // ゲスト側のmovesプロキシ（ホストへ転送）
     const remoteMoves = useMemo(() => {

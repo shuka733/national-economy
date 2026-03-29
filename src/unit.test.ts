@@ -7,6 +7,7 @@ import { NationalEconomy } from './game';
 import type { GameState } from './types';
 import { CONSUMABLE_DEF_ID, getCardDef } from './cards';
 import { INVALID_MOVE } from 'boardgame.io/core';
+import { resolveGuestAssignment } from './p2pSession';
 
 /** テスト用のゲーム状態を作成するヘルパー */
 function makeTestEnv(numPlayers = 2, version: 'base' | 'glory' = 'glory') {
@@ -220,5 +221,120 @@ describe('賃金計算テスト', () => {
         // R1-2 は $2
         const p = G.players['0'];
         expect(p.workers).toBeGreaterThanOrEqual(1);
+    });
+});
+
+describe('開拓民の農場建設確定フロー', () => {
+    it('カード選択だけでは建設されず、confirmBuildSelectionで大農園が建設される', () => {
+        const { G, callMove, getCurrentPlayer } = makeTestEnv(2, 'base');
+        const pid = getCurrentPlayer();
+        const p = G.players[pid];
+
+        p.buildings.push({
+            card: { uid: 'pioneer_test', defId: 'pioneer' },
+            workerPlaced: false,
+        });
+        p.hand.push({ uid: 'large_farm_test', defId: 'large_farm' });
+
+        G.phase = 'work';
+        const beforeBuildingCount = p.buildings.length;
+        const largeFarmIndex = p.hand.findIndex(card => card.uid === 'large_farm_test');
+
+        callMove('placeWorkerOnBuilding', 'pioneer_test');
+        expect(G.phase).toBe('build');
+        expect(G.buildState?.action).toBe('pioneer');
+
+        callMove('selectBuildCard', largeFarmIndex);
+        expect(G.phase).toBe('build');
+        expect(G.buildState?.selectedCardIndex).toBe(largeFarmIndex);
+        expect(p.buildings).toHaveLength(beforeBuildingCount);
+
+        callMove('confirmBuildSelection');
+        expect(G.phase).toBe('work');
+        expect(G.buildState).toBeNull();
+        expect(p.buildings).toHaveLength(beforeBuildingCount + 1);
+        expect(p.buildings.some(slot => slot.card.defId === 'large_farm')).toBe(true);
+        expect(p.hand.some(card => card.uid === 'large_farm_test')).toBe(false);
+    });
+});
+
+describe('二胡市建設の選択状態', () => {
+    it('同コストの建物を選択したあとでもcancelActionで選択状態とワーカー配置が戻る', () => {
+        const { G, callMove, getCurrentPlayer } = makeTestEnv(2, 'base');
+        const pid = getCurrentPlayer();
+        const p = G.players[pid];
+        const prevWorkers = p.availableWorkers;
+
+        p.buildings.push({
+            card: { uid: 'dual_test', defId: 'dual_construction' },
+            workerPlaced: false,
+        });
+        p.hand.push({ uid: 'farm_a', defId: 'farm' });
+        p.hand.push({ uid: 'farm_b', defId: 'farm' });
+
+        G.phase = 'work';
+        callMove('placeWorkerOnBuilding', 'dual_test');
+        expect(G.phase).toBe('dualConstruction');
+
+        callMove('toggleDualCard', p.hand.findIndex(card => card.uid === 'farm_a'));
+        callMove('toggleDualCard', p.hand.findIndex(card => card.uid === 'farm_b'));
+        expect(G.dualConstructionState?.selectedCardIndices).toHaveLength(2);
+
+        callMove('cancelAction');
+        expect(G.phase).toBe('work');
+        expect(G.dualConstructionState).toBeNull();
+        expect(p.availableWorkers).toBe(prevWorkers);
+    });
+});
+
+describe('resolveGuestAssignment', () => {
+    it('既知のsessionTokenならtabTokenが変わっても同じ席を再利用する', () => {
+        const oldConnection = { id: 'old' };
+        const newConnection = { id: 'new' };
+        const sessionRegistry = new Map([
+            ['known-session', { pid: '1', name: 'Guest 1' }],
+        ]);
+        const connections = new Map([
+            ['1', oldConnection],
+        ]);
+
+        const result = resolveGuestAssignment({
+            requestedSessionToken: 'known-session',
+            tabToken: 'fresh-tab',
+            currentConnection: newConnection,
+            sessionRegistry,
+            connections,
+            numPlayers: 4,
+            gameStarted: true,
+            createSessionToken: () => 'generated-session',
+        });
+
+        expect(result.pid).toBe('1');
+        expect(result.sessionToken).toBe('known-session');
+        expect(result.replacedConnection).toBe(oldConnection);
+    });
+
+    it('ゲーム開始後に未登録sessionTokenでは予約済み席を奪えない', () => {
+        const sessionRegistry = new Map([
+            ['guest-1', { pid: '1', name: 'Guest 1' }],
+            ['guest-2', { pid: '2', name: 'Guest 2' }],
+            ['guest-3', { pid: '3', name: 'Guest 3' }],
+        ]);
+        const connections = new Map<string, { id: string }>();
+
+        const result = resolveGuestAssignment({
+            requestedSessionToken: 'unknown-session',
+            tabToken: 'tab-2',
+            currentConnection: { id: 'incoming' },
+            sessionRegistry,
+            connections,
+            numPlayers: 4,
+            gameStarted: true,
+            createSessionToken: () => 'generated-session',
+        });
+
+        expect(result.pid).toBeNull();
+        expect(result.sessionToken).toBe('unknown-session');
+        expect(result.replacedConnection).toBeNull();
     });
 });
