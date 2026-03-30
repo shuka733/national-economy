@@ -544,7 +544,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     const PLAYER_COLORS = ['blue', 'green', 'yellow', 'purple'];
     const getMeepleSrc = (playerIndex: number) => `${import.meta.env.BASE_URL}meeples/p${playerIndex + 1}_${PLAYER_COLORS[playerIndex]}.png`;
     // ワーカードラッグ状態（Refベース: documentリスナーから常に最新値を参照）
-    const workerDragRef = useRef<{ x: number; y: number; hoveredUid: string | null; workerIndex: number } | null>(null);
+    const workerDragRef = useRef<{ x: number; y: number; hoveredUid: string | null; workerIndex: number; width: number; height: number } | null>(null);
     const [workerDragRender, setWorkerDragRender] = useState<typeof workerDragRef.current>(null);
     // movesへの最新参照（マウント時1回のdocumentリスナーから使用）
     const movesRef = useRef(moves);
@@ -1791,7 +1791,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                 <img
                     src={getMeepleSrc(parseInt(myPid))}
                     className="worker-drag-ghost"
-                    style={{ left: workerDragRender.x, top: workerDragRender.y }}
+                    style={{ left: workerDragRender.x, top: workerDragRender.y, width: workerDragRender.width, height: workerDragRender.height }}
                     alt=""
                 />
             )}
@@ -2110,6 +2110,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                             onPointerDown={() => { startCardPreview(b.card.defId, 3000 + pidNumber * 100 + bi); }}
                                                             onPointerUp={endPreview}
                                                             onPointerLeave={() => { endPreview(); endHoverPreview(); }}
+                                                            onPointerCancel={() => { endPreview(); endHoverPreview(); }}
                                                             onPointerEnter={(e) => { startHoverCardPreview(b.card.defId, 3000 + pidNumber * 100 + bi, e); }}
                                                             className={`opponent-building-sprite ${b.workerPlaced ? 'building-placed' : ''} ${opponentBuildingLayout.compact ? 'opponent-building-sprite-compact' : ''}`}
                                                             style={{ borderColor, width: opponentBuildingLayout.cardW, height: opponentBuildingLayout.cardH }}>
@@ -2511,7 +2512,8 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                             onPointerDown={(e) => {
                                                 if (!canDrag) return;
                                                 e.preventDefault();
-                                                workerDragRef.current = { x: e.clientX, y: e.clientY, hoveredUid: null, workerIndex: i };
+                                                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                                workerDragRef.current = { x: e.clientX, y: e.clientY, hoveredUid: null, workerIndex: i, width: rect.width, height: rect.height };
                                                 setWorkerDragRender({ ...workerDragRef.current });
                                             }}
                                             alt="worker"

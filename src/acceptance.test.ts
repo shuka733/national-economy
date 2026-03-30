@@ -87,6 +87,34 @@ test('⑥ CPU全員プレイで最後まで進んでゲーム終了画面が表�
     expect(pageText).toMatch(/\d+VP/);
 });
 
+test('⑦ worker drag ghost matches worker token size', async ({ page }) => {
+    await startDefaultLocalGame(page);
+
+    await page.addStyleTag({
+        content: '.worker-token{animation:none !important;transform:none !important;}',
+    });
+
+    const worker = page.locator('.worker-token.draggable').first();
+    await expect(worker).toBeVisible({ timeout: 10000 });
+    const workerBox = await worker.boundingBox();
+    expect(workerBox).not.toBeNull();
+    if (!workerBox) return;
+
+    await page.mouse.move(workerBox.x + workerBox.width / 2, workerBox.y + workerBox.height / 2);
+    await page.mouse.down();
+
+    const ghost = page.locator('.worker-drag-ghost');
+    await expect(ghost).toBeVisible({ timeout: 10000 });
+    const ghostBox = await ghost.boundingBox();
+    expect(ghostBox).not.toBeNull();
+    if (!ghostBox) return;
+
+    expect(Math.abs(ghostBox.width - workerBox.width)).toBeLessThanOrEqual(1);
+    expect(Math.abs(ghostBox.height - workerBox.height)).toBeLessThanOrEqual(1);
+
+    await page.mouse.up();
+});
+
 test('@tablet tablet touch ui is applied on iPad landscape', async ({ page }) => {
     await startDefaultLocalGame(page);
 
@@ -113,6 +141,9 @@ test('@phone phone touch ui is applied on iPhone 12', async ({ page }) => {
     await expect(page.locator(LOG_TOGGLE_BUTTON)).toBeVisible({ timeout: 10000 });
     await expect(page.locator('.area-opponents .inline-log')).toHaveCount(0);
     await expect(page.locator(ROUND_LABEL).first()).toBeVisible({ timeout: 10000 });
+
+    const scrollTouchAction = await page.locator('.opponent-buildings-scroll').first().evaluate((el) => getComputedStyle(el).touchAction);
+    expect(scrollTouchAction).toContain('pan-x');
 
     const hasHorizontalOverflow = await page.evaluate(() => {
         const root = document.scrollingElement ?? document.documentElement;

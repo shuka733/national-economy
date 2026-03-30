@@ -1257,7 +1257,6 @@ body {
   --pub-card-h: calc(var(--card-h) * 0.71);
   --pub-card-w: calc(var(--card-w) * 0.71);
   --worker-size: 22px;
-  --worker-drag-ghost-size: 36px;
   --opponent-hand-card-w: 16px;
   --opponent-hand-fan-h: 24px;
   --hand-card-scale: 0.84;
@@ -1475,6 +1474,7 @@ body {
   gap: 6px;
   overflow-x: auto;
   overflow-y: hidden;
+  overscroll-behavior-x: contain;
   padding-bottom: 3px;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
@@ -2176,12 +2176,10 @@ body {
 /* ドラッグ中のゴーストミープル */
 .worker-drag-ghost {
   position: fixed;
-  width: var(--worker-drag-ghost-size);
-  height: var(--worker-drag-ghost-size);
   pointer-events: none;
   z-index: 9999;
   transform: translate(-50%, -50%);
-  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.4));
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.28));
   opacity: 0.85;
 }
 
@@ -2918,7 +2916,6 @@ body {
   --pub-card-w: clamp(28px, calc((100vw - 340px) / 8), 54px);
   --pub-card-h: calc(var(--pub-card-w) * 88 / 63);
   --worker-size: 13px;
-  --worker-drag-ghost-size: 20px;
   --opponent-hand-card-w: clamp(8px, calc(var(--pub-card-w) * 0.21), 11px);
   --opponent-hand-fan-h: clamp(13px, calc(var(--opponent-hand-card-w) * 1.45), 17px);
   --hand-card-scale: 0.88;
@@ -3015,11 +3012,14 @@ body {
 .game-layout.mobile-touch-ui .opponent-buildings-scroll {
   gap: 2px;
   padding-bottom: 1px;
+  touch-action: pan-x;
+  -webkit-overflow-scrolling: touch;
 }
 
 .game-layout.mobile-touch-ui .opponent-building-sprite {
   border-radius: 4px;
   padding: 2px 3px;
+  touch-action: pan-x;
 }
 
 .game-layout.mobile-touch-ui .opponent-building-title {
