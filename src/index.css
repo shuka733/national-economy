@@ -1258,8 +1258,8 @@ body {
   --pub-card-w: calc(var(--card-w) * 0.71);
   --worker-size: 22px;
   --worker-drag-ghost-size: 36px;
-  --opponent-hand-card-w: 22px;
-  --opponent-hand-fan-h: 36px;
+  --opponent-hand-card-w: 16px;
+  --opponent-hand-fan-h: 24px;
   --hand-card-scale: 0.84;
   --hand-card-height: calc(var(--hand-card-scale) * 100%);
   --worker-chip-icon-size: 10px;
@@ -1321,7 +1321,7 @@ body {
    ============================================================ */
 .area-opponents {
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto 1fr;
   gap: 3px;
   overflow: hidden;
   padding-right: 2px;
@@ -1356,7 +1356,7 @@ body {
   background: var(--bg-secondary);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 8px;
-  padding: var(--sp-2) var(--sp-3);
+  padding: var(--sp-2);
   transition: all 0.3s;
   position: relative;
   overflow: hidden;
@@ -1364,6 +1364,7 @@ body {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  gap: var(--sp-2);
 }
 
 .opponent-card::before {
@@ -1419,7 +1420,8 @@ body {
   display: flex;
   position: relative;
   height: var(--opponent-hand-fan-h);
-  margin-bottom: 2px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 /* 相手の手札カード: 比率 63:88 で統一 */
@@ -1435,17 +1437,51 @@ body {
   flex-shrink: 0;
 }
 
+.opponent-card-body {
+  display: grid;
+  grid-template-columns: minmax(0, 30%) minmax(0, 1fr);
+  gap: 6px;
+  min-height: 0;
+  flex: 1;
+  align-items: stretch;
+}
+
+.opponent-hand-zone {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.opponent-hand-fan-shell {
+  width: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.opponent-buildings-zone {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+}
+
 /* 相手の建物行（水平スクロール） */
 .opponent-buildings-scroll {
   display: flex;
-  gap: 3px;
+  gap: 6px;
   overflow-x: auto;
-  padding-bottom: 2px;
+  overflow-y: hidden;
+  padding-bottom: 3px;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
   flex: 1;
+  height: 100%;
   min-height: 0;
-  align-items: flex-start;
+  align-items: flex-end;
 }
 
 .opponent-buildings-scroll::-webkit-scrollbar {
@@ -1459,15 +1495,17 @@ body {
 
 /* 相手の建物カード: 公共の場と同じサイズのカードスプライト */
 .opponent-building-sprite {
-  width: var(--pub-card-w);
-  height: var(--pub-card-h);
+  width: auto;
+  height: auto;
+  max-height: 100%;
   flex-shrink: 0;
-  border-radius: 5px;
+  box-sizing: border-box;
+  border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: linear-gradient(170deg, rgba(30, 34, 53, 0.95) 0%, rgba(22, 25, 40, 0.98) 100%);
   display: flex;
   flex-direction: column;
-  padding: var(--sp-1) var(--sp-2);
+  padding: 4px;
   overflow: hidden;
   position: relative;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
@@ -1475,6 +1513,65 @@ body {
   cursor: default;
   user-select: none;
   touch-action: none;
+}
+
+.opponent-building-title {
+  font-weight: 700;
+  font-size: var(--fs-md);
+  line-height: 1.15;
+  position: relative;
+  z-index: 1;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.opponent-building-title.compact {
+  font-size: var(--fs-sm);
+  line-height: 1.05;
+  display: block;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.opponent-building-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 4px;
+  margin-top: 2px;
+  position: relative;
+  z-index: 1;
+}
+
+.opponent-building-meta.compact {
+  gap: 2px;
+  margin-top: 1px;
+}
+
+.opponent-building-effect {
+  font-size: var(--fs-xs);
+  color: var(--text-dim);
+  margin-top: auto;
+  line-height: 1.2;
+  position: relative;
+  z-index: 1;
+}
+
+.opponent-building-sprite-compact {
+  padding: 2px;
+  gap: 1px;
+}
+
+.opponent-building-sprite-compact .tag-badge {
+  gap: 0;
+  padding: 0 1px;
+  font-size: calc(var(--fs-xs) * 0.92);
+}
+
+.opponent-building-sprite-compact .worker-on-building-icon {
+  width: calc(var(--worker-on-building-icon-size) * 0.82);
+  height: calc(var(--worker-on-building-icon-size) * 0.82);
 }
 
 .opponent-building-sprite.building-placed {
@@ -1496,20 +1593,65 @@ body {
 }
 
 /* --- 家計ボックス: 固定高 --- */
+.public-top-bar {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 .household-box {
   height: auto;
   min-height: 36px;
+  flex: 1;
   flex-shrink: 0;
   background: linear-gradient(145deg, rgba(45, 212, 191, 0.08) 0%, rgba(30, 34, 53, 0.9) 100%);
   border: 1px solid rgba(45, 212, 191, 0.25);
   border-radius: 8px;
-  padding: 6px 10px;
+  padding: 6px 9px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   position: relative;
   overflow: hidden;
   backdrop-filter: blur(8px);
+}
+
+.log-toggle-button {
+  flex: 0 0 auto;
+  width: calc(var(--fs-4xl) * 2.8);
+  min-width: calc(var(--fs-4xl) * 2.8);
+  min-height: 36px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: linear-gradient(180deg, rgba(107, 114, 128, 0.3) 0%, rgba(55, 65, 81, 0.88) 100%);
+  color: var(--text-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 8px;
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.2s ease, background 0.2s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+.log-toggle-button-label {
+  font-size: var(--fs-lg);
+  font-weight: 800;
+  letter-spacing: 0.4px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .log-toggle-button:hover {
+    transform: translateY(-1px);
+    border-color: rgba(255, 255, 255, 0.2);
+    background: linear-gradient(180deg, rgba(129, 140, 248, 0.32) 0%, rgba(67, 56, 202, 0.78) 100%);
+  }
+}
+
+.log-toggle-button:active {
+  transform: translateY(0);
 }
 
 .household-box::after {
@@ -2777,8 +2919,8 @@ body {
   --pub-card-h: calc(var(--pub-card-w) * 88 / 63);
   --worker-size: 13px;
   --worker-drag-ghost-size: 20px;
-  --opponent-hand-card-w: clamp(11px, calc(var(--pub-card-w) * 0.3), 16px);
-  --opponent-hand-fan-h: clamp(18px, calc(var(--opponent-hand-card-w) * 1.5), 28px);
+  --opponent-hand-card-w: clamp(8px, calc(var(--pub-card-w) * 0.21), 11px);
+  --opponent-hand-fan-h: clamp(13px, calc(var(--opponent-hand-card-w) * 1.45), 17px);
   --hand-card-scale: 0.88;
   --hand-card-height: calc(var(--hand-card-scale) * 100%);
   --worker-chip-icon-size: 7px;
@@ -2832,7 +2974,7 @@ body {
 .game-layout.mobile-touch-ui .opponent-card {
   flex: 0 0 calc(100% / 3 - 3px);
   border-radius: 6px;
-  padding: 4px 6px;
+  padding: 4px;
 }
 
 .game-layout.mobile-touch-ui .opponent-card-header {
@@ -2850,13 +2992,24 @@ body {
   justify-content: flex-end;
 }
 
+.game-layout.mobile-touch-ui .opponent-card-body {
+  gap: 4px;
+}
+
+.game-layout.mobile-touch-ui .opponent-hand-zone {
+  align-items: flex-start;
+}
+
 .game-layout.mobile-touch-ui .opponent-hand-fan {
   height: var(--opponent-hand-fan-h);
-  margin-bottom: 1px;
 }
 
 .game-layout.mobile-touch-ui .opponent-hand-card {
   border-radius: 2px;
+}
+
+.game-layout.mobile-touch-ui .opponent-buildings-zone {
+  height: 100%;
 }
 
 .game-layout.mobile-touch-ui .opponent-buildings-scroll {
@@ -2869,10 +3022,29 @@ body {
   padding: 2px 3px;
 }
 
-.game-layout.mobile-touch-ui .area-opponents .inline-log {
-  max-height: 56px;
-  padding: 3px 5px;
-  border-radius: 5px;
+.game-layout.mobile-touch-ui .opponent-building-title {
+  font-size: var(--fs-sm);
+  line-height: 1.05;
+}
+
+.game-layout.mobile-touch-ui .opponent-building-meta {
+  gap: 2px;
+  margin-top: 1px;
+}
+
+.game-layout.mobile-touch-ui .opponent-building-effect {
+  font-size: calc(var(--fs-xs) * 0.92);
+  line-height: 1.05;
+}
+
+.game-layout.mobile-touch-ui .opponent-building-sprite-compact {
+  border-radius: 3px;
+  padding: 1px 2px;
+}
+
+.game-layout.mobile-touch-ui .opponent-building-sprite-compact .tag-badge {
+  padding: 0 1px;
+  font-size: calc(var(--fs-xs) * 0.84);
 }
 
 .game-layout.mobile-touch-ui .area-public {
@@ -2880,9 +3052,13 @@ body {
   padding: 0 8px 4px;
 }
 
+.game-layout.mobile-touch-ui .public-top-bar {
+  gap: 4px;
+}
+
 .game-layout.mobile-touch-ui .household-box {
   min-height: 24px;
-  padding: 4px 8px;
+  padding: 4px 7px;
   border-radius: 6px;
 }
 
@@ -2907,6 +3083,19 @@ body {
 
 .game-layout.mobile-touch-ui .household-meta {
   gap: 8px !important;
+}
+
+.game-layout.mobile-touch-ui .log-toggle-button {
+  min-height: 24px;
+  width: calc(var(--fs-4xl) * 2.5);
+  min-width: calc(var(--fs-4xl) * 2.5);
+  border-radius: 6px;
+  padding: 0 6px;
+  gap: 3px;
+}
+
+.game-layout.mobile-touch-ui .log-toggle-button-label {
+  font-size: var(--fs-md);
 }
 
 .game-layout.mobile-touch-ui .household-meta-label {

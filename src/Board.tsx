@@ -92,6 +92,12 @@ const opponentConsumableCardStyle: React.CSSProperties = {
 const opponentRevealedCardStyle: React.CSSProperties = {
     background: 'linear-gradient(135deg, var(--teal-15), rgba(30,30,40,0.9))',
 };
+const OPPONENT_HAND_CARD_WIDTH_DESKTOP = 16;
+const OPPONENT_HAND_CARD_WIDTH_MOBILE = 11;
+const OPPONENT_BUILDING_COMPACT_MAX_HEIGHT = 36;
+const OPPONENT_BUILDING_MOBILE_FALLBACK_SCALE = 0.72;
+const OPPONENT_BUILDING_VERTICAL_GUTTER_DESKTOP = 4;
+const OPPONENT_BUILDING_VERTICAL_GUTTER_MOBILE = 2;
 type FullscreenCapableDocument = Document & {
     webkitFullscreenElement?: Element | null;
     webkitFullscreenEnabled?: boolean;
@@ -800,6 +806,12 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     // コールバックrefパターン: DOMノードの再マウント（例: 設計事務所モーダル→閉じ）時にResizeObserverを再設定
     const [containerSize, setContainerSize] = useState<{ w: number; h: number }>({ w: 600, h: 200 });
     const resizeObserverRef = useRef<ResizeObserver | null>(null);
+    const [opponentHandZoneSizes, setOpponentHandZoneSizes] = useState<Record<string, { w: number; h: number }>>({});
+    const opponentHandZoneObserverRefs = useRef<Record<string, ResizeObserver | null>>({});
+    const opponentHandZoneCallbackRefs = useRef<Record<string, (node: HTMLDivElement | null) => void>>({});
+    const [opponentBuildingZoneSizes, setOpponentBuildingZoneSizes] = useState<Record<string, { w: number; h: number }>>({});
+    const opponentBuildingZoneObserverRefs = useRef<Record<string, ResizeObserver | null>>({});
+    const opponentBuildingZoneCallbackRefs = useRef<Record<string, (node: HTMLDivElement | null) => void>>({});
     const handFanContainerCallbackRef = useCallback((node: HTMLDivElement | null) => {
         // 前のResizeObserverをクリーンアップ
         if (resizeObserverRef.current) {
@@ -824,8 +836,94 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
             setContainerSize({ w: node.clientWidth, h: node.clientHeight });
         }
     }, []);
+    const getOpponentHandZoneCallbackRef = useCallback((pid: string) => {
+        if (!opponentHandZoneCallbackRefs.current[pid]) {
+            opponentHandZoneCallbackRefs.current[pid] = (node: HTMLDivElement | null) => {
+                const prevObserver = opponentHandZoneObserverRefs.current[pid];
+                if (prevObserver) {
+                    prevObserver.disconnect();
+                    delete opponentHandZoneObserverRefs.current[pid];
+                }
+
+                if (!node) {
+                    setOpponentHandZoneSizes(prev => {
+                        if (!(pid in prev)) return prev;
+                        const next = { ...prev };
+                        delete next[pid];
+                        return next;
+                    });
+                    return;
+                }
+
+                const updateSize = (width: number, height: number) => {
+                    setOpponentHandZoneSizes(prev => {
+                        const current = prev[pid];
+                        if (current && Math.abs(current.w - width) < 1 && Math.abs(current.h - height) < 1) return prev;
+                        return { ...prev, [pid]: { w: width, h: height } };
+                    });
+                };
+
+                const observer = new ResizeObserver((entries) => {
+                    for (const entry of entries) {
+                        updateSize(entry.contentRect.width, entry.contentRect.height);
+                    }
+                });
+                observer.observe(node);
+                opponentHandZoneObserverRefs.current[pid] = observer;
+                updateSize(node.clientWidth, node.clientHeight);
+            };
+        }
+        return opponentHandZoneCallbackRefs.current[pid];
+    }, []);
 
     // ドローアニメーション中の追加スロット数
+    useEffect(() => {
+        return () => {
+            Object.values(opponentHandZoneObserverRefs.current).forEach(observer => observer?.disconnect());
+            opponentHandZoneObserverRefs.current = {};
+            Object.values(opponentBuildingZoneObserverRefs.current).forEach(observer => observer?.disconnect());
+            opponentBuildingZoneObserverRefs.current = {};
+        };
+    }, []);
+    const getOpponentBuildingZoneCallbackRef = useCallback((pid: string) => {
+        if (!opponentBuildingZoneCallbackRefs.current[pid]) {
+            opponentBuildingZoneCallbackRefs.current[pid] = (node: HTMLDivElement | null) => {
+                const prevObserver = opponentBuildingZoneObserverRefs.current[pid];
+                if (prevObserver) {
+                    prevObserver.disconnect();
+                    delete opponentBuildingZoneObserverRefs.current[pid];
+                }
+
+                if (!node) {
+                    setOpponentBuildingZoneSizes(prev => {
+                        if (!(pid in prev)) return prev;
+                        const next = { ...prev };
+                        delete next[pid];
+                        return next;
+                    });
+                    return;
+                }
+
+                const updateSize = (width: number, height: number) => {
+                    setOpponentBuildingZoneSizes(prev => {
+                        const current = prev[pid];
+                        if (current && Math.abs(current.w - width) < 1 && Math.abs(current.h - height) < 1) return prev;
+                        return { ...prev, [pid]: { w: width, h: height } };
+                    });
+                };
+
+                const observer = new ResizeObserver((entries) => {
+                    for (const entry of entries) {
+                        updateSize(entry.contentRect.width, entry.contentRect.height);
+                    }
+                });
+                observer.observe(node);
+                opponentBuildingZoneObserverRefs.current[pid] = observer;
+                updateSize(node.clientWidth, node.clientHeight);
+            };
+        }
+        return opponentBuildingZoneCallbackRefs.current[pid];
+    }, []);
     const [drawAnimSlots, setDrawAnimSlots] = useState(0);
     // カードドロー検知: move前の手札枚数と現在の手札枚数を比較
     // useLayoutEffectを使用: レンダー後・ペイント前に同期実行されるため、
@@ -1591,12 +1689,52 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
             return Math.min(neededSpacing, cardWidth) - cardWidth;
         }
     };
+    const getOpponentHandLayout = (pid: string, total: number) => {
+        const cardW = isMobileTouchUi ? OPPONENT_HAND_CARD_WIDTH_MOBILE : OPPONENT_HAND_CARD_WIDTH_DESKTOP;
+        const cardH = cardW * 88 / 63;
+        const zoneSize = opponentHandZoneSizes[pid];
+        const containerW = Math.max(cardW, (zoneSize?.w ?? (cardW * 2)) - 4);
+        if (total <= 0) {
+            return {
+                cardW,
+                cardH,
+                overlapMargin: 0,
+                paddingLeft: Math.max(0, (containerW - cardW) / 2),
+            };
+        }
+
+        const step = total <= 1 ? 0 : Math.min(cardW, Math.max(0, (containerW - cardW) / (total - 1)));
+        const overlapMargin = total <= 1 ? 0 : step - cardW;
+        const totalCardsWidth = total <= 1 ? cardW : cardW + (total - 1) * step;
+        const paddingLeft = Math.max(0, (containerW - totalCardsWidth) / 2);
+        return { cardW, cardH, overlapMargin, paddingLeft };
+    };
 
     // デッキの厚みクラス判定
     const deckDepthClass = (count: number) => {
         if (count === 0) return 'empty-deck';
         if (count === 1) return 'single-card';
         return 'has-depth';
+    };
+
+    const getOpponentBuildingLayout = (pid: string, total: number) => {
+        const zoneSize = opponentBuildingZoneSizes[pid];
+        const fallbackCardH = isMobileTouchUi
+            ? Math.min(myHandLayout.cardH, mobileBaseCardH * OPPONENT_BUILDING_MOBILE_FALLBACK_SCALE)
+            : myHandLayout.cardH;
+        const verticalGutter = isMobileTouchUi
+            ? OPPONENT_BUILDING_VERTICAL_GUTTER_MOBILE
+            : OPPONENT_BUILDING_VERTICAL_GUTTER_DESKTOP;
+        const measuredAvailableH = zoneSize ? Math.max(0, zoneSize.h - verticalGutter) : fallbackCardH;
+        const rawCardH = Math.min(fallbackCardH, measuredAvailableH);
+        const cardH = rawCardH > 0 ? rawCardH : fallbackCardH;
+        const compact = isMobileTouchUi && cardH <= OPPONENT_BUILDING_COMPACT_MAX_HEIGHT;
+        return {
+            cardH,
+            cardW: cardH * 63 / 88,
+            compact,
+            showEffectText: !compact && total > 0,
+        };
     };
 
     const boardLayoutClassName = `game-bg game-layout${isMobileTouchUi ? ' mobile-touch-ui' : ''}`;
@@ -1807,9 +1945,6 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                         <button onClick={() => { soundManager.playSFX('click'); setShowDiscard(!showDiscard); }} className="stat-badge" style={{ cursor: 'pointer', border: '1px solid var(--glass-border)' }}>
                             <IconDiscard size={"calc(var(--fs) * 1.11)"} color="var(--orange)" /><b style={{ color: 'var(--orange)', fontSize: 'var(--fs-lg)' }}>{G.discard.length}</b>
                         </button>
-                        <button onClick={() => { soundManager.playSFX('click'); setShowLog(!showLog); }} className="stat-badge" style={{ cursor: 'pointer', border: '1px solid rgba(99, 102, 241, 0.15)' }}>
-                            <IconLog size={"calc(var(--fs) * 1.11)"} color="#818cf8" /><b style={{ color: '#818cf8', fontSize: 'var(--fs-lg)' }}>{G.log.length}</b>
-                        </button>
                         <button onClick={() => { soundManager.playSFX('click'); setShowSettings(true); }} className="stat-badge" style={{ cursor: 'pointer', padding: '3px 6px' }} title="音量設定">
                             {muted ? <IconSoundOff size={"calc(var(--fs) * 1.33)"} /> : <IconSoundOn size={"calc(var(--fs) * 1.33)"} />}
                         </button>
@@ -1876,6 +2011,8 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                 const isCpu = cpuConfig?.enabled && cpuConfig.cpuPlayers.includes(pid);
                                 const isNpcHandShown = !!(isCpu && npcHandVisible[pid]);
                                 const opponentActivityLabel = getOpponentActivityLabel(pid);
+                                const opponentHandLayout = getOpponentHandLayout(pid, p.hand.length);
+                                const opponentBuildingLayout = getOpponentBuildingLayout(pid, p.buildings.length);
                                 // CPUミープル飛行アニメーション用: opponent-cardにプレイヤーIDを付与
                                 return (
                                     <div key={pid} data-player-id={pid} className={`opponent-card ${active ? 'opponent-card-active' : 'opponent-card-inactive'}`}>
@@ -1920,43 +2057,50 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                         </div>
 
                                         {/* 手札（ミニ直線配置）: NPC手札トグルで表示切替 */}
-                                        <div className="opponent-hand-fan" style={{ display: 'flex', justifyContent: 'center', flexShrink: 0 }}>
-                                            {p.hand.map((c: Card, ci: number) => {
-                                                const isVisibleCard = isNpcHandShown && !isHidden(c);
-                                                return (
-                                                    <div key={c.uid}
-                                                        onPointerDown={() => { if (isVisibleCard) startCardPreview(c.defId, 4000 + pidNumber * 100 + ci); }}
-                                                        onPointerUp={endPreview}
-                                                        onPointerLeave={() => { endPreview(); endHoverPreview(); }}
-                                                        onPointerEnter={(e) => { if (isVisibleCard) startHoverCardPreview(c.defId, 4000 + pidNumber * 100 + ci, e); }}
-                                                        className="opponent-hand-card"
-                                                        style={{
-                                                            marginLeft: ci === 0 ? 0 : getCardOverlapMargin(p.hand.length, false),
-                                                            zIndex: ci + 1,
-                                                            ...(isConsumable(c)
-                                                                ? opponentConsumableCardStyle
-                                                                : isVisibleCard
-                                                                    ? opponentRevealedCardStyle
-                                                                    : {}),
-                                                            display: 'flex',
-                                                            alignItems: 'center',
-                                                            justifyContent: 'center',
-                                                            padding: '1px',
-                                                            overflow: 'hidden',
-                                                        }}>
-                                                        {isVisibleCard && (
-                                                            <div style={{ fontSize: 'var(--fs-xs)', fontWeight: 700, color: 'var(--text-primary)', textAlign: 'center', lineHeight: 1.1, wordBreak: 'break-all' }}>
-                                                                {cName(c.defId)}
-                                                            </div>
-                                                        )}
+                                        <div className="opponent-card-body">
+                                            <div className="opponent-hand-zone" ref={getOpponentHandZoneCallbackRef(pid)}>
+                                                <div className="opponent-hand-fan-shell">
+                                                    <div className="opponent-hand-fan" style={{ paddingLeft: opponentHandLayout.paddingLeft }}>
+                                                        {p.hand.map((c: Card, ci: number) => {
+                                                            const isVisibleCard = isNpcHandShown && !isHidden(c);
+                                                            return (
+                                                                <div key={c.uid}
+                                                                    onPointerDown={() => { if (isVisibleCard) startCardPreview(c.defId, 4000 + pidNumber * 100 + ci); }}
+                                                                    onPointerUp={endPreview}
+                                                                    onPointerLeave={() => { endPreview(); endHoverPreview(); }}
+                                                                    onPointerEnter={(e) => { if (isVisibleCard) startHoverCardPreview(c.defId, 4000 + pidNumber * 100 + ci, e); }}
+                                                                    className="opponent-hand-card"
+                                                                    style={{
+                                                                        width: opponentHandLayout.cardW,
+                                                                        height: opponentHandLayout.cardH,
+                                                                        marginLeft: ci === 0 ? 0 : opponentHandLayout.overlapMargin,
+                                                                        zIndex: ci + 1,
+                                                                        ...(isConsumable(c)
+                                                                            ? opponentConsumableCardStyle
+                                                                            : isVisibleCard
+                                                                                ? opponentRevealedCardStyle
+                                                                                : {}),
+                                                                        display: 'flex',
+                                                                        alignItems: 'center',
+                                                                        justifyContent: 'center',
+                                                                        padding: '1px',
+                                                                        overflow: 'hidden',
+                                                                    }}>
+                                                                    {isVisibleCard && (
+                                                                        <div style={{ fontSize: 'var(--fs-xs)', fontWeight: 700, color: 'var(--text-primary)', textAlign: 'center', lineHeight: 1.1, wordBreak: 'break-all' }}>
+                                                                            {cName(c.defId)}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            );
+                                                        })}
                                                     </div>
-                                                );
-                                            })}
-                                        </div>
+                                                </div>
+                                            </div>
 
                                         {/* 建物（カードスプライト・水平スクロール） */}
-                                        {p.buildings.length > 0 && (
-                                            <div className="opponent-buildings-scroll">
+                                            <div className="opponent-buildings-zone" ref={getOpponentBuildingZoneCallbackRef(pid)}>
+                                                <div className="opponent-buildings-scroll">
                                                 {p.buildings.map((b, bi) => {
                                                     const def = getCardDef(b.card.defId);
                                                     const borderColor = def.tags.includes('farm') ? 'var(--tag-farm-bg)' : def.tags.includes('factory') ? 'var(--tag-factory-bg)' : 'var(--glass-border)';
@@ -1967,64 +2111,60 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                             onPointerUp={endPreview}
                                                             onPointerLeave={() => { endPreview(); endHoverPreview(); }}
                                                             onPointerEnter={(e) => { startHoverCardPreview(b.card.defId, 3000 + pidNumber * 100 + bi, e); }}
-                                                            className={`opponent-building-sprite ${b.workerPlaced ? 'building-placed' : ''}`}
-                                                            style={{ borderColor }}>
+                                                            className={`opponent-building-sprite ${b.workerPlaced ? 'building-placed' : ''} ${opponentBuildingLayout.compact ? 'opponent-building-sprite-compact' : ''}`}
+                                                            style={{ borderColor, width: opponentBuildingLayout.cardW, height: opponentBuildingLayout.cardH }}>
                                                             <CardBgImage defId={b.card.defId} />
-                                                            <div style={{ fontWeight: 700, fontSize: 'var(--fs-md)', lineHeight: 1.2, color: b.workerPlaced ? 'var(--text-dim)' : 'var(--text-primary)', position: 'relative', zIndex: 1 }}>{def.name}</div>
-                                                            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2, position: 'relative', zIndex: 1 }}>
+                                                            <div className={`opponent-building-title${opponentBuildingLayout.compact ? ' compact' : ''}`} style={{ color: b.workerPlaced ? 'var(--text-dim)' : 'var(--text-primary)' }}>{def.name}</div>
+                                                            <div className={`opponent-building-meta${opponentBuildingLayout.compact ? ' compact' : ''}`}>
                                                                 <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', fontWeight: 600 }}>C{def.cost}</span>
                                                                 <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--gold-dim)', fontWeight: 600 }}>{def.vp}VP</span>
                                                             </div>
-                                                            <TagBadges defId={b.card.defId} compact={isMobileTouchUi} />
-                                                            {def.effectText && <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-dim)', marginTop: 'auto', lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{def.effectText}</div>}
+                                                            <TagBadges defId={b.card.defId} compact={isMobileTouchUi || opponentBuildingLayout.compact} />
+                                                            {opponentBuildingLayout.showEffectText && def.effectText && <div className="opponent-building-effect">{def.effectText}</div>}
                                                             {b.workerPlaced && <img src={getMeepleSrc(parseInt(pid))} className="worker-on-building-icon" alt="配置済み" />}
                                                         </div>
                                                     );
                                                 })}
+                                                </div>
                                             </div>
-                                        )}
+                                    </div>
                                     </div>
                                 );
                             })}
-                        </div>
-
-                        {/* コンパクトログ */}
-                        <div className="inline-log" style={{ marginTop: 'auto' }}>
-                            <div style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-dim)', fontWeight: 700, marginBottom: 2, display: 'flex', alignItems: 'center', gap: 3 }}>
-                                <IconLog size={"calc(var(--fs) * 1.11)"} /> LOG
-                                <button onClick={() => { soundManager.playSFX('click'); setShowLog(true); }} style={{ marginLeft: 'auto', fontSize: 'var(--fs-base)', color: 'var(--text-dim)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>全件</button>
-                            </div>
-                            {G.log.slice(-3).reverse().map((entry, i) => (
-                                <div key={G.log.length - i}
-                                    className={`log-entry ${entry.text.startsWith('===') ? 'log-entry-round' : entry.text.startsWith('---') ? 'log-entry-phase' : 'log-entry-action'}`}
-                                    style={{ fontSize: 'var(--fs-base)' }}>
-                                    {entry.text}
-                                </div>
-                            ))}
                         </div>
                     </div>
 
                     {/* ==== 右列: 公共の場 ==== */}
                     <div className="area-public" style={{ border: '1px solid var(--glass-border)', borderRadius: 4 }}>
-                        {/* 家計 */}
-                        <div className={`household-box ${wagePressure ? 'wage-pressure' : ''}`}>
-                            <div className="household-main" style={{ display: 'flex', alignItems: 'center', gap: 8, zIndex: 1 }}>
-                                <IconHouse size={"calc(var(--fs) * 1.78)"} color={wagePressure ? 'var(--red)' : 'var(--teal)'} />
-                                <div className="household-summary">
-                                    <div className="household-title" style={{ fontSize: 'var(--fs-md)', color: 'var(--text-dim)', fontWeight: 600 }}>HOUSEHOLD</div>
-                                    <div className="household-total" style={{ fontSize: 'var(--fs-4xl)', fontWeight: 900, color: wagePressure ? 'var(--red)' : 'var(--green)', lineHeight: 1 }}>${G.household}</div>
+                        <div className="public-top-bar">
+                            <div className={`household-box ${wagePressure ? 'wage-pressure' : ''}`}>
+                                <div className="household-main" style={{ display: 'flex', alignItems: 'center', gap: 8, zIndex: 1 }}>
+                                    <IconHouse size={"calc(var(--fs) * 1.78)"} color={wagePressure ? 'var(--red)' : 'var(--teal)'} />
+                                    <div className="household-summary">
+                                        <div className="household-title" style={{ fontSize: 'var(--fs-md)', color: 'var(--text-dim)', fontWeight: 600 }}>HOUSEHOLD</div>
+                                        <div className="household-total" style={{ fontSize: 'var(--fs-4xl)', fontWeight: 900, color: wagePressure ? 'var(--red)' : 'var(--green)', lineHeight: 1 }}>${G.household}</div>
+                                    </div>
+                                </div>
+                                <div className="household-meta" style={{ display: 'flex', gap: 10, zIndex: 1 }}>
+                                    <div className="household-meta-item" style={{ textAlign: 'center' }}>
+                                        <div className="household-meta-label" style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)' }}>WAGE</div>
+                                        <div className="household-meta-value" style={{ fontSize: 'var(--fs-xl3)', fontWeight: 700, color: 'var(--teal)' }}>${wage}</div>
+                                    </div>
+                                    <div className="household-meta-item" style={{ textAlign: 'center' }}>
+                                        <div className="household-meta-label" style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)' }}>ROUND</div>
+                                        <div className="household-meta-value" style={{ fontSize: 'var(--fs-xl3)', fontWeight: 700, color: 'var(--blue)' }}>{G.round}/9</div>
+                                    </div>
                                 </div>
                             </div>
-                            <div className="household-meta" style={{ display: 'flex', gap: 10, zIndex: 1 }}>
-                                <div className="household-meta-item" style={{ textAlign: 'center' }}>
-                                    <div className="household-meta-label" style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)' }}>WAGE</div>
-                                    <div className="household-meta-value" style={{ fontSize: 'var(--fs-xl3)', fontWeight: 700, color: 'var(--teal)' }}>${wage}</div>
-                                </div>
-                                <div className="household-meta-item" style={{ textAlign: 'center' }}>
-                                    <div className="household-meta-label" style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)' }}>ROUND</div>
-                                    <div className="household-meta-value" style={{ fontSize: 'var(--fs-xl3)', fontWeight: 700, color: 'var(--blue)' }}>{G.round}/9</div>
-                                </div>
-                            </div>
+                            <button
+                                onClick={() => { soundManager.playSFX('click'); setShowLog(true); }}
+                                className="log-toggle-button"
+                                type="button"
+                                aria-label="LOG"
+                            >
+                                <IconLog size={"calc(var(--fs) * 1.11)"} />
+                                <span className="log-toggle-button-label">LOG</span>
+                            </button>
                         </div>
 
                         {/* デッキ + 職場の横並びエリア */}

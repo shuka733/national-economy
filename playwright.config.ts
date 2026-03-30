@@ -24,13 +24,18 @@ export default defineConfig({
     projects: [
         {
             name: 'chromium',
-            grepInvert: /@tablet/,
+            grepInvert: /@tablet|@phone/,
             use: { ...devices['Desktop Chrome'] },
         },
         {
             name: 'ipad-pro-11-landscape',
             grep: /@tablet/,
             use: { ...devices['iPad Pro 11 landscape'] },
+        },
+        {
+            name: 'iphone-12',
+            grep: /@phone/,
+            use: { ...devices['iPhone 12'] },
         },
     ],
     /* テスト結果レポート */
