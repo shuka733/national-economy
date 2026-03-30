@@ -3298,11 +3298,15 @@ body {
   padding-bottom: 2px;
   min-height: var(--mobile-self-card-height);
   align-items: flex-end;
+  touch-action: pan-x;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .game-layout.mobile-touch-ui .building-card-in-field {
   height: var(--mobile-self-card-height);
   border-radius: 4px;
+  touch-action: pan-x;
 }
 
 .game-layout.mobile-touch-ui .my-status-panel {

@@ -142,8 +142,22 @@ test('@phone phone touch ui is applied on iPhone 12', async ({ page }) => {
     await expect(page.locator('.area-opponents .inline-log')).toHaveCount(0);
     await expect(page.locator(ROUND_LABEL).first()).toBeVisible({ timeout: 10000 });
 
-    const scrollTouchAction = await page.locator('.opponent-buildings-scroll').first().evaluate((el) => getComputedStyle(el).touchAction);
-    expect(scrollTouchAction).toContain('pan-x');
+    const opponentScrollTouchAction = await page.locator('.opponent-buildings-scroll').first().evaluate((el) => getComputedStyle(el).touchAction);
+    expect(opponentScrollTouchAction).toContain('pan-x');
+
+    const myBuildingsStyles = await page.locator('.my-buildings-scroll').evaluate((el) => {
+        const scrollTouchAction = getComputedStyle(el).touchAction;
+        const overflowX = getComputedStyle(el).overflowX;
+        const probe = document.createElement('div');
+        probe.className = 'hand-card building-card-in-field';
+        el.appendChild(probe);
+        const cardTouchAction = getComputedStyle(probe).touchAction;
+        probe.remove();
+        return { scrollTouchAction, overflowX, cardTouchAction };
+    });
+    expect(myBuildingsStyles.scrollTouchAction).toContain('pan-x');
+    expect(myBuildingsStyles.overflowX).toBe('auto');
+    expect(myBuildingsStyles.cardTouchAction).toContain('pan-x');
 
     const hasHorizontalOverflow = await page.evaluate(() => {
         const root = document.scrollingElement ?? document.documentElement;

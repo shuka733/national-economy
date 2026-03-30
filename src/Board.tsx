@@ -2859,6 +2859,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                         }}
                                         onPointerDown={() => { if (!workerDragRender) startCardPreview(b.card.defId, 1000 + bi); }}
                                         onPointerUp={() => { if (!workerDragRender) endPreview(); }}
+                                        onPointerCancel={() => { if (!workerDragRender) { endPreview(); endHoverPreview(); } }}
                                         onPointerLeave={() => { if (!workerDragRender) endPreview(); endHoverPreview(); }}
                                         onPointerEnter={(e) => { startHoverCardPreview(b.card.defId, 1000 + bi, e); }}
                                         className={`hand-card building-card-in-field ${canActivate || isPaydaySellable ? 'hand-card-playable' : ''} ${b.workerPlaced && !isPaydayPhase ? 'building-placed' : ''} ${workerDragRender?.hoveredUid === b.card.uid && canActivate ? 'worker-drag-hover' : ''}`}
