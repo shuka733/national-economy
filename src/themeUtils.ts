@@ -4,7 +4,7 @@
 import type { ThemeName } from './App';
 
 /** テーマ別画像を持つテーマ一覧（これらはテーマ別サブフォルダにカード画像を持つ） */
-const THEMED_IMAGE_THEMES: ThemeName[] = ['japanese', 'watercolor'];
+const THEMED_IMAGE_THEMES: ThemeName[] = ['paper', 'japanese', 'watercolor'];
 
 /**
  * 現在のテーマを取得する（CSSのdata-theme属性から読み取る）

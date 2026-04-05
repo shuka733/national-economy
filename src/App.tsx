@@ -87,7 +87,7 @@ function loadOrCreateSessionStoredValue(storageKey: string, createValue: () => s
 
 function getThemeBackgroundAsset(theme: ThemeName, kind: 'title' | 'game'): string {
     const suffix = kind === 'title' ? 'bg_title.png' : 'bg_game.png';
-    if (theme === 'default') return '';
+    if (theme === 'default' || theme === 'paper') return '';
     if (theme === 'steampunk') return suffix;
     return `${theme}_${suffix}`;
 }
@@ -366,16 +366,17 @@ function StartNotification({ playerName, startPlayerName, onDismiss }: { playerN
 // メインメニュー：モード選択のみ
 // ============================================================
 /** テーマ名の型定義 */
-export type ThemeName = 'default' | 'steampunk' | 'japanese' | 'watercolor';
+export type ThemeName = 'default' | 'paper' | 'steampunk' | 'japanese' | 'watercolor';
 
 /** テーマ表示情報 */
 const THEME_INFO: Record<ThemeName, { label: string; icon: string }> = {
+    paper: { label: '紙版', icon: '紙' },
     default: { label: 'Classic', icon: '🏭' },
     steampunk: { label: 'Steampunk', icon: '⚙️' },
     japanese: { label: '和風', icon: '🏯' },
     watercolor: { label: '水彩', icon: '🎨' },
 };
-const THEME_ORDER: ThemeName[] = ['default', 'steampunk', 'japanese', 'watercolor'];
+const THEME_ORDER: ThemeName[] = ['default', 'paper', 'steampunk', 'japanese', 'watercolor'];
 
 function MainMenuScreen({ onLocal, onOnline, onDevGallery, theme, onCycleTheme }: {
     onLocal: () => void;

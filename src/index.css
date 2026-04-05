@@ -131,6 +131,53 @@
 
 /* --- 和風テーマ（藍色・朱赤ベース） ---
    使い方: document.documentElement.dataset.theme = 'japanese' */
+/* --- 紙版テーマ: ベージュ紙と濃いインク寄り --- */
+[data-theme="paper"] {
+  --bg-deep: #14100a;
+  --bg-primary: #1b1610;
+  --bg-secondary: #262018;
+  --bg-card: #2f271d;
+  --bg-elevated: #392f24;
+
+  --text-primary: #f4ead7;
+  --text-secondary: #c5b59a;
+  --text-dim: #857760;
+
+  --gold: #cfb06d;
+  --gold-light: #dec48d;
+  --gold-dim: #8f7440;
+  --teal: #8ea18a;
+  --teal-dim: #506250;
+
+  --glass-bg: rgba(33, 27, 20, 0.86);
+  --glass-border: rgba(216, 193, 144, 0.15);
+  --glow-gold: 0 0 20px rgba(207, 176, 109, 0.25);
+  --glow-teal: 0 0 14px rgba(142, 161, 138, 0.16);
+
+  --teal-15: rgba(142, 161, 138, 0.15);
+  --teal-40: rgba(142, 161, 138, 0.4);
+  --teal-60: rgba(142, 161, 138, 0.6);
+  --gold-15: rgba(207, 176, 109, 0.15);
+  --gold-40: rgba(207, 176, 109, 0.4);
+  --gold-60: rgba(207, 176, 109, 0.6);
+
+  --tag-farm: #9bb06f;
+  --tag-farm-bg: rgba(132, 160, 86, 0.28);
+  --tag-factory: #8ba0bb;
+  --tag-factory-bg: rgba(100, 124, 150, 0.28);
+  --tag-lock: #cfb06d;
+  --tag-lock-bg: rgba(196, 164, 92, 0.28);
+
+  --blue: #8fb2d8;
+  --green: #98b86d;
+  --purple: #a28ab2;
+  --orange: #d18a42;
+  --red: #d66262;
+  --red-30: rgba(214, 98, 98, 0.3);
+
+  --card-image-overlay: #6d5c45;
+}
+
 [data-theme="japanese"] {
   /* ベースカラー: 墨・紺系 */
   --bg-deep: #0a0e18;
