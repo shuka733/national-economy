@@ -1,7 +1,7 @@
 // ============================================================
 // Board.tsx  –  メインUI (v8: 3カラムレイアウト + エフェクト)
 // ============================================================
-import React, { useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import type { BoardProps } from 'boardgame.io/react';
 import type { GameState, Card, PlayerState, Workplace, PaydayPlayerState } from './types';
 import { getConstructionCost, isConsumable, getWagePerWorker, canBuildAnything, canBuildFarmFree, canDualConstruct, canPlaceOnBuilding, getRoundWorkplaceInfo } from './game';
@@ -15,7 +15,19 @@ import { SoundSettings } from './SoundSettings';
 import { CPUSettings } from './CPUSettings';
 import { useAnimations } from './components/AnimationLayer';
 import { BgImageOverlay } from './components/BgImageOverlay';
-import { getThemedCardImagePath, getThemedWorkplaceImagePath } from './themeUtils';
+import {
+    buildPaperAutomatonVariantMap,
+    getCurrentTheme,
+    preloadAssetImages,
+    getSoldWorkplaceCardUid,
+    getResolvedDeckFaceAssetPath,
+    getThemeCardAspectRatio,
+    getThemedCardImagePath,
+    getThemedCardImagePathForCard,
+    getResolvedWorkplaceImagePath,
+    isPaperTheme,
+} from './themeUtils';
+import type { ThemedCardImageRef } from './themeUtils';
 import {
     canUseHoverInteractions,
     getFullscreenFallbackMessage,
@@ -157,13 +169,83 @@ function renderEffectText(text: string): React.ReactNode {
     return parts;
 }
 
-/** カード背景画像: テキストの背面に半透明で表示 */
-function CardBgImage({ defId }: { defId: string }) {
-    if (defId === CONSUMABLE_DEF_ID) return null;
-    const d = getCardDef(defId);
-    if (!d.image) return null;
-    const themedPath = getThemedCardImagePath(d.image);
-    return <BgImageOverlay src={`${import.meta.env.BASE_URL}${themedPath.replace(/^\//, '')}`} />;
+function isPaperThemeActive(): boolean {
+    return isPaperTheme();
+}
+
+function toAssetUrl(path: string): string {
+    return `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
+}
+
+function collectCardsForPaperVariantMap(G: GameState): Array<Pick<Card, 'uid' | 'defId'>> {
+    return [
+        ...G.deck,
+        ...G.discard,
+        ...Object.values(G.players).flatMap(player => [
+            ...player.hand,
+            ...player.buildings.map(slot => slot.card),
+        ]),
+        ...(G.designOfficeState?.revealedCards ?? []),
+    ];
+}
+
+function buildGamePaperAutomatonVariantMap(G: GameState): Record<string, string> {
+    return buildPaperAutomatonVariantMap(collectCardsForPaperVariantMap(G), G.publicWorkplaces);
+}
+
+function toDisplayCardRef(card: Pick<Card, 'uid' | 'defId'>, paperAutomatonVariantMap: Record<string, string>): ThemedCardImageRef {
+    return {
+        defId: card.defId,
+        paperVariant: card.defId === 'gl_automaton' ? paperAutomatonVariantMap[card.uid] : undefined,
+    };
+}
+
+function toSoldWorkplaceDisplayCardRef(
+    workplace: Pick<Workplace, 'id' | 'fromBuildingDefId'>,
+    paperAutomatonVariantMap: Record<string, string>,
+): ThemedCardImageRef | null {
+    if (!workplace.fromBuildingDefId) return null;
+    const soldCardUid = getSoldWorkplaceCardUid(workplace.id);
+    return {
+        defId: workplace.fromBuildingDefId,
+        paperVariant: workplace.fromBuildingDefId === 'gl_automaton' && soldCardUid
+            ? paperAutomatonVariantMap[soldCardUid]
+            : undefined,
+    };
+}
+
+function PaperFaceImage({ src, alt, className }: { src: string; alt: string; className?: string }) {
+    return (
+        <img
+            src={toAssetUrl(src)}
+            alt={alt}
+            loading="eager"
+            decoding="async"
+            className={className}
+            style={{
+                position: 'absolute',
+                left: '50%',
+                top: '50%',
+                width: 'calc(100% + 2px)',
+                height: 'calc(100% + 2px)',
+                transform: 'translate(-50%, -50%)',
+                objectFit: 'contain',
+                pointerEvents: 'none',
+                userSelect: 'none',
+            }}
+        />
+    );
+}
+
+/** カード背景画像: 通常テーマでは半透明背景、紙版では完成カード面をそのまま表示 */
+function CardBgImage({ card }: { card: ThemedCardImageRef }) {
+    const themedPath = getThemedCardImagePathForCard(card);
+    if (!themedPath) return null;
+    const alt = card.defId === CONSUMABLE_DEF_ID ? '消費財' : getCardDef(card.defId).name;
+    if (isPaperThemeActive()) {
+        return <PaperFaceImage src={themedPath} alt={alt} className="paper-card-face-image" />;
+    }
+    return <BgImageOverlay src={toAssetUrl(themedPath)} />;
 }
 
 /** ラウンド番号 → 職場ID マッピング (game.ts getRoundWorkplaceInfoから取得) */
@@ -197,8 +279,24 @@ function getWorkplaceImage(wpId: string): string | null {
 function WorkplaceBgImage({ wpId }: { wpId: string }) {
     const img = getWorkplaceImage(wpId);
     if (!img) return null;
-    const themedImg = getThemedWorkplaceImagePath(img);
+    const themedImg = getResolvedWorkplaceImagePath(img);
+    if (isPaperThemeActive()) {
+        return <PaperFaceImage src={`/${themedImg.replace(/^\//, '')}`} alt={wpId} className="paper-card-face-image" />;
+    }
     return <BgImageOverlay src={`${import.meta.env.BASE_URL}${themedImg}`} />;
+}
+
+function PaperDeckFaceImage({
+    deckKind,
+    version,
+}: {
+    deckKind: 'building' | 'consumable';
+    version: GameState['version'];
+}) {
+    const src = getResolvedDeckFaceAssetPath(deckKind, version);
+    if (!src) return null;
+    const alt = deckKind === 'building' ? '建物デッキ' : '消費財デッキ';
+    return <PaperFaceImage src={src} alt={alt} className="paper-card-face-image paper-deck-face-image" />;
 }
 
 /** CPU自動プレイ用: GameStateのフェーズ・選択状態を一意表現する文字列を生成
@@ -233,6 +331,9 @@ function computeCpuStateSignature(G: GameState, activePid: string): string {
 // メインBoard
 // ============================================================
 export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<GameState> & { cpuConfig?: CPUConfig }) {
+    const currentTheme = getCurrentTheme();
+    const paperTheme = currentTheme === 'paper';
+    const cardAspectRatio = getThemeCardAspectRatio(currentTheme);
     const [showDiscard, setShowDiscard] = useState(false);
     // NPC手札表示トグル（pid → 表示中かどうか）
     const [npcHandVisible, setNpcHandVisible] = useState<Record<string, boolean>>({});
@@ -251,7 +352,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     // 手札長押し/ホバープレビュー用
     // プレビューデータ型: カード or 公共職場
     type PreviewData =
-        | { type: 'card'; defId: string }
+        | { type: 'card'; card: ThemedCardImageRef }
         | { type: 'workplace'; wpId: string; name: string; effectText: string; multipleAllowed: boolean };
     type HoverPreviewMode = 'auto' | 'above-hand';
     type PlacementDelta =
@@ -359,14 +460,14 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
         if (previewTimerRef.current) { clearTimeout(previewTimerRef.current); previewTimerRef.current = null; }
     };
     // カード用プレビュー開始
-    const startCardPreview = (defId: string, cardIdx?: number, previewMode: HoverPreviewMode = 'auto') => {
+    const startCardPreview = (card: Pick<Card, 'uid' | 'defId'>, cardIdx?: number, previewMode: HoverPreviewMode = 'auto') => {
         clearPreviewTimer();
         isHoverPreviewRef.current = false;
         hoverPreviewModeRef.current = previewMode;
         previewSourceRef.current = 'press';
         pressingCardIdxRef.current = cardIdx ?? null;
         previewTimerRef.current = setTimeout(() => {
-            setPreviewData({ type: 'card', defId });
+            setPreviewData({ type: 'card', card: getDisplayCardRef(card) });
         }, TIMING.LONG_PRESS_MS);
     };
     // 公共職場用プレビュー開始
@@ -379,14 +480,15 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
         previewTimerRef.current = setTimeout(() => {
             // 売却建物（fromBuildingDefIdあり）はCardDefフォーマットで表示
             if (wp.fromBuildingDefId) {
-                setPreviewData({ type: 'card', defId: wp.fromBuildingDefId });
+                const soldCard = getSoldWorkplaceDisplayCard(wp);
+                if (soldCard) setPreviewData({ type: 'card', card: soldCard });
             } else {
                 setPreviewData({ type: 'workplace', wpId: wp.id, name: wp.name, effectText: wp.effectText, multipleAllowed: wp.multipleAllowed });
             }
         }, TIMING.LONG_PRESS_MS);
     };
     // ホバーによるカードプレビュー開始（eから元カードの位置を記録）
-    const startHoverCardPreview = (defId: string, cardIdx: number, e: React.PointerEvent) => {
+    const startHoverCardPreview = (card: Pick<Card, 'uid' | 'defId'>, cardIdx: number, e: React.PointerEvent) => {
         if (!featureFlags.HOVER_PREVIEW || !hoverInteractionsEnabled) return;
         clearPreviewTimer();
         // 既存のホバープレビューがあれば閉じてから新しいプレビューを開始
@@ -400,10 +502,10 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
         pressingCardIdxRef.current = cardIdx;
         previewTimerRef.current = setTimeout(() => {
             isHoverPreviewRef.current = true;
-            setPreviewData({ type: 'card', defId });
+            setPreviewData({ type: 'card', card: getDisplayCardRef(card) });
         }, TIMING.HOVER_PREVIEW_MS);
     };
-    const startHoverCardPreviewWithMode = (defId: string, cardIdx: number, e: React.PointerEvent, hoverMode: HoverPreviewMode) => {
+    const startHoverCardPreviewWithMode = (card: Pick<Card, 'uid' | 'defId'>, cardIdx: number, e: React.PointerEvent, hoverMode: HoverPreviewMode) => {
         if (!featureFlags.HOVER_PREVIEW || !hoverInteractionsEnabled) return;
         clearPreviewTimer();
         if (isHoverPreviewRef.current) {
@@ -416,7 +518,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
         pressingCardIdxRef.current = cardIdx;
         previewTimerRef.current = setTimeout(() => {
             isHoverPreviewRef.current = true;
-            setPreviewData({ type: 'card', defId });
+            setPreviewData({ type: 'card', card: getDisplayCardRef(card) });
         }, TIMING.HOVER_PREVIEW_MS);
     };
     // ホバーによる職場プレビュー開始（eから元カードの位置を記録）
@@ -434,7 +536,8 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
         previewTimerRef.current = setTimeout(() => {
             isHoverPreviewRef.current = true;
             if (wp.fromBuildingDefId) {
-                setPreviewData({ type: 'card', defId: wp.fromBuildingDefId });
+                const soldCard = getSoldWorkplaceDisplayCard(wp);
+                if (soldCard) setPreviewData({ type: 'card', card: soldCard });
             } else {
                 setPreviewData({ type: 'workplace', wpId: wp.id, name: wp.name, effectText: wp.effectText, multipleAllowed: wp.multipleAllowed });
             }
@@ -591,6 +694,17 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     // G: UIレンダリング用（アニメーション中は凍結された前の状態を使用）
     // rawG: ロジック用（useLayoutEffect, moves, CPU処理で使用）
     const G = drawAnimRef.current ? frozenGRef.current : rawG;
+    const paperAutomatonVariantMap = useMemo(() => buildGamePaperAutomatonVariantMap(rawG), [rawG]);
+    const getDisplayCardRef = useCallback(
+        (card: Pick<Card, 'uid' | 'defId'>): ThemedCardImageRef => toDisplayCardRef(card, paperAutomatonVariantMap),
+        [paperAutomatonVariantMap],
+    );
+    const getSoldWorkplaceDisplayCard = useCallback(
+        (workplace: Pick<Workplace, 'id' | 'fromBuildingDefId'>): ThemedCardImageRef | null => (
+            toSoldWorkplaceDisplayCardRef(workplace, paperAutomatonVariantMap)
+        ),
+        [paperAutomatonVariantMap],
+    );
     const displayPhase = G.phase;
     const wage = getWagePerWorker(G.round);
 
@@ -710,6 +824,19 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                 return null;
             };
             const startSequence = () => {
+                if (paperTheme) {
+                    setFlipRound(null);
+                    setRoundCardAnim(null);
+                    setRoundAnnounce(rawG.round);
+                    const announceTimer = setTimeout(() => {
+                        setRoundAnnounce((prev) => (prev === rawG.round ? null : prev));
+                    }, TIMING.ANNOUNCE_SHOW_MS);
+                    return {
+                        moveTimer: null as ReturnType<typeof setTimeout> | null,
+                        announceTimer,
+                        doneTimer: null as ReturnType<typeof setTimeout> | null,
+                    };
+                }
                 // デッキ位置を事前取得
                 const deckRect = roundDeckRef.current?.getBoundingClientRect() ?? null;
                 // ① フリップ開始
@@ -783,13 +910,13 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                 const { moveTimer, announceTimer, doneTimer } = startSequence();
                 return () => {
                     cancelled = true;
-                    clearTimeout(moveTimer);
-                    clearTimeout(announceTimer);
-                    clearTimeout(doneTimer);
+                    if (moveTimer) clearTimeout(moveTimer);
+                    if (announceTimer) clearTimeout(announceTimer);
+                    if (doneTimer) clearTimeout(doneTimer);
                 };
             }
         }
-    }, [isOnline, myPid, rawG.lastPlacementEvent, rawG.round]);
+    }, [isOnline, myPid, paperTheme, rawG.lastPlacementEvent, rawG.round]);
 
     // ====== アニメーション管理 ======
     const { triggerRipple, triggerMeepleFlight, triggerDraw, isDrawAnimating, AnimationOverlay } = useAnimations();
@@ -949,9 +1076,9 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                 setDrawAnimSlots(handDiff);
                 // 即座にドロー2_上開始（ドロー1_下なし）
                 setTimeout(() => { setDrawAnimSlots(0); }, 10);
-                const HAND_IN_DURATION = 400;
-                const STAGGER_DELAY = 100;
-                const POST_DRAW_WAIT = 500;
+                const HAND_IN_DURATION = TIMING.HAND_IN_MS;
+                const STAGGER_DELAY = TIMING.STAGGER_DELAY_MS;
+                const POST_DRAW_WAIT = TIMING.POST_DRAW_WAIT_MS;
                 const handInTotalTime = HAND_IN_DURATION + (handDiff - 1) * STAGGER_DELAY;
                 setTimeout(() => {
                     setDrawAnimSlots(0);
@@ -965,6 +1092,12 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
 
             const buildingDrawCount = Math.max(0, deckDiff);
             const consumableDrawCount = Math.max(0, handDiff - buildingDrawCount);
+            const buildingDeckFaceSrc = paperTheme
+                ? getResolvedDeckFaceAssetPath('building', rawG.version, currentTheme)
+                : null;
+            const consumableDeckFaceSrc = paperTheme
+                ? getResolvedDeckFaceAssetPath('consumable', rawG.version, currentTheme)
+                : null;
 
             // ドロー中の新カードを画面外に配置
             setDrawAnimSlots(handDiff);
@@ -977,7 +1110,10 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
             if (buildingDrawCount > 0) {
                 const bRect = cached?.buildingRect ?? buildingDeckRef.current?.getBoundingClientRect();
                 if (bRect) {
-                    triggerDraw('building', buildingDrawCount, bRect, () => { });
+                    triggerDraw('building', buildingDrawCount, bRect, {
+                        faceSrc: buildingDeckFaceSrc,
+                        onHandInStart: () => { },
+                    });
                 }
             }
 
@@ -988,7 +1124,10 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                     // 建物ドローがある場合はその分遅延させる
                     const delay = buildingDrawCount * 100;
                     setTimeout(() => {
-                        triggerDraw('consumable', consumableDrawCount, cRect, () => { });
+                        triggerDraw('consumable', consumableDrawCount, cRect, {
+                            faceSrc: consumableDeckFaceSrc,
+                            onHandInStart: () => { },
+                        });
                     }, delay);
                 }
             }
@@ -1026,13 +1165,19 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
 
             const cached = deckRectCacheRef.current as { buildingRect: DOMRect | null; consumableRect: DOMRect | null } | null;
             const bRect = cached?.buildingRect ?? buildingDeckRef.current?.getBoundingClientRect();
+            const buildingDeckFaceSrc = paperTheme
+                ? getResolvedDeckFaceAssetPath('building', rawG.version, currentTheme)
+                : null;
             deckRectCacheRef.current = null;
 
-            const DECK_OUT_DURATION = 300;
-            const STAGGER_DELAY = 100;
+            const DECK_OUT_DURATION = TIMING.DECK_OUT_MS;
+            const STAGGER_DELAY = TIMING.STAGGER_DELAY_MS;
 
             if (bRect) {
-                triggerDraw('building', deckDiff, bRect, () => { });
+                triggerDraw('building', deckDiff, bRect, {
+                    faceSrc: buildingDeckFaceSrc,
+                    onHandInStart: () => { },
+                });
             }
 
             // ドロー1_下完了後にDesignOfficeUI表示のためアニメーション終了
@@ -1059,7 +1204,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
         const containerH = containerRect.height;
         const containerW = containerRect.width;
         const cardH = (containerH - 30) * 0.84;
-        const cardW = cardH * 63 / 88;
+        const cardW = cardH * cardAspectRatio;
 
         if (totalCards <= 0) return [];
         if (totalCards === 1) {
@@ -1077,7 +1222,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
             slots.push({ x: startX + i * spacing, y: cardY, w: cardW, h: cardH });
         }
         return slots;
-    }, []);
+    }, [cardAspectRatio]);
 
     const snapshotAnimationRects = useCallback(() => {
         const players: Record<string, DOMRect> = {};
@@ -1485,6 +1630,105 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     // ホットシートでカレントプレイヤー = 自分
     const myIdx = parseInt(myPid);
     const myPlayer = G.players[myPid];
+    const paperPreloadTargets = useMemo(() => {
+        if (!paperTheme) return { visible: [] as string[], upcoming: [] as string[] };
+
+        const visible = new Set<string>();
+        const upcoming = new Set<string>();
+        const addPath = (target: Set<string>, path: string | null | undefined) => {
+            const trimmed = path?.trim();
+            if (!trimmed) return;
+            target.add(trimmed.startsWith('/') ? trimmed : `/${trimmed}`);
+        };
+        const addCardPath = (target: Set<string>, cardRef: ThemedCardImageRef | null | undefined) => {
+            if (!cardRef) return;
+            addPath(target, getThemedCardImagePathForCard(cardRef, currentTheme));
+        };
+        const addWorkplacePath = (target: Set<string>, wpId: string | null | undefined) => {
+            if (!wpId) return;
+            const img = getWorkplaceImage(wpId);
+            if (!img) return;
+            addPath(target, getResolvedWorkplaceImagePath(img, currentTheme));
+        };
+
+        addPath(visible, getResolvedDeckFaceAssetPath('building', rawG.version, currentTheme));
+        addPath(visible, getResolvedDeckFaceAssetPath('consumable', rawG.version, currentTheme));
+        addPath(visible, getThemedCardImagePathForCard({ defId: CONSUMABLE_DEF_ID }, currentTheme));
+
+        for (const [pid, player] of Object.entries(rawG.players)) {
+            if (pid === myPid || npcHandVisible[pid]) {
+                for (const card of player.hand) {
+                    if (!isHidden(card)) addCardPath(visible, getDisplayCardRef(card));
+                }
+            }
+            for (const slot of player.buildings) {
+                addCardPath(visible, getDisplayCardRef(slot.card));
+            }
+        }
+
+        const discardCards = showDiscard ? rawG.discard : rawG.discard.slice(-3);
+        for (const card of discardCards) {
+            addCardPath(visible, getDisplayCardRef(card));
+        }
+        for (const card of rawG.designOfficeState?.revealedCards ?? []) {
+            addCardPath(visible, getDisplayCardRef(card));
+        }
+        for (const card of rawG.deck.slice(-4)) {
+            if (!isHidden(card)) addCardPath(upcoming, getDisplayCardRef(card));
+        }
+        for (const workplace of rawG.publicWorkplaces) {
+            addWorkplacePath(visible, workplace.id);
+            addCardPath(visible, getSoldWorkplaceDisplayCard(workplace));
+        }
+        if (previewData?.type === 'card') {
+            addCardPath(visible, previewData.card);
+        } else if (previewData?.type === 'workplace') {
+            addWorkplacePath(visible, previewData.wpId);
+        }
+
+        return { visible: [...visible], upcoming: [...upcoming] };
+    }, [
+        currentTheme,
+        getDisplayCardRef,
+        getSoldWorkplaceDisplayCard,
+        myPid,
+        npcHandVisible,
+        paperTheme,
+        previewData,
+        rawG.deck,
+        rawG.designOfficeState?.revealedCards,
+        rawG.discard,
+        rawG.players,
+        rawG.publicWorkplaces,
+        rawG.version,
+        showDiscard,
+    ]);
+    useEffect(() => {
+        if (!paperTheme || isDrawAnimating || paperPreloadTargets.visible.length === 0) return;
+
+        const idleWindow = window as Window & {
+            requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+            cancelIdleCallback?: (handle: number) => void;
+        };
+        let timeoutId: number | null = null;
+        let idleId: number | null = null;
+        const run = () => preloadAssetImages(paperPreloadTargets.visible, { mode: 'decode' });
+
+        if (idleWindow.requestIdleCallback) {
+            idleId = idleWindow.requestIdleCallback(() => run(), { timeout: 300 });
+        } else {
+            timeoutId = window.setTimeout(run, 32);
+        }
+
+        return () => {
+            if (idleId !== null && idleWindow.cancelIdleCallback) idleWindow.cancelIdleCallback(idleId);
+            if (timeoutId !== null) window.clearTimeout(timeoutId);
+        };
+    }, [isDrawAnimating, paperPreloadTargets.visible, paperTheme]);
+    useEffect(() => {
+        if (!paperTheme || isDrawAnimating || paperPreloadTargets.upcoming.length === 0) return;
+        preloadAssetImages(paperPreloadTargets.upcoming, { mode: 'load' });
+    }, [isDrawAnimating, paperPreloadTargets.upcoming, paperTheme]);
     const playerName = (pid: string | number) => getPlayerDisplayName(G.playerNames, pid);
     const playerChipLabel = (pid: string | number) => shortenPlayerDisplayName(playerName(pid), 8);
     const renderWorkerChip = (pid: number, key: React.Key) => (
@@ -1644,17 +1888,17 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     const getMobileBaseCardH = () => {
         const mobileViewportW = typeof window !== 'undefined' ? window.innerWidth : containerSize.w;
         const mobilePubCardW = Math.min(54, Math.max(28, (mobileViewportW - 340) / 8));
-        return mobilePubCardW * 88 / 63;
+        return mobilePubCardW / cardAspectRatio;
     };
     const getMyHandLayout = (total: number) => {
-        const horizontalInset = isMobileTouchUi ? 2 : 16;
+        const horizontalInset = isMobileTouchUi ? (paperTheme ? 0 : 2) : 16;
         const containerW = Math.max(0, containerSize.w - horizontalInset);
         const mobileBaseCardH = getMobileBaseCardH();
-        const mobileVerticalGutter = 2;
+        const mobileVerticalGutter = isMobileTouchUi && paperTheme ? 0 : 2;
         const maxCardH = isMobileTouchUi
             ? Math.max(mobileBaseCardH, Math.max(0, containerSize.h - mobileVerticalGutter * 2))
             : Math.max(0, containerSize.h * handCardScale);
-        const maxCardW = maxCardH * 63 / 88;
+        const maxCardW = maxCardH * cardAspectRatio;
         if (total <= 0) {
             return {
                 cardH: maxCardH,
@@ -1678,7 +1922,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
             // containerSizeはResizeObserverで追跡済み（padding 8px*2を除く）
             const containerW = containerSize.w - 16;
             const cardH = containerSize.h * handCardScale;
-            const cardW = cardH * 63 / 88;
+            const cardW = cardH * cardAspectRatio;
             const neededSpacing = (containerW - cardW) / (total - 1);
             return Math.min(neededSpacing, cardW) - cardW;
         } else {
@@ -1691,7 +1935,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     };
     const getOpponentHandLayout = (pid: string, total: number) => {
         const cardW = isMobileTouchUi ? OPPONENT_HAND_CARD_WIDTH_MOBILE : OPPONENT_HAND_CARD_WIDTH_DESKTOP;
-        const cardH = cardW * 88 / 63;
+        const cardH = cardW / cardAspectRatio;
         const zoneSize = opponentHandZoneSizes[pid];
         const containerW = Math.max(cardW, (zoneSize?.w ?? (cardW * 2)) - 4);
         if (total <= 0) {
@@ -1731,7 +1975,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
         const compact = isMobileTouchUi && cardH <= OPPONENT_BUILDING_COMPACT_MAX_HEIGHT;
         return {
             cardH,
-            cardW: cardH * 63 / 88,
+            cardW: cardH * cardAspectRatio,
             compact,
             showEffectText: !compact && total > 0,
         };
@@ -1739,7 +1983,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
 
     const boardLayoutClassName = `game-bg game-layout${isMobileTouchUi ? ' mobile-touch-ui' : ''}`;
     const gameScalerClassName = `game-scaler${isMobileTouchUi ? ' mobile-touch-ui' : ''}`;
-    const handCardScale = isMobileTouchUi ? 0.9 : 0.84;
+    const handCardScale = isMobileTouchUi ? 0.9 : (paperTheme ? 1.0 : 0.84);
     const myHandSource = drawAnimRef.current ? (rawG.players[myPid]?.hand ?? myPlayer.hand) : myPlayer.hand;
     const myHandLayout = getMyHandLayout(myHandSource.length);
     const mobileBaseCardH = getMobileBaseCardH();
@@ -1844,83 +2088,88 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
 
                 if (previewData.type === 'card') {
                     // カード（建物 / 売却建物）フォーマット
-                    const pDef = getCardDef(previewData.defId);
+                    const pDef = getCardDef(previewData.card.defId);
                     if (!pDef) return null;
-                    const imgSrc = pDef.image ? `${import.meta.env.BASE_URL}${getThemedCardImagePath(pDef.image).replace(/^\//, '')}` : null;
+                    const themedCardPath = getThemedCardImagePathForCard(previewData.card, currentTheme);
+                    const imgSrc = themedCardPath ? toAssetUrl(themedCardPath) : null;
                     const tagLabel = pDef.tags.includes('farm') ? '🌿 農場' : pDef.tags.includes('factory') ? '🏭 工場' : '🏢 施設';
                     return (
                         <div className={`card-preview-overlay${featureFlags.DARKEN_ON_PREVIEW ? '' : ' no-darken'}`} onPointerUp={closePreview} onClick={closePreview} onPointerMove={handlePreviewPointerMove}>
-                            <div className="card-preview-card" style={previewStyle || undefined}>
+                            <div className={`card-preview-card${paperTheme ? ' paper-preview-card' : ''}`} style={previewStyle || undefined}>
                                 <div className="card-preview-image">
-                                    {imgSrc && <img src={imgSrc} alt={pDef.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
+                                    {imgSrc && <img src={imgSrc} alt={pDef.name} style={{ width: '100%', height: '100%', objectFit: paperTheme ? 'contain' : 'cover' }} />}
                                 </div>
-                                <div className="card-preview-info">
-                                    {/* ヘッダー: カード名 + タイプ */}
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-2)' }}>
-                                        <div style={{ fontWeight: 900, fontSize: 'var(--fs-4xl)', color: 'var(--text-primary)', letterSpacing: '0.5px' }}>{pDef.name}</div>
-                                        <span style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-dim)', fontWeight: 500 }}>{tagLabel}</span>
-                                    </div>
-                                    {/* スタッツ行: コスト / VP */}
-                                    <div style={{ display: 'flex', gap: 'var(--sp-4)', marginBottom: 'var(--sp-3)', alignItems: 'center' }}>
-                                        <span className="card-preview-stat">
-                                            <span style={{ color: 'var(--gold-light)', fontSize: 'var(--fs-3xl)', fontWeight: 800 }}>C{pDef.cost}</span>
-                                        </span>
-                                        <span className="card-preview-stat">
-                                            <span style={{ color: 'var(--gold-light)', fontSize: 'var(--fs-3xl)', fontWeight: 800 }}>{pDef.vp}VP</span>
-                                        </span>
-                                    </div>
-                                    {/* セパレーター */}
-                                    <div className="card-preview-separator" />
-                                    {/* 効果テキスト: ハイライト付き */}
-                                    {pDef.effectText && (
-                                        <div className="card-preview-effect">
-                                            {renderEffectText(pDef.effectText)}
+                                {!paperTheme && (
+                                    <div className="card-preview-info">
+                                        {/* ヘッダー: カード名 + タイプ */}
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-2)' }}>
+                                            <div style={{ fontWeight: 900, fontSize: 'var(--fs-4xl)', color: 'var(--text-primary)', letterSpacing: '0.5px' }}>{pDef.name}</div>
+                                            <span style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-dim)', fontWeight: 500 }}>{tagLabel}</span>
                                         </div>
-                                    )}
-                                    {/* タグバッジ */}
-                                    {(pDef.tags.length > 0 || pDef.unsellable) && (
-                                        <div style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap', marginTop: 'var(--sp-3)' }}>
-                                            {pDef.tags.includes('farm') && <span className="tag-badge tag-farm"><TagFarm size={"calc(var(--fs) * 1.33)"} /> 農園</span>}
-                                            {pDef.tags.includes('factory') && <span className="tag-badge tag-factory"><TagFactory size={"calc(var(--fs) * 1.33)"} /> 工場</span>}
-                                            {pDef.unsellable && <span className="tag-badge tag-lock"><TagLock size={"calc(var(--fs) * 1.33)"} /> 売却不可</span>}
-                                            {pDef.consumeOnUse && <span className="tag-badge" style={{ color: 'var(--red)', background: 'var(--red-15)' }}>🔥 使い捨て</span>}
+                                        {/* スタッツ行: コスト / VP */}
+                                        <div style={{ display: 'flex', gap: 'var(--sp-4)', marginBottom: 'var(--sp-3)', alignItems: 'center' }}>
+                                            <span className="card-preview-stat">
+                                                <span style={{ color: 'var(--gold-light)', fontSize: 'var(--fs-3xl)', fontWeight: 800 }}>C{pDef.cost}</span>
+                                            </span>
+                                            <span className="card-preview-stat">
+                                                <span style={{ color: 'var(--gold-light)', fontSize: 'var(--fs-3xl)', fontWeight: 800 }}>{pDef.vp}VP</span>
+                                            </span>
                                         </div>
-                                    )}
-                                </div>
+                                        {/* セパレーター */}
+                                        <div className="card-preview-separator" />
+                                        {/* 効果テキスト: ハイライト付き */}
+                                        {pDef.effectText && (
+                                            <div className="card-preview-effect">
+                                                {renderEffectText(pDef.effectText)}
+                                            </div>
+                                        )}
+                                        {/* タグバッジ */}
+                                        {(pDef.tags.length > 0 || pDef.unsellable) && (
+                                            <div style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap', marginTop: 'var(--sp-3)' }}>
+                                                {pDef.tags.includes('farm') && <span className="tag-badge tag-farm"><TagFarm size={"calc(var(--fs) * 1.33)"} /> 農園</span>}
+                                                {pDef.tags.includes('factory') && <span className="tag-badge tag-factory"><TagFactory size={"calc(var(--fs) * 1.33)"} /> 工場</span>}
+                                                {pDef.unsellable && <span className="tag-badge tag-lock"><TagLock size={"calc(var(--fs) * 1.33)"} /> 売却不可</span>}
+                                                {pDef.consumeOnUse && <span className="tag-badge" style={{ color: 'var(--red)', background: 'var(--red-15)' }}>🔥 使い捨て</span>}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                         </div>
                     );
                 } else {
                     // 公共職場フォーマット（コスト/VP省略）
                     const wpImg = getWorkplaceImage(previewData.wpId);
-                    const wpImgSrc = wpImg ? `${import.meta.env.BASE_URL}${getThemedWorkplaceImagePath(wpImg)}` : null;
+                    const wpImgSrc = wpImg ? `${import.meta.env.BASE_URL}${getResolvedWorkplaceImagePath(wpImg, currentTheme)}` : null;
                     return (
                         <div className={`card-preview-overlay${featureFlags.DARKEN_ON_PREVIEW ? '' : ' no-darken'}`} onPointerUp={closePreview} onClick={closePreview} onPointerMove={handlePreviewPointerMove}>
-                            <div className="card-preview-card" style={previewStyle || undefined}>
+                            <div className={`card-preview-card${paperTheme ? ' paper-preview-card' : ''}`} style={previewStyle || undefined}>
                                 <div className="card-preview-image">
-                                    {wpImgSrc && <img src={wpImgSrc} alt={previewData.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
+                                    {wpImgSrc && <img src={wpImgSrc} alt={previewData.name} style={{ width: '100%', height: '100%', objectFit: paperTheme ? 'contain' : 'cover' }} />}
                                 </div>
-                                <div className="card-preview-info">
-                                    {/* ヘッダー: 職場名 + タイプ */}
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-2)' }}>
-                                        <div style={{ fontWeight: 900, fontSize: 'var(--fs-4xl)', color: 'var(--text-primary)', letterSpacing: '0.5px' }}>{previewData.name}</div>
-                                        <span style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-dim)', fontWeight: 500 }}>🏛️ 公共職場</span>
+                                {!paperTheme && (
+                                    <div className="card-preview-info">
+                                        {/* ヘッダー: 職場名 + タイプ */}
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-2)' }}>
+                                            <div style={{ fontWeight: 900, fontSize: 'var(--fs-4xl)', color: 'var(--text-primary)', letterSpacing: '0.5px' }}>{previewData.name}</div>
+                                            <span style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-dim)', fontWeight: 500 }}>🏛️ 公共職場</span>
+                                        </div>
+                                        {/* セパレーター */}
+                                        <div className="card-preview-separator" />
+                                        {/* 効果テキスト: ハイライト付き */}
+                                        {previewData.effectText && (
+                                            <div className="card-preview-effect">
+                                                {renderEffectText(previewData.effectText)}
+                                            </div>
+                                        )}
+                                        {/* 特殊ルール */}
+                                        {previewData.multipleAllowed && (
+                                            <div style={{ display: 'flex', gap: 'var(--sp-2)', marginTop: 'var(--sp-3)' }}>
+                                                <span className="tag-badge" style={{ color: 'var(--purple)', background: 'rgba(167,139,250,0.15)' }}>∞ 複数配置可能</span>
+                                            </div>
+                                        )}
                                     </div>
-                                    {/* セパレーター */}
-                                    <div className="card-preview-separator" />
-                                    {/* 効果テキスト: ハイライト付き */}
-                                    {previewData.effectText && (
-                                        <div className="card-preview-effect">
-                                            {renderEffectText(previewData.effectText)}
-                                        </div>
-                                    )}
-                                    {/* 特殊ルール */}
-                                    {previewData.multipleAllowed && (
-                                        <div style={{ display: 'flex', gap: 'var(--sp-2)', marginTop: 'var(--sp-3)' }}>
-                                            <span className="tag-badge" style={{ color: 'var(--purple)', background: 'rgba(167,139,250,0.15)' }}>∞ 複数配置可能</span>
-                                        </div>
-                                    )}
-                                </div>
+                                )}
                             </div>
                         </div>
                     );
@@ -2065,28 +2314,31 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                             const isVisibleCard = isNpcHandShown && !isHidden(c);
                                                             return (
                                                                 <div key={c.uid}
-                                                                    onPointerDown={() => { if (isVisibleCard) startCardPreview(c.defId, 4000 + pidNumber * 100 + ci); }}
+                                                                    onPointerDown={() => { if (isVisibleCard) startCardPreview(c, 4000 + pidNumber * 100 + ci); }}
                                                                     onPointerUp={endPreview}
                                                                     onPointerLeave={() => { endPreview(); endHoverPreview(); }}
-                                                                    onPointerEnter={(e) => { if (isVisibleCard) startHoverCardPreview(c.defId, 4000 + pidNumber * 100 + ci, e); }}
+                                                                    onPointerEnter={(e) => { if (isVisibleCard) startHoverCardPreview(c, 4000 + pidNumber * 100 + ci, e); }}
                                                                     className="opponent-hand-card"
                                                                     style={{
                                                                         width: opponentHandLayout.cardW,
                                                                         height: opponentHandLayout.cardH,
                                                                         marginLeft: ci === 0 ? 0 : opponentHandLayout.overlapMargin,
                                                                         zIndex: ci + 1,
-                                                                        ...(isConsumable(c)
-                                                                            ? opponentConsumableCardStyle
-                                                                            : isVisibleCard
-                                                                                ? opponentRevealedCardStyle
-                                                                                : {}),
+                                                                        ...(paperTheme
+                                                                            ? {}
+                                                                            : isConsumable(c)
+                                                                                ? opponentConsumableCardStyle
+                                                                                : isVisibleCard
+                                                                                    ? opponentRevealedCardStyle
+                                                                                    : {}),
                                                                         display: 'flex',
                                                                         alignItems: 'center',
                                                                         justifyContent: 'center',
                                                                         padding: '1px',
                                                                         overflow: 'hidden',
                                                                     }}>
-                                                                    {isVisibleCard && (
+                                                                    {isVisibleCard && paperTheme && <CardBgImage card={getDisplayCardRef(c)} />}
+                                                                    {isVisibleCard && !paperTheme && (
                                                                         <div style={{ fontSize: 'var(--fs-xs)', fontWeight: 700, color: 'var(--text-primary)', textAlign: 'center', lineHeight: 1.1, wordBreak: 'break-all' }}>
                                                                             {cName(c.defId)}
                                                                         </div>
@@ -2107,21 +2359,25 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                     return (
                                                         <div key={bi}
                                                             data-building-uid={b.card.uid}
-                                                            onPointerDown={() => { startCardPreview(b.card.defId, 3000 + pidNumber * 100 + bi); }}
+                                                            onPointerDown={() => { startCardPreview(b.card, 3000 + pidNumber * 100 + bi); }}
                                                             onPointerUp={endPreview}
                                                             onPointerLeave={() => { endPreview(); endHoverPreview(); }}
                                                             onPointerCancel={() => { endPreview(); endHoverPreview(); }}
-                                                            onPointerEnter={(e) => { startHoverCardPreview(b.card.defId, 3000 + pidNumber * 100 + bi, e); }}
+                                                            onPointerEnter={(e) => { startHoverCardPreview(b.card, 3000 + pidNumber * 100 + bi, e); }}
                                                             className={`opponent-building-sprite ${b.workerPlaced ? 'building-placed' : ''} ${opponentBuildingLayout.compact ? 'opponent-building-sprite-compact' : ''}`}
                                                             style={{ borderColor, width: opponentBuildingLayout.cardW, height: opponentBuildingLayout.cardH }}>
-                                                            <CardBgImage defId={b.card.defId} />
-                                                            <div className={`opponent-building-title${opponentBuildingLayout.compact ? ' compact' : ''}`} style={{ color: b.workerPlaced ? 'var(--text-dim)' : 'var(--text-primary)' }}>{def.name}</div>
-                                                            <div className={`opponent-building-meta${opponentBuildingLayout.compact ? ' compact' : ''}`}>
-                                                                <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', fontWeight: 600 }}>C{def.cost}</span>
-                                                                <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--gold-dim)', fontWeight: 600 }}>{def.vp}VP</span>
-                                                            </div>
-                                                            <TagBadges defId={b.card.defId} compact={isMobileTouchUi || opponentBuildingLayout.compact} />
-                                                            {opponentBuildingLayout.showEffectText && def.effectText && <div className="opponent-building-effect">{def.effectText}</div>}
+                                                            <CardBgImage card={getDisplayCardRef(b.card)} />
+                                                            {!paperTheme && (
+                                                                <>
+                                                                    <div className={`opponent-building-title${opponentBuildingLayout.compact ? ' compact' : ''}`} style={{ color: b.workerPlaced ? 'var(--text-dim)' : 'var(--text-primary)' }}>{def.name}</div>
+                                                                    <div className={`opponent-building-meta${opponentBuildingLayout.compact ? ' compact' : ''}`}>
+                                                                        <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', fontWeight: 600 }}>C{def.cost}</span>
+                                                                        <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--gold-dim)', fontWeight: 600 }}>{def.vp}VP</span>
+                                                                    </div>
+                                                                    <TagBadges defId={b.card.defId} compact={isMobileTouchUi || opponentBuildingLayout.compact} />
+                                                                    {opponentBuildingLayout.showEffectText && def.effectText && <div className="opponent-building-effect">{def.effectText}</div>}
+                                                                </>
+                                                            )}
                                                             {b.workerPlaced && <img src={getMeepleSrc(parseInt(pid))} className="worker-on-building-icon" alt="配置済み" />}
                                                         </div>
                                                     );
@@ -2142,7 +2398,9 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                 <div className="household-main" style={{ display: 'flex', alignItems: 'center', gap: 8, zIndex: 1 }}>
                                     <IconHouse size={"calc(var(--fs) * 1.78)"} color={wagePressure ? 'var(--red)' : 'var(--teal)'} />
                                     <div className="household-summary">
-                                        <div className="household-title" style={{ fontSize: 'var(--fs-md)', color: 'var(--text-dim)', fontWeight: 600 }}>HOUSEHOLD</div>
+                                        <div className="household-title" style={{ fontSize: 'var(--fs-md)', color: 'var(--text-dim)', fontWeight: 600 }}>
+                                            {paperTheme ? '家計' : 'HOUSEHOLD'}
+                                        </div>
                                         <div className="household-total" style={{ fontSize: 'var(--fs-4xl)', fontWeight: 900, color: wagePressure ? 'var(--red)' : 'var(--green)', lineHeight: 1 }}>${G.household}</div>
                                     </div>
                                 </div>
@@ -2157,15 +2415,30 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                     </div>
                                 </div>
                             </div>
-                            <button
-                                onClick={() => { soundManager.playSFX('click'); setShowLog(true); }}
-                                className="log-toggle-button"
-                                type="button"
-                                aria-label="LOG"
-                            >
-                                <IconLog size={"calc(var(--fs) * 1.11)"} />
-                                <span className="log-toggle-button-label">LOG</span>
-                            </button>
+                            <div className="public-top-actions">
+                                {isMobileTouchUi && (
+                                    <button
+                                        onClick={() => { soundManager.playSFX('click'); setShowSettings(true); }}
+                                        className="log-toggle-button public-sound-button"
+                                        type="button"
+                                        aria-label="音量設定"
+                                        title="音量設定"
+                                    >
+                                        {muted
+                                            ? <IconSoundOff size={"calc(var(--fs) * 1.11)"} />
+                                            : <IconSoundOn size={"calc(var(--fs) * 1.11)"} />}
+                                    </button>
+                                )}
+                                <button
+                                    onClick={() => { soundManager.playSFX('click'); setShowLog(true); }}
+                                    className="log-toggle-button"
+                                    type="button"
+                                    aria-label="LOG"
+                                >
+                                    <IconLog size={"calc(var(--fs) * 1.11)"} />
+                                    <span className="log-toggle-button-label">LOG</span>
+                                </button>
+                            </div>
                         </div>
 
                         {/* デッキ + 職場の横並びエリア */}
@@ -2174,7 +2447,12 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                             <div className="deck-column">
                                 {/* ラウンドカード: 9枚物理重ね（R1~R9） */}
                                 {/* 各ラウンドのカードを重ねて表示。G.round以降のみ。最上面がフリップ対象 */}
-                                <div ref={roundDeckRef} className={`deck-card deck-round ${deckDepthClass(9 - G.round + 1)}`} style={{ position: 'relative' }}>
+                                {!paperTheme && (
+                                <div
+                                    ref={roundDeckRef}
+                                    className={`deck-card deck-round ${deckDepthClass(9 - G.round + 1)}`}
+                                    style={{ position: 'relative' }}
+                                >
                                     {(() => {
                                         // 残りラウンド: 大きいラウンド→小さいラウンドの順（最上面＝現在ラウンド）
                                         const remainingRounds = Array.from({ length: 9 }, (_, i) => 9 - i)
@@ -2202,11 +2480,15 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                             {/* 裏面: 追加職場名 */}
                                                             <div className="deck-top-face round-card-back" style={{ overflow: 'hidden' }}>
                                                                 <WorkplaceBgImage wpId={getRoundWorkplaceId(r)} />
-                                                                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', position: 'relative', zIndex: 1 }}>新職場</div>
-                                                                <div style={{ fontSize: 'var(--fs-lg)', fontWeight: 700, color: 'var(--teal)', position: 'relative', zIndex: 1 }}>
-                                                                    {wpName || '—'}
-                                                                </div>
-                                                                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', position: 'relative', zIndex: 1 }}>R{r}</div>
+                                                                {!paperTheme && (
+                                                                    <>
+                                                                        <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', position: 'relative', zIndex: 1 }}>新職場</div>
+                                                                        <div style={{ fontSize: 'var(--fs-lg)', fontWeight: 700, color: 'var(--teal)', position: 'relative', zIndex: 1 }}>
+                                                                            {wpName || '—'}
+                                                                        </div>
+                                                                        <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', position: 'relative', zIndex: 1 }}>R{r}</div>
+                                                                    </>
+                                                                )}
                                                             </div>
                                                         </div>
                                                     ) : (
@@ -2221,6 +2503,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                         });
                                     })()}
                                 </div>
+                                )}
                                 {/* 消費財デッキ: 仮想的に10枚重ね描画 */}
                                 <div ref={consumableDeckRef} className="deck-card deck-consumable has-depth" style={{ position: 'relative' }}>
                                     {Array.from({ length: 10 }).map((_, i) => (
@@ -2229,7 +2512,8 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                             inset: i === 0 ? undefined : 0,
                                             zIndex: 10 - i,
                                         }}>
-                                            {i === 0 && <div className="deck-label">消費財</div>}
+                                            {paperTheme && <PaperDeckFaceImage deckKind="consumable" version={G.version} />}
+                                            {!paperTheme && i === 0 && <div className="deck-label">消費財</div>}
                                         </div>
                                     ))}
                                 </div>
@@ -2241,7 +2525,8 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                             inset: i === 0 ? undefined : 0,
                                             zIndex: 20 - i,
                                         }}>
-                                            {i === 0 && <div className="deck-label">建物デッキ</div>}
+                                            {paperTheme && <PaperDeckFaceImage deckKind="building" version={G.version} />}
+                                            {!paperTheme && i === 0 && <div className="deck-label">建物デッキ</div>}
                                         </div>
                                     ))}
                                     <div className="deck-count-popup">枚数: {G.deck.length}</div>
@@ -2264,8 +2549,8 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                     zIndex: i + 1,
                                                     animationDelay: `${i * 0.02}s`,
                                                 }}>
-                                                <CardBgImage defId={c.defId} />
-                                                <div className="discard-scatter-name">{cName(c.defId)}</div>
+                                                <CardBgImage card={getDisplayCardRef(c)} />
+                                                {!paperTheme && <div className="discard-scatter-name">{cName(c.defId)}</div>}
                                             </div>
                                         );
                                     })}
@@ -2304,9 +2589,13 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                         className={`workplace-card ${ok ? 'workplace-available' : 'game-card-disabled'} ${workerDragRender?.hoveredUid === wp.id ? 'worker-drag-hover' : ''}`}
                                                         style={{ position: 'relative', overflow: 'hidden' }}>
                                                         <WorkplaceBgImage wpId={wp.id} />
-                                                        <div style={{ fontWeight: 700, fontSize: 'var(--fs-md)', color: ok ? 'var(--teal)' : 'var(--text-dim)', position: 'relative', zIndex: 1 }}>{wp.name}</div>
-                                                        <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', marginTop: 1, lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{wp.effectText}</div>
-                                                        {wp.multipleAllowed && <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--purple)', position: 'relative', zIndex: 1 }}>∞ 複数可</div>}
+                                                        {!paperTheme && (
+                                                            <>
+                                                                <div style={{ fontWeight: 700, fontSize: 'var(--fs-md)', color: ok ? 'var(--teal)' : 'var(--text-dim)', position: 'relative', zIndex: 1 }}>{wp.name}</div>
+                                                                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', marginTop: 1, lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{wp.effectText}</div>
+                                                                {wp.multipleAllowed && <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--purple)', position: 'relative', zIndex: 1 }}>∞ 複数可</div>}
+                                                            </>
+                                                        )}
                                                         {wp.workers.length > 0 && (
                                                             <div style={{ marginTop: 2, display: 'flex', gap: 1, flexWrap: 'wrap', position: 'relative', zIndex: 1 }}>
                                                                 {wp.workers.map((w, i) => renderWorkerChip(w, i))}
@@ -2334,8 +2623,12 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                         className={`workplace-card ${ok ? 'workplace-available' : 'game-card-disabled'} ${workerDragRender?.hoveredUid === wp.id ? 'worker-drag-hover' : ''}`}
                                                         style={{ position: 'relative', overflow: 'hidden' }}>
                                                         <WorkplaceBgImage wpId={wp.id} />
-                                                        <div style={{ fontWeight: 700, fontSize: 'var(--fs-md)', color: ok ? 'var(--teal)' : 'var(--text-dim)', position: 'relative', zIndex: 1 }}>{wp.name}</div>
-                                                        <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', marginTop: 1, lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{wp.effectText}</div>
+                                                        {!paperTheme && (
+                                                            <>
+                                                                <div style={{ fontWeight: 700, fontSize: 'var(--fs-md)', color: ok ? 'var(--teal)' : 'var(--text-dim)', position: 'relative', zIndex: 1 }}>{wp.name}</div>
+                                                                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', marginTop: 1, lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{wp.effectText}</div>
+                                                            </>
+                                                        )}
                                                         {wp.workers.length > 0 && (
                                                             <div style={{ marginTop: 2, display: 'flex', gap: 1, position: 'relative', zIndex: 1 }}>
                                                                 {wp.workers.map((w, i) => renderWorkerChip(w, i))}
@@ -2378,9 +2671,13 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                     className={`workplace-card ${ok && !hideForRoundAnimation ? 'workplace-available' : 'game-card-disabled'} ${workerDragRender?.hoveredUid === wp.id ? 'worker-drag-hover' : ''}`}
                                                     style={{ ...(hideForRoundAnimation ? { opacity: 0 } : {}), position: 'relative', overflow: 'hidden' }}>
                                                     <WorkplaceBgImage wpId={wp.id} />
-                                                    <div style={{ fontWeight: 700, fontSize: 'var(--fs-md)', color: ok ? 'var(--teal)' : 'var(--text-dim)', position: 'relative', zIndex: 1 }}>{wp.name}</div>
-                                                    <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', marginTop: 1, lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{wp.effectText}</div>
-                                                    {wp.multipleAllowed && <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--purple)', position: 'relative', zIndex: 1 }}>∞ 複数可</div>}
+                                                    {!paperTheme && (
+                                                        <>
+                                                            <div style={{ fontWeight: 700, fontSize: 'var(--fs-md)', color: ok ? 'var(--teal)' : 'var(--text-dim)', position: 'relative', zIndex: 1 }}>{wp.name}</div>
+                                                            <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', marginTop: 1, lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{wp.effectText}</div>
+                                                            {wp.multipleAllowed && <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--purple)', position: 'relative', zIndex: 1 }}>∞ 複数可</div>}
+                                                        </>
+                                                    )}
                                                     {wp.workers.length > 0 && (
                                                         <div style={{ marginTop: 2, display: 'flex', gap: 1, flexWrap: 'wrap', position: 'relative', zIndex: 1 }}>
                                                             {wp.workers.map((w, i) => renderWorkerChip(w, i))}
@@ -2392,7 +2689,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
 
                                         return (
                                             <>
-                                                <div className="round-workplaces-grid" style={{ gridTemplateColumns: `repeat(${maxCols}, var(--pub-card-w))` }}>
+                                                <div className="round-workplaces-grid" style={{ gridTemplateColumns: `repeat(${maxCols}, var(--workplace-card-w))` }}>
                                                     {Array.from({ length: maxCols }).map((_, col) => {
                                                         const wp = row1[col];
                                                         if (!wp) return <div key={`round-r1-${col}`} className="workplace-empty" />;
@@ -2425,9 +2722,13 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                             overflow: 'hidden',
                                                         }}>
                                                             <WorkplaceBgImage wpId={getRoundWorkplaceId(roundCardAnim.round)} />
-                                                            <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', position: 'relative', zIndex: 1 }}>新職場</div>
-                                                            <div style={{ fontSize: 'var(--fs-lg)', fontWeight: 700, color: 'var(--teal)', position: 'relative', zIndex: 1 }}>{wpName || '—'}</div>
-                                                            <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', position: 'relative', zIndex: 1 }}>R{roundCardAnim.round}</div>
+                                                            {!paperTheme && (
+                                                                <>
+                                                                    <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', position: 'relative', zIndex: 1 }}>新職場</div>
+                                                                    <div style={{ fontSize: 'var(--fs-lg)', fontWeight: 700, color: 'var(--teal)', position: 'relative', zIndex: 1 }}>{wpName || '—'}</div>
+                                                                    <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', position: 'relative', zIndex: 1 }}>R{roundCardAnim.round}</div>
+                                                                </>
+                                                            )}
                                                         </div>
                                                     );
                                                 })()}
@@ -2459,21 +2760,28 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                             style={{
                                                                 borderColor: ok ? 'var(--teal-40)' : 'var(--teal-15)',
                                                             }}>
-                                                            {wp.fromBuildingDefId && <CardBgImage defId={wp.fromBuildingDefId} />}
-                                                            <div style={{ fontWeight: 700, fontSize: 'var(--fs-base)', lineHeight: 1.2, color: ok ? 'var(--text-primary)' : 'var(--text-dim)', position: 'relative', zIndex: 1 }}>
-                                                                {wp.name}
-                                                            </div>
-                                                            {def && (
+                                                            {(() => {
+                                                                const soldCard = getSoldWorkplaceDisplayCard(wp);
+                                                                return soldCard ? <CardBgImage card={soldCard} /> : null;
+                                                            })()}
+                                                            {!paperTheme && (
                                                                 <>
-                                                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2, position: 'relative', zIndex: 1 }}>
-                                                                        <span style={{ fontSize: 'var(--fs-md)', color: 'var(--text-dim)', fontWeight: 600 }}>C{def.cost}</span>
-                                                                        <span style={{ fontSize: 'var(--fs-md)', color: 'var(--gold-dim)', fontWeight: 600 }}>{def.vp}VP</span>
+                                                                    <div style={{ fontWeight: 700, fontSize: 'var(--fs-base)', lineHeight: 1.2, color: ok ? 'var(--text-primary)' : 'var(--text-dim)', position: 'relative', zIndex: 1 }}>
+                                                                        {wp.name}
                                                                     </div>
-                                                                    <TagBadges defId={wp.fromBuildingDefId!} compact={isMobileTouchUi} />
-                                                                    {def.effectText && <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-dim)', marginTop: 'auto', lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{def.effectText}</div>}
+                                                                    {def && (
+                                                                        <>
+                                                                            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2, position: 'relative', zIndex: 1 }}>
+                                                                                <span style={{ fontSize: 'var(--fs-md)', color: 'var(--text-dim)', fontWeight: 600 }}>C{def.cost}</span>
+                                                                                <span style={{ fontSize: 'var(--fs-md)', color: 'var(--gold-dim)', fontWeight: 600 }}>{def.vp}VP</span>
+                                                                            </div>
+                                                                            <TagBadges defId={wp.fromBuildingDefId!} compact={isMobileTouchUi} />
+                                                                            {def.effectText && <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-dim)', marginTop: 'auto', lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{def.effectText}</div>}
+                                                                        </>
+                                                                    )}
+                                                                    {!def && <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', marginTop: 1, lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{wp.effectText}</div>}
                                                                 </>
                                                             )}
-                                                            {!def && <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', marginTop: 1, lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{wp.effectText}</div>}
                                                             {wp.workers.length > 0 && (
                                                                 <div style={{ marginTop: 2, display: 'flex', gap: 1, position: 'relative', zIndex: 1 }}>
                                                                     {wp.workers.map((w, i) => renderWorkerChip(w, i))}
@@ -2688,29 +2996,33 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                             return (
                                                 <div key={c.uid}
                                                     onClick={() => { if (canClick && clickAction && !previewData) { soundManager.playSFX('click'); clickAction(); } }}
-                                                    onPointerDown={() => { if (!isCons) startCardPreview(c.defId, ci, 'above-hand'); }}
+                                                    onPointerDown={() => { if (!isCons) startCardPreview(c, ci, 'above-hand'); }}
                                                     onPointerUp={endPreview}
                                                     onPointerLeave={() => { endPreview(); endHoverPreview(); }}
-                                                    onPointerEnter={(e) => { if (!isCons) startHoverCardPreviewWithMode(c.defId, ci, e, 'above-hand'); }}
+                                                    onPointerEnter={(e) => { if (!isCons) startHoverCardPreviewWithMode(c, ci, e, 'above-hand'); }}
                                                     className={`hand-card ${isCons ? 'hand-card-consumable' : ''} ${canClick || isDragBuildHighlight ? 'hand-card-playable' : ''} ${workerDragRender?.hoveredUid?.startsWith('carpenter') && !isDragBuildHighlight && !isCons ? 'hand-card-drag-dimmed' : ''} ${pressingCardIdxRef.current === ci ? 'hand-card-pressing' : ''}`}
                                                     style={{ marginLeft: ci === 0 ? 0 : overlapMargin, zIndex: ci + 1, ...(isMobileTouchUi ? { height: 'var(--mobile-self-card-height)' } : {}), ...drawStyle, ...selectedStyle }}>
-                                                    <CardBgImage defId={c.defId} />
-                                                    <div style={{ fontWeight: 700, fontSize: 'var(--fs-base)', lineHeight: 1.2, color: isCons ? 'var(--text-secondary)' : 'var(--text-primary)', position: 'relative', zIndex: 1 }}>
-                                                        {cName(c.defId)}
-                                                    </div>
-                                                    {def && (
+                                                    <CardBgImage card={getDisplayCardRef(c)} />
+                                                    {!paperTheme && (
                                                         <>
-                                                            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2, position: 'relative', zIndex: 1, opacity: 1 }}>
-                                                                <span style={{ fontSize: 'var(--fs-md)', color: 'var(--text-dim)', fontWeight: 600 }}>
-                                                                    C{isBuildPhase ? getConstructionCost(myPlayer, c.defId, G.buildState!.costReduction) : def.cost}
-                                                                </span>
-                                                                <span style={{ fontSize: 'var(--fs-md)', color: 'var(--gold-dim)', fontWeight: 600 }}>{def.vp}VP</span>
+                                                            <div style={{ fontWeight: 700, fontSize: 'var(--fs-base)', lineHeight: 1.2, color: isCons ? 'var(--text-secondary)' : 'var(--text-primary)', position: 'relative', zIndex: 1 }}>
+                                                                {cName(c.defId)}
                                                             </div>
-                                                            <div style={{ opacity: 1 }}><TagBadges defId={c.defId} compact={isMobileTouchUi} /></div>
-                                                            {def.effectText && <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-dim)', marginTop: 'auto', lineHeight: 1.2, position: 'relative', zIndex: 1, opacity: 1 }}>{def.effectText}</div>}
+                                                            {def && (
+                                                                <>
+                                                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2, position: 'relative', zIndex: 1, opacity: 1 }}>
+                                                                        <span style={{ fontSize: 'var(--fs-md)', color: 'var(--text-dim)', fontWeight: 600 }}>
+                                                                            C{isBuildPhase ? getConstructionCost(myPlayer, c.defId, G.buildState!.costReduction) : def.cost}
+                                                                        </span>
+                                                                        <span style={{ fontSize: 'var(--fs-md)', color: 'var(--gold-dim)', fontWeight: 600 }}>{def.vp}VP</span>
+                                                                    </div>
+                                                                    <div style={{ opacity: 1 }}><TagBadges defId={c.defId} compact={isMobileTouchUi} /></div>
+                                                                    {def.effectText && <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-dim)', marginTop: 'auto', lineHeight: 1.2, position: 'relative', zIndex: 1, opacity: 1 }}>{def.effectText}</div>}
+                                                                </>
+                                                            )}
+                                                            {isCons && <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', marginTop: 2, position: 'relative', zIndex: 1 }}>消費財</div>}
                                                         </>
                                                     )}
-                                                    {isCons && <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', marginTop: 2, position: 'relative', zIndex: 1 }}>消費財</div>}
                                                     {selectedLabel && <div style={{ color: 'var(--red)', fontSize: 'var(--fs-md)', fontWeight: 700, position: 'relative', zIndex: 1 }}>{selectedLabel}</div>}
                                                     {isExcluded && <div style={{ color: 'var(--gold)', fontSize: 'var(--fs-sm)', position: 'relative', zIndex: 1 }}>建設対象</div>}
                                                 </div>
@@ -2857,11 +3169,11 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                                 soundManager.playSFX('click'); moves.togglePaydaySell(bi);
                                             }
                                         }}
-                                        onPointerDown={() => { if (!workerDragRender) startCardPreview(b.card.defId, 1000 + bi); }}
+                                        onPointerDown={() => { if (!workerDragRender) startCardPreview(b.card, 1000 + bi); }}
                                         onPointerUp={() => { if (!workerDragRender) endPreview(); }}
                                         onPointerCancel={() => { if (!workerDragRender) { endPreview(); endHoverPreview(); } }}
                                         onPointerLeave={() => { if (!workerDragRender) endPreview(); endHoverPreview(); }}
-                                        onPointerEnter={(e) => { startHoverCardPreview(b.card.defId, 1000 + bi, e); }}
+                                        onPointerEnter={(e) => { startHoverCardPreview(b.card, 1000 + bi, e); }}
                                         className={`hand-card building-card-in-field ${canActivate || isPaydaySellable ? 'hand-card-playable' : ''} ${b.workerPlaced && !isPaydayPhase ? 'building-placed' : ''} ${workerDragRender?.hoveredUid === b.card.uid && canActivate ? 'worker-drag-hover' : ''}`}
                                         style={{
                                             borderColor: color,
@@ -2870,16 +3182,20 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                             ...(needsPaydaySelling && def.unsellable ? { opacity: 0.5 } : {}),
                                         }}
                                         title={`${def.name} (${def.vp}VP) ${def.effectText}`}>
-                                        <CardBgImage defId={b.card.defId} />
-                                        <div style={{ fontWeight: 700, fontSize: 'var(--fs-base)', lineHeight: 1.2, color: b.workerPlaced ? 'var(--text-dim)' : 'var(--text-primary)', position: 'relative', zIndex: 1 }}>
-                                            {def.name}
-                                        </div>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2, position: 'relative', zIndex: 1 }}>
-                                            <span style={{ fontSize: 'var(--fs-md)', color: 'var(--text-dim)', fontWeight: 600 }}>C{def.cost}</span>
-                                            <span style={{ fontSize: 'var(--fs-md)', color: 'var(--gold-dim)', fontWeight: 600 }}>{def.vp}VP</span>
-                                        </div>
-                                        <TagBadges defId={b.card.defId} compact={isMobileTouchUi} />
-                                        {def.effectText && <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-dim)', marginTop: 'auto', lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{def.effectText}</div>}
+                                        <CardBgImage card={getDisplayCardRef(b.card)} />
+                                        {!paperTheme && (
+                                            <>
+                                                <div style={{ fontWeight: 700, fontSize: 'var(--fs-base)', lineHeight: 1.2, color: b.workerPlaced ? 'var(--text-dim)' : 'var(--text-primary)', position: 'relative', zIndex: 1 }}>
+                                                    {def.name}
+                                                </div>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2, position: 'relative', zIndex: 1 }}>
+                                                    <span style={{ fontSize: 'var(--fs-md)', color: 'var(--text-dim)', fontWeight: 600 }}>C{def.cost}</span>
+                                                    <span style={{ fontSize: 'var(--fs-md)', color: 'var(--gold-dim)', fontWeight: 600 }}>{def.vp}VP</span>
+                                                </div>
+                                                <TagBadges defId={b.card.defId} compact={isMobileTouchUi} />
+                                                {def.effectText && <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-dim)', marginTop: 'auto', lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{def.effectText}</div>}
+                                            </>
+                                        )}
                                         {b.workerPlaced && <img src={getMeepleSrc(parseInt(myPid))} className="worker-on-building-icon" alt="配置済み" />}
                                         {isPaydaySelected && <div style={{ color: 'var(--red)', fontSize: 'var(--fs-md)', fontWeight: 700, position: 'relative', zIndex: 1 }}>💰 売却</div>}
                                     </div>
@@ -2979,26 +3295,36 @@ function LogModal({ log, onClose }: { log: GameState['log']; onClose: () => void
 // ============================================================
 function DesignOfficeUI({ G, moves, onBeforeSelect }: { G: GameState; moves: any; onBeforeSelect?: () => void }) {
     const dos = G.designOfficeState!;
+    const currentTheme = getCurrentTheme();
+    const paperTheme = currentTheme === 'paper';
+    const paperAutomatonVariantMap = useMemo(() => buildGamePaperAutomatonVariantMap(G), [G]);
+    const getDisplayCardRef = useCallback(
+        (card: Pick<Card, 'uid' | 'defId'>): ThemedCardImageRef => toDisplayCardRef(card, paperAutomatonVariantMap),
+        [paperAutomatonVariantMap],
+    );
+    const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+    /*
     // 選択状態（排他選択: 1枚のみ）
     const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
     // 長押しプレビュー用
-    const [previewDefId, setPreviewDefId] = useState<string | null>(null);
-    const previewDefIdRef = useRef<string | null>(null);
+    */
+    const [previewCard, setPreviewCard] = useState<Card | null>(null);
+    const previewCardRef = useRef<Card | null>(null);
     const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const clearTimer = () => { if (previewTimer.current) { clearTimeout(previewTimer.current); previewTimer.current = null; } };
     useEffect(() => {
-        previewDefIdRef.current = previewDefId;
-    }, [previewDefId]);
-    const startCardPreview = (defId: string) => {
+        previewCardRef.current = previewCard;
+    }, [previewCard]);
+    const startCardPreview = (card: Card) => {
         clearTimer();
-        previewTimer.current = setTimeout(() => { setPreviewDefId(defId); }, 300);
+        previewTimer.current = setTimeout(() => { setPreviewCard(card); }, 300);
     };
     const endCardPreview = () => { clearTimer(); };
-    const closeCardPreview = () => { clearTimer(); setPreviewDefId(null); };
+    const closeCardPreview = () => { clearTimer(); setPreviewCard(null); };
     useEffect(() => {
         const handlePreviewRelease = () => {
             clearTimer();
-            if (matchesTouchOptimizedUi() && previewDefIdRef.current) setPreviewDefId(null);
+            if (matchesTouchOptimizedUi() && previewCardRef.current) setPreviewCard(null);
         };
         document.addEventListener('pointerup', handlePreviewRelease, true);
         document.addEventListener('pointercancel', handlePreviewRelease, true);
@@ -3011,26 +3337,29 @@ function DesignOfficeUI({ G, moves, onBeforeSelect }: { G: GameState; moves: any
     return (
         <div className="game-bg" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
             {/* 長押しプレビューオーバーレイ */}
-            {previewDefId && (() => {
-                const pDef = getCardDef(previewDefId);
+            {previewCard && (() => {
+                const pDef = getCardDef(previewCard.defId);
                 if (!pDef) return null;
-                const imgSrc = pDef.image ? `${import.meta.env.BASE_URL}${pDef.image.replace(/^\//, '')}` : null;
+                const themedCardPath = getThemedCardImagePathForCard(getDisplayCardRef(previewCard), currentTheme);
+                const imgSrc = themedCardPath ? toAssetUrl(themedCardPath) : null;
                 const tagLabel = pDef.tags.includes('farm') ? '🌿 農場' : pDef.tags.includes('factory') ? '🏭 工場' : '🏢 施設';
                 return (
                     <div className="card-preview-overlay" onPointerUp={closeCardPreview} onClick={closeCardPreview}>
-                        <div className="card-preview-card">
+                        <div className={`card-preview-card${paperTheme ? ' paper-preview-card' : ''}`}>
                             <div className="card-preview-image">
-                                {imgSrc && <img src={imgSrc} alt={pDef.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
+                                {imgSrc && <img src={imgSrc} alt={pDef.name} style={{ width: '100%', height: '100%', objectFit: paperTheme ? 'contain' : 'cover' }} />}
                             </div>
-                            <div className="card-preview-info">
-                                <div style={{ fontWeight: 700, fontSize: 'var(--fs-4xl)', color: 'var(--text-primary)', marginBottom: 4 }}>{pDef.name}</div>
-                                <div style={{ fontSize: 'var(--fs-xl2)', color: 'var(--text-secondary)', marginBottom: 6 }}>{tagLabel}</div>
-                                <div style={{ display: 'flex', gap: 16, marginBottom: 8 }}>
-                                    <span style={{ fontSize: 'var(--fs-2xl)', color: 'var(--text-dim)', fontWeight: 600 }}>コスト: <b style={{ color: 'var(--gold-light)' }}>C{pDef.cost}</b></span>
-                                    <span style={{ fontSize: 'var(--fs-2xl)', color: 'var(--text-dim)', fontWeight: 600 }}>得点: <b style={{ color: 'var(--gold-light)' }}>{pDef.vp}VP</b></span>
+                            {!paperTheme && (
+                                <div className="card-preview-info">
+                                    <div style={{ fontWeight: 700, fontSize: 'var(--fs-4xl)', color: 'var(--text-primary)', marginBottom: 4 }}>{pDef.name}</div>
+                                    <div style={{ fontSize: 'var(--fs-xl2)', color: 'var(--text-secondary)', marginBottom: 6 }}>{tagLabel}</div>
+                                    <div style={{ display: 'flex', gap: 16, marginBottom: 8 }}>
+                                        <span style={{ fontSize: 'var(--fs-2xl)', color: 'var(--text-dim)', fontWeight: 600 }}>コスト: <b style={{ color: 'var(--gold-light)' }}>C{pDef.cost}</b></span>
+                                        <span style={{ fontSize: 'var(--fs-2xl)', color: 'var(--text-dim)', fontWeight: 600 }}>得点: <b style={{ color: 'var(--gold-light)' }}>{pDef.vp}VP</b></span>
+                                    </div>
+                                    {pDef.effectText && <div style={{ fontSize: 'var(--fs-xl3)', color: 'var(--text-secondary)', lineHeight: 1.5 }}>{pDef.effectText}</div>}
                                 </div>
-                                {pDef.effectText && <div style={{ fontSize: 'var(--fs-xl3)', color: 'var(--text-secondary)', lineHeight: 1.5 }}>{pDef.effectText}</div>}
-                            </div>
+                            )}
                         </div>
                     </div>
                 );
@@ -3053,11 +3382,11 @@ function DesignOfficeUI({ G, moves, onBeforeSelect }: { G: GameState; moves: any
                         return (
                             <div key={c.uid}
                                 onClick={() => {
-                                    if (previewDefId) return; // プレビュー中は選択無効
+                                    if (previewCard) return; // プレビュー中は選択無効
                                     soundManager.playSFX('click');
                                     setSelectedIdx(isSelected ? null : ci);
                                 }}
-                                onPointerDown={() => { if (!isCons) startCardPreview(c.defId); }}
+                                onPointerDown={() => { if (!isCons) startCardPreview(c); }}
                                 onPointerUp={endCardPreview}
                                 onPointerLeave={endCardPreview}
                                 className={`hand-card hand-card-playable`}
@@ -3071,25 +3400,29 @@ function DesignOfficeUI({ G, moves, onBeforeSelect }: { G: GameState; moves: any
                                         boxShadow: '0 0 12px var(--teal-40)',
                                     } : {}),
                                 }}>
-                                <CardBgImage defId={c.defId} />
-                                {/* カード名 */}
-                                <div style={{ fontWeight: 700, fontSize: 'var(--fs-base)', lineHeight: 1.2, color: isCons ? 'var(--text-secondary)' : 'var(--text-primary)', position: 'relative', zIndex: 1 }}>
-                                    {cName(c.defId)}
-                                </div>
-                                {def && (
+                                <CardBgImage card={getDisplayCardRef(c)} />
+                                {!paperTheme && (
                                     <>
-                                        {/* コスト・VP */}
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2, position: 'relative', zIndex: 1 }}>
-                                            <span style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-secondary)', fontWeight: 600 }}>C{def.cost}</span>
-                                            <span style={{ fontSize: 'var(--fs-lg)', color: 'var(--gold-light)', fontWeight: 600 }}>{def.vp}VP</span>
+                                        {/* カード名 */}
+                                        <div style={{ fontWeight: 700, fontSize: 'var(--fs-base)', lineHeight: 1.2, color: isCons ? 'var(--text-secondary)' : 'var(--text-primary)', position: 'relative', zIndex: 1 }}>
+                                            {cName(c.defId)}
                                         </div>
-                                        {/* 属性タグ */}
-                                        <TagBadges defId={c.defId} />
-                                        {/* 説明文 */}
-                                        {def.effectText && <div style={{ fontSize: 'var(--fs-base)', color: 'var(--text-secondary)', marginTop: 'auto', lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{def.effectText}</div>}
+                                        {def && (
+                                            <>
+                                                {/* コスト・VP */}
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2, position: 'relative', zIndex: 1 }}>
+                                                    <span style={{ fontSize: 'var(--fs-lg)', color: 'var(--text-secondary)', fontWeight: 600 }}>C{def.cost}</span>
+                                                    <span style={{ fontSize: 'var(--fs-lg)', color: 'var(--gold-light)', fontWeight: 600 }}>{def.vp}VP</span>
+                                                </div>
+                                                {/* 属性タグ */}
+                                                <TagBadges defId={c.defId} />
+                                                {/* 説明文 */}
+                                                {def.effectText && <div style={{ fontSize: 'var(--fs-base)', color: 'var(--text-secondary)', marginTop: 'auto', lineHeight: 1.2, position: 'relative', zIndex: 1 }}>{def.effectText}</div>}
+                                            </>
+                                        )}
+                                        {isCons && <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', marginTop: 2, position: 'relative', zIndex: 1 }}>消費財</div>}
                                     </>
                                 )}
-                                {isCons && <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-dim)', marginTop: 2, position: 'relative', zIndex: 1 }}>消費財</div>}
                                 {/* 選択マーク */}
                                 {isSelected && <div style={{ position: 'absolute', top: 4, right: 4, fontSize: 'var(--fs-2xl)', zIndex: 2 }}>✓</div>}
                             </div>
@@ -3427,6 +3760,8 @@ function CleanupUI({ G, moves, myPid, isOnline }: { G: GameState; moves: any; my
 // 捨て札表示モーダル
 // ============================================================
 function DiscardPileModal({ discard, onClose }: { discard: GameState['discard']; onClose: () => void }) {
+    const currentTheme = getCurrentTheme();
+    const paperTheme = currentTheme === 'paper';
     // defIdでグループ化（コスト順ソート）
     const groups: Record<string, { defId: string; count: number }> = {};
     for (const c of discard) {
@@ -3447,27 +3782,30 @@ function DiscardPileModal({ discard, onClose }: { discard: GameState['discard'];
                     <div className="discard-grid">
                         {entries.map(({ defId, count }) => {
                             const def = getCardDef(defId);
-                            const imgSrc = def.image ? `${import.meta.env.BASE_URL}${def.image.replace(/^\//, '')}` : null;
+                            const themedPath = def.image ? getThemedCardImagePath(def.image, { defId }, currentTheme) : null;
+                            const imgSrc = themedPath ? toAssetUrl(themedPath) : null;
                             return (
-                                <div key={defId} className="discard-grid-card">
+                                <div key={defId} className={`discard-grid-card${paperTheme ? ' discard-grid-card-paper' : ''}`}>
                                     {count > 1 && <div className="discard-count-badge">×{count}</div>}
                                     <div className="discard-card-image">
                                         {imgSrc ? <img src={imgSrc} alt={def.name} /> : (
                                             <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-dim)', fontSize: 'var(--fs-3xl)' }}>🃏</div>
                                         )}
                                     </div>
-                                    <div className="discard-card-info">
-                                        <div className="discard-card-name">{def.name}</div>
-                                        <div className="discard-card-stats">
-                                            <span>C<b style={{ color: 'var(--gold-light)' }}>{def.cost}</b></span>
-                                            <span><b style={{ color: 'var(--gold-light)' }}>{def.vp}</b>VP</span>
-                                        </div>
-                                        {def.effectText && (
-                                            <div className="discard-card-effect">
-                                                {renderEffectText(def.effectText)}
+                                    {!paperTheme && (
+                                        <div className="discard-card-info">
+                                            <div className="discard-card-name">{def.name}</div>
+                                            <div className="discard-card-stats">
+                                                <span>C<b style={{ color: 'var(--gold-light)' }}>{def.cost}</b></span>
+                                                <span><b style={{ color: 'var(--gold-light)' }}>{def.vp}</b>VP</span>
                                             </div>
-                                        )}
-                                    </div>
+                                            {def.effectText && (
+                                                <div className="discard-card-effect">
+                                                    {renderEffectText(def.effectText)}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                             );
                         })}

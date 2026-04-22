@@ -27,8 +27,8 @@ export function SoundSettings({ onClose }: { onClose: () => void }) {
     };
 
     return (
-        <div className="modal-overlay animate-fade-in" style={{ zIndex: 9999 }}>
-            <div className="modal-content animate-slide-up" style={{ width: 320, padding: 24, textAlign: 'center' }}>
+        <div className="modal-overlay animate-fade-in" style={{ zIndex: 9999 }} onClick={onClose}>
+            <div className="modal-content animate-slide-up" onClick={(e) => e.stopPropagation()} style={{ width: 320, padding: 24, textAlign: 'center' }}>
                 <h3 style={{ margin: '0 0 20px', color: 'var(--gold)', fontSize: 'var(--fs-4xl)' }}>🔊 音量設定</h3>
 
                 {/* Mute Toggle */}

@@ -22,6 +22,7 @@ import { soundManager } from './SoundManager';
 import { LogoFactory, IconRobot, IconPlayer, IconHammer, IconTrophy, IconGamepad, IconGlobe, IconWrench, IconHome, IconLink, IconDice, IconRocket, IconClipboard, IconGear, IconWave, IconCheck } from './components/Icons';
 import { FullscreenToggleButton } from './components/FullscreenToggleButton';
 import { DevCardGallery } from './DevCardGallery';
+import { resolveInitialTheme, THEME_STORAGE_KEY } from './themeUtils';
 
 // ============================================================
 // 型定義
@@ -370,13 +371,13 @@ export type ThemeName = 'default' | 'paper' | 'steampunk' | 'japanese' | 'waterc
 
 /** テーマ表示情報 */
 const THEME_INFO: Record<ThemeName, { label: string; icon: string }> = {
-    paper: { label: '紙版', icon: '紙' },
+    paper: { label: '紙版', icon: '📄' },
     default: { label: 'Classic', icon: '🏭' },
     steampunk: { label: 'Steampunk', icon: '⚙️' },
     japanese: { label: '和風', icon: '🏯' },
     watercolor: { label: '水彩', icon: '🎨' },
 };
-const THEME_ORDER: ThemeName[] = ['default', 'paper', 'steampunk', 'japanese', 'watercolor'];
+const THEME_ORDER: ThemeName[] = ['paper', 'default', 'steampunk', 'japanese', 'watercolor'];
 
 function MainMenuScreen({ onLocal, onOnline, onDevGallery, theme, onCycleTheme }: {
     onLocal: () => void;
@@ -592,6 +593,7 @@ function HostLobby({ onBack }: { onBack: () => void }) {
     const [gameStarted, setGameStarted] = useState(false);
     const [hostState, setHostState] = useState<{ G: GameState; ctx: Ctx } | null>(null);
     const [showStartNotification, setShowStartNotification] = useState(false);
+    const [hostRoomToken, setHostRoomToken] = useState(() => generateRoomToken());
     const [peerSeed, setPeerSeed] = useState(0);
     const peerRef = useRef<Peer | null>(null);
     const connectionsRef = useRef<Map<string, DataConnection>>(new Map());
@@ -602,6 +604,7 @@ function HostLobby({ onBack }: { onBack: () => void }) {
     const versionRef = useRef(version);
     const gameStartedRef = useRef(gameStarted);
     const hostStateRef = useRef(hostState);
+    const hostNameRef = useRef(hostName);
 
     useEffect(() => {
         numPlayersRef.current = numPlayers;
@@ -620,11 +623,16 @@ function HostLobby({ onBack }: { onBack: () => void }) {
     }, [hostState]);
 
     useEffect(() => {
+        hostNameRef.current = hostName;
+    }, [hostName]);
+
+    useEffect(() => {
         localStorage.setItem(HOST_NAME_STORAGE_KEY, hostName);
     }, [hostName]);
 
     useEffect(() => {
-        const peer = new Peer(toInternalRoomId(generateRoomToken()), iceConfig);
+        setStatus('PeerJS接続中...');
+        const peer = new Peer(toInternalRoomId(hostRoomToken), iceConfig);
         peerRef.current = peer;
 
         peer.on('open', (id) => {
@@ -635,6 +643,7 @@ function HostLobby({ onBack }: { onBack: () => void }) {
         peer.on('error', (err) => {
             if (err.type === 'unavailable-id') {
                 setStatus('繝ｫ繝ｼ繝ID繧呈｢ｺ菫昴＠縺ｦ縺・∪縺・..');
+                setHostRoomToken(generateRoomToken());
                 setPeerSeed(seed => seed + 1);
                 return;
             }
@@ -691,7 +700,7 @@ function HostLobby({ onBack }: { onBack: () => void }) {
                     const currentPlayerNames = currentState?.G.playerNames
                         ?? buildPlayerNames(
                             numPlayersRef.current,
-                            hostName,
+                            hostNameRef.current,
                             Object.fromEntries(
                                 Array.from(sessionRegistryRef.current.values()).map((info): [string, LobbyPlayerInfo] => [info.pid, info])
                             )
@@ -750,8 +759,11 @@ function HostLobby({ onBack }: { onBack: () => void }) {
             });
         });
 
-        return () => { peer.destroy(); };
-    }, [hostName, peerSeed]);
+        return () => {
+            if (peerRef.current === peer) peerRef.current = null;
+            peer.destroy();
+        };
+    }, [hostRoomToken, peerSeed]);
 
     // ゲーム開始
     const startGame = useCallback(() => {
@@ -1192,9 +1204,7 @@ export default function App() {
 
     // テーマ切り替え（localStorage永続化・5テーマ対応）
     const [theme, setTheme] = useState<ThemeName>(() => {
-        const saved = localStorage.getItem('ne-theme');
-        if (saved && THEME_ORDER.includes(saved as ThemeName)) return saved as ThemeName;
-        return 'default';
+        return resolveInitialTheme(localStorage);
     });
     useEffect(() => {
         const titleBackgroundAsset = getThemeBackgroundAsset(theme, 'title');
@@ -1214,7 +1224,7 @@ export default function App() {
         } else {
             document.documentElement.style.removeProperty('--theme-game-bg-image');
         }
-        localStorage.setItem('ne-theme', theme);
+        localStorage.setItem(THEME_STORAGE_KEY, theme);
     }, [theme]);
     // テーマをサイクル式で切り替え（default → steampunk → japanese → fantasy → watercolor → default ...）
     const cycleTheme = () => setTheme(prev => {

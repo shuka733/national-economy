@@ -6,81 +6,17 @@ import React, { useState } from 'react';
 import { BASE_CARD_DEFS } from './base_cards';
 import { GLORY_CARD_DEFS } from './glory_cards';
 import type { CardDef } from './types';
-import { getThemedCardImagePath } from './themeUtils';
+import { getCurrentTheme, getThemeCardAspectRatio, getThemedCardImagePath } from './themeUtils';
 import { FullscreenToggleButton } from './components/FullscreenToggleButton';
-
-// ============================================================
-// カードIDから画像パスへのマッピング
-// Viteのbase設定（/national-economy/）に対応するため、
-// import.meta.env.BASE_URLを使って動的にパスを解決する
-// ============================================================
-
-/** ベースセットのカードID → 画像ファイル名（public/cards/progress/ 配下） */
-const BASE_IMAGE_FILES: Record<string, string> = {
-    farm: 'progress/prog_farm.png',
-    slash_burn: 'progress/prog_slash_burn.png',
-    coffee_shop: 'progress/prog_coffee_shop.png',
-    design_office: 'progress/prog_design_office.png',
-    factory: 'progress/prog_factory.png',
-    construction_co: 'progress/prog_construction_co.png',
-    warehouse: 'progress/prog_warehouse.png',
-    law_office: 'progress/prog_law_office.png',
-    orchard: 'progress/prog_orchard.png',
-    company_housing: 'progress/prog_company_housing.png',
-    real_estate: 'progress/prog_real_estate.png',
-    pioneer: 'progress/prog_pioneer.png',
-    restaurant: 'progress/prog_restaurant.png',
-    large_farm: 'progress/prog_large_farm.png',
-    agri_coop: 'progress/prog_agri_coop.png',
-    general_contractor: 'progress/prog_general_contractor.png',
-    steel_mill: 'progress/prog_steel_mill.png',
-    mansion: 'progress/prog_mansion.png',
-    chemical_plant: 'progress/prog_chemical_plant.png',
-    labor_union: 'progress/prog_labor_union.png',
-    auto_factory: 'progress/prog_auto_factory.png',
-    headquarters: 'progress/prog_headquarters.png',
-    dual_construction: 'progress/prog_dual_construction.png',
-    railroad: 'progress/prog_railroad.png',
-};
-
-/** GloryセットのカードID → 画像ファイル名（public/cards/glory/ 配下） */
-const GLORY_IMAGE_FILES: Record<string, string> = {
-    gl_relic: 'glory/relic.png',
-    gl_village: 'glory/rural_village.png',
-    gl_colonist: 'glory/colonial_group.png',
-    gl_studio: 'glory/workshop.png',
-    gl_steam_factory: 'glory/steam_factory.png',
-    gl_poultry_farm: 'glory/poultry_farm.png',
-    gl_skyscraper: 'glory/skyscraper_construction.png',
-    gl_game_cafe: 'glory/game_cafe.png',
-    gl_cotton_farm: 'glory/cotton_plantation.png',
-    gl_museum: 'glory/art_museum.png',
-    gl_monument: 'glory/monument.png',
-    gl_consumers_coop: 'glory/consumer_union.png',
-    gl_automaton: 'glory/automaton.png',
-    gl_coal_mine: 'glory/coal_mine.png',
-    gl_modernism_construction: 'glory/modernism_construction.png',
-    gl_theater: 'glory/theater.png',
-    gl_guild_hall: 'glory/guild_hall.png',
-    gl_ivory_tower: 'glory/ivory_tower.png',
-    gl_refinery: 'glory/smelter.png',
-    gl_teleporter: 'glory/transfer_device.png',
-    gl_revolution_square: 'glory/revolution_square.png',
-    gl_harvest_festival: 'glory/harvest_festival.png',
-    gl_tech_exhibition: 'glory/technical_exhibition.png',
-    gl_greenhouse: 'glory/greenhouse.png',
-    gl_temple_of_purification: 'glory/temple_of_purification.png',
-    gl_locomotive_factory: 'glory/locomotive_factory.png',
-};
 
 /** カードIDから画像パスを取得。Viteのbase設定を考慮したURLを返す。 */
 function getImagePath(card: CardDef): string | undefined {
-    // import.meta.env.BASE_URL は末尾スラッシュ付きで返る（例: '/national-economy/'）
+    if (!card.image) return undefined;
     const base = import.meta.env.BASE_URL.replace(/\/$/, '');
-    const file = BASE_IMAGE_FILES[card.id] ?? GLORY_IMAGE_FILES[card.id];
-    if (!file) return undefined;
-    const basePath = `/cards/${file}`;
-    const themedPath = getThemedCardImagePath(basePath);
+    const themedPath = getThemedCardImagePath(card.image, {
+        defId: card.id,
+        paperVariant: card.id === 'gl_automaton' ? '01' : undefined,
+    });
     return `${base}${themedPath}`;
 }
 
@@ -108,6 +44,9 @@ function TagBadge({ tag }: { tag: string }) {
 // 1枚のカードプレビュー
 // ============================================================
 function CardPreview({ card, showImage }: { card: CardDef; showImage: boolean }) {
+    const currentTheme = getCurrentTheme();
+    const paperTheme = currentTheme === 'paper';
+    const cardAspectRatio = getThemeCardAspectRatio(currentTheme);
     const imagePath = getImagePath(card);
     const hasImage = !!imagePath;
 
@@ -135,7 +74,7 @@ function CardPreview({ card, showImage }: { card: CardDef; showImage: boolean })
             {showImage && (
                 <div style={{
                     width: '100%',
-                    aspectRatio: '63/88',
+                    aspectRatio: `${cardAspectRatio}`,
                     background: hasImage ? 'transparent' : 'rgba(255,255,255,0.03)',
                     display: 'flex',
                     alignItems: 'center',
@@ -147,7 +86,7 @@ function CardPreview({ card, showImage }: { card: CardDef; showImage: boolean })
                         <img
                             src={imagePath}
                             alt={card.name}
-                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            style={{ width: '100%', height: '100%', objectFit: paperTheme ? 'contain' : 'cover' }}
                             onError={e => {
                                 // 画像が見つからない場合は代替テキスト表示
                                 (e.currentTarget as HTMLImageElement).style.display = 'none';
@@ -166,7 +105,8 @@ function CardPreview({ card, showImage }: { card: CardDef; showImage: boolean })
             )}
 
             {/* カード情報 */}
-            <div style={{ padding: '10px 10px 12px', flex: 1 }}>
+            {!paperTheme && (
+                <div style={{ padding: '10px 10px 12px', flex: 1 }}>
                 {/* カード名 */}
                 <div style={{ fontSize: 'var(--fs-xl3)', fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4, lineHeight: 1.2 }}>
                     {card.name}
@@ -224,7 +164,8 @@ function CardPreview({ card, showImage }: { card: CardDef; showImage: boolean })
                 <div style={{ marginTop: 6, fontSize: 'var(--fs-base)', color: 'rgba(255,255,255,0.2)', fontFamily: 'monospace' }}>
                     ID: {card.id}
                 </div>
-            </div>
+                </div>
+            )}
         </div>
     );
 }

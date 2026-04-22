@@ -51,7 +51,9 @@ function buildDeck(version: GameVersion): Card[] {
     const cards: Card[] = [];
     const defs = getDeckDefs(version);
     for (const def of defs) {
-        for (let i = 0; i < def.copies; i++) cards.push({ uid: uid(), defId: def.id });
+        for (let i = 0; i < def.copies; i++) {
+            cards.push({ uid: uid(), defId: def.id });
+        }
     }
     // シャッフル (Fisher-Yates)
     for (let i = cards.length - 1; i > 0; i--) {

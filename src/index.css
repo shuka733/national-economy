@@ -7,12 +7,15 @@
 
 /* --- カスタムプロパティ --- */
 :root {
+  --card-ratio-w: 63;
+  --card-ratio-h: 88;
+
   /* ベースカラー */
-  --bg-deep: #0c0e14;
-  --bg-primary: #131620;
-  --bg-secondary: #1a1e2e;
-  --bg-card: #1e2235;
-  --bg-elevated: #252a3a;
+  --bg-deep: #14100a;
+  --bg-primary: #1b1610;
+  --bg-secondary: #262018;
+  --bg-card: #2f271d;
+  --bg-elevated: #392f24;
 
   /* アクセントカラー */
   --gold: #d4a853;
@@ -32,8 +35,8 @@
   --text-dim: #6b7280;
 
   /* エフェクト */
-  --glass-bg: rgba(30, 34, 53, 0.7);
-  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-bg: rgba(33, 27, 20, 0.86);
+  --glass-border: rgba(216, 193, 144, 0.15);
   --glow-gold: 0 0 20px rgba(212, 168, 83, 0.3);
   --glow-teal: 0 0 15px rgba(45, 212, 191, 0.2);
 
@@ -133,49 +136,51 @@
    使い方: document.documentElement.dataset.theme = 'japanese' */
 /* --- 紙版テーマ: ベージュ紙と濃いインク寄り --- */
 [data-theme="paper"] {
-  --bg-deep: #14100a;
-  --bg-primary: #1b1610;
-  --bg-secondary: #262018;
-  --bg-card: #2f271d;
-  --bg-elevated: #392f24;
+  --card-ratio-w: 57;
+  --card-ratio-h: 88;
+  --bg-deep: #0c0e14;
+  --bg-primary: #131620;
+  --bg-secondary: #1a1e2e;
+  --bg-card: #1e2235;
+  --bg-elevated: #252a3a;
 
-  --text-primary: #f4ead7;
-  --text-secondary: #c5b59a;
-  --text-dim: #857760;
+  --text-primary: #e8e6e3;
+  --text-secondary: #9ca3af;
+  --text-dim: #6b7280;
 
-  --gold: #cfb06d;
-  --gold-light: #dec48d;
-  --gold-dim: #8f7440;
-  --teal: #8ea18a;
-  --teal-dim: #506250;
+  --gold: #d4a853;
+  --gold-light: #e8c97a;
+  --gold-dim: #a07830;
+  --teal: #2dd4bf;
+  --teal-dim: #134e4a;
 
-  --glass-bg: rgba(33, 27, 20, 0.86);
-  --glass-border: rgba(216, 193, 144, 0.15);
-  --glow-gold: 0 0 20px rgba(207, 176, 109, 0.25);
-  --glow-teal: 0 0 14px rgba(142, 161, 138, 0.16);
+  --glass-bg: rgba(30, 34, 53, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glow-gold: 0 0 20px rgba(212, 168, 83, 0.3);
+  --glow-teal: 0 0 15px rgba(45, 212, 191, 0.2);
 
-  --teal-15: rgba(142, 161, 138, 0.15);
-  --teal-40: rgba(142, 161, 138, 0.4);
-  --teal-60: rgba(142, 161, 138, 0.6);
-  --gold-15: rgba(207, 176, 109, 0.15);
-  --gold-40: rgba(207, 176, 109, 0.4);
-  --gold-60: rgba(207, 176, 109, 0.6);
+  --teal-15: rgba(45, 212, 191, 0.15);
+  --teal-40: rgba(45, 212, 191, 0.4);
+  --teal-60: rgba(45, 212, 191, 0.6);
+  --gold-15: rgba(212, 168, 83, 0.15);
+  --gold-40: rgba(212, 168, 83, 0.4);
+  --gold-60: rgba(212, 168, 83, 0.6);
 
-  --tag-farm: #9bb06f;
-  --tag-farm-bg: rgba(132, 160, 86, 0.28);
-  --tag-factory: #8ba0bb;
-  --tag-factory-bg: rgba(100, 124, 150, 0.28);
-  --tag-lock: #cfb06d;
-  --tag-lock-bg: rgba(196, 164, 92, 0.28);
+  --tag-farm: #d4fce0;
+  --tag-farm-bg: rgba(34, 197, 94, 0.5);
+  --tag-factory: #dbeafe;
+  --tag-factory-bg: rgba(59, 130, 246, 0.5);
+  --tag-lock: #fef3c7;
+  --tag-lock-bg: rgba(251, 191, 36, 0.5);
 
-  --blue: #8fb2d8;
-  --green: #98b86d;
-  --purple: #a28ab2;
-  --orange: #d18a42;
-  --red: #d66262;
-  --red-30: rgba(214, 98, 98, 0.3);
+  --blue: #60a5fa;
+  --green: #4ade80;
+  --purple: #a78bfa;
+  --orange: #fb923c;
+  --red: #f87171;
+  --red-30: rgba(248, 113, 113, 0.3);
 
-  --card-image-overlay: #6d5c45;
+  --card-image-overlay: #4a6670;
 }
 
 [data-theme="japanese"] {
@@ -600,7 +605,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: var(--public-cards-gap);
   padding: 14px 24px;
   background: transparent;
   border: none;
@@ -1288,6 +1293,17 @@ body {
 .game-scaler {
   /* ビューポートの横幅ベースで16:9を維持 */
   --scaler-h: min(100vh, calc(100vw * 9 / 16));
+  --main-area-opponents-track: 35fr;
+  --main-area-public-track: 65fr;
+  --main-area-gap: 2px;
+  --public-area-gap: 12px;
+  --public-area-padding-top: 4px;
+  --public-area-padding-right: 12px;
+  --public-area-padding-bottom: 4px;
+  --public-area-padding-left: 12px;
+  --public-top-bar-gap: 6px;
+  --public-cards-gap: 12px;
+  --workplaces-layout-gap: 20px;
   width: min(100vw, calc(100vh * 16 / 9));
   height: var(--scaler-h);
   display: grid;
@@ -1299,15 +1315,22 @@ body {
   overflow: hidden;
   /* 手札カードサイズ: 下段25%の高さを基準 */
   --card-h: calc((var(--scaler-h) - 28px) * 0.25 * 0.84 - 30px);
-  --card-w: calc(var(--card-h) * 63 / 88);
+  --card-w: calc(var(--card-h) * var(--card-ratio-w) / var(--card-ratio-h));
   /* 公共の場カードサイズ: 面積50% = 各辺 √0.5 ≈ 71% */
   --pub-card-h: calc(var(--card-h) * 0.71);
   --pub-card-w: calc(var(--card-w) * 0.71);
+  --workplace-card-w: var(--pub-card-w);
+  --workplace-card-h: var(--pub-card-h);
+  --deck-card-w: var(--pub-card-w);
+  --deck-card-h: var(--pub-card-h);
+  --sold-card-w: var(--pub-card-w);
+  --sold-card-h: var(--pub-card-h);
   --worker-size: 22px;
   --opponent-hand-card-w: 16px;
-  --opponent-hand-fan-h: 24px;
+  --opponent-hand-fan-h: calc(var(--opponent-hand-card-w) * var(--card-ratio-h) / var(--card-ratio-w));
   --hand-card-scale: 0.84;
   --hand-card-height: calc(var(--hand-card-scale) * 100%);
+  --field-card-scale: 0.84;
   --worker-chip-icon-size: 10px;
   --worker-on-building-icon-size: 14px;
   /* フォントスケーリング: --scaler-hの1/64 (参照高さ576pxで9px) */
@@ -1356,8 +1379,8 @@ body {
 /* ポンチ絵準拠: 35% / 65% の2カラム */
 .game-main-area {
   display: grid;
-  grid-template-columns: 35fr 65fr;
-  gap: 2px;
+  grid-template-columns: minmax(0, var(--main-area-opponents-track)) minmax(0, var(--main-area-public-track));
+  gap: var(--main-area-gap);
   min-height: 0;
   overflow: hidden;
 }
@@ -1473,7 +1496,7 @@ body {
 /* 相手の手札カード: 比率 63:88 で統一 */
 .opponent-hand-card {
   width: var(--opponent-hand-card-w);
-  aspect-ratio: 63 / 88;
+  aspect-ratio: var(--card-ratio-w) / var(--card-ratio-h);
   border-radius: 3px;
   background: linear-gradient(170deg, #1e2240 0%, #14182a 100%);
   border: 1px solid rgba(96, 165, 250, 0.2);
@@ -1633,17 +1656,21 @@ body {
 .area-public {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--public-area-gap);
   min-height: 0;
   overflow-y: auto;
-  padding: 4px 12px;
+  padding:
+    var(--public-area-padding-top)
+    var(--public-area-padding-right)
+    var(--public-area-padding-bottom)
+    var(--public-area-padding-left);
 }
 
 /* --- 家計ボックス: 固定高 --- */
 .public-top-bar {
   display: flex;
   align-items: stretch;
-  gap: 6px;
+  gap: var(--public-top-bar-gap);
   flex-shrink: 0;
 }
 
@@ -1651,7 +1678,8 @@ body {
   height: auto;
   min-height: 36px;
   flex: 1;
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-width: 0;
   background: linear-gradient(145deg, rgba(45, 212, 191, 0.08) 0%, rgba(30, 34, 53, 0.9) 100%);
   border: 1px solid rgba(45, 212, 191, 0.25);
   border-radius: 8px;
@@ -1662,6 +1690,13 @@ body {
   position: relative;
   overflow: hidden;
   backdrop-filter: blur(8px);
+}
+
+.public-top-actions {
+  display: flex;
+  gap: 6px;
+  flex: 0 0 auto;
+  align-items: stretch;
 }
 
 .log-toggle-button {
@@ -1681,6 +1716,11 @@ body {
   cursor: pointer;
   transition: transform 0.15s ease, border-color 0.2s ease, background 0.2s ease;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+.public-sound-button {
+  justify-content: center;
+  padding: 0;
 }
 
 .log-toggle-button-label {
@@ -1723,7 +1763,7 @@ body {
 .public-cards-area {
   display: flex;
   flex: 1;
-  gap: 12px;
+  gap: var(--public-cards-gap);
   min-height: 0;
   overflow-y: auto;
   align-items: flex-start;
@@ -1743,8 +1783,8 @@ body {
 /* --- デッキカード共通: 公共カードサイズ(50%面積) --- */
 .deck-card {
   position: relative;
-  width: var(--pub-card-w);
-  height: var(--pub-card-h);
+  width: var(--deck-card-w);
+  height: var(--deck-card-h);
   perspective: 600px;
   flex-shrink: 0;
 }
@@ -1933,7 +1973,7 @@ body {
 /* 初期配置 + ラウンド追加を横並びにするレイアウト */
 .workplaces-layout {
   display: flex;
-  gap: 20px;
+  gap: var(--workplaces-layout-gap);
   /* デッキ列↔建物列と同じ余白 */
   align-items: flex-start;
 }
@@ -1941,7 +1981,7 @@ body {
 /* 初期配置エリア: 4列×2行 */
 .initial-workplaces-grid {
   display: grid;
-  grid-template-columns: repeat(4, var(--pub-card-w));
+  grid-template-columns: repeat(4, var(--workplace-card-w));
   gap: 3px;
   flex-shrink: 0;
 }
@@ -1955,8 +1995,8 @@ body {
 
 /* 空セル（遺跡なし時やラウンド未追加時のプレースホルダー） */
 .workplace-empty {
-  width: var(--pub-card-w);
-  height: var(--pub-card-h);
+  width: var(--workplace-card-w);
+  height: var(--workplace-card-h);
 }
 
 .workplaces-row-label {
@@ -1969,8 +2009,8 @@ body {
 
 /* 職場カード: 公共カードサイズ(50%面積) */
 .workplace-card {
-  width: var(--pub-card-w);
-  height: var(--pub-card-h);
+  width: var(--workplace-card-w);
+  height: var(--workplace-card-h);
   background: linear-gradient(145deg, rgba(20, 78, 74, 0.4) 0%, rgba(30, 34, 53, 0.8) 100%);
   border: 1px solid rgba(45, 212, 191, 0.15);
   border-radius: 5px;
@@ -2081,8 +2121,8 @@ body {
 
 /* 売却建物カード: 公共職場カードと同じ固定サイズ */
 .sold-buildings-grid .hand-card {
-  width: var(--pub-card-w);
-  height: var(--pub-card-h);
+  width: var(--sold-card-w);
+  height: var(--sold-card-h);
   flex-shrink: 0;
 }
 
@@ -2278,7 +2318,7 @@ body {
   height: var(--hand-card-height);
   width: auto;
   min-width: 0;
-  aspect-ratio: 63 / 88;
+  aspect-ratio: var(--card-ratio-w) / var(--card-ratio-h);
   flex-shrink: 0;
   border-radius: 6px;
   border: 1.5px solid rgba(255, 255, 255, 0.1);
@@ -2459,7 +2499,7 @@ body {
 .building-card-in-field {
   flex-shrink: 0 !important;
   margin-left: 0 !important;
-  height: calc((100% - 30px) * 0.84);
+  height: calc((100% - 30px) * var(--field-card-scale));
 }
 
 .building-placed {
@@ -2815,6 +2855,101 @@ body {
   flex-direction: column;
 }
 
+[data-theme="paper"] {
+  --paper-card-radius: 6.3% / 4.1%;
+}
+
+.paper-card-face-image {
+  z-index: 0;
+  border-radius: var(--paper-card-radius, inherit);
+  display: block;
+}
+
+[data-theme="paper"] .hand-card,
+[data-theme="paper"] .workplace-card,
+[data-theme="paper"] .opponent-building-sprite {
+  padding: 0;
+  background: linear-gradient(180deg, rgba(248, 236, 212, 0.08), rgba(44, 32, 22, 0.24));
+  border-color: rgba(222, 196, 141, 0.28);
+  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.32);
+}
+
+[data-theme="paper"] .hand-card::before {
+  display: none;
+}
+
+[data-theme="paper"] .deck-top-face {
+  overflow: hidden;
+}
+
+[data-theme="paper"] .game-scaler:not(.mobile-touch-ui) {
+  --hand-card-scale: 1;
+  --main-area-opponents-track: 35fr;
+  --main-area-public-track: 65fr;
+  --public-area-gap: 10px;
+  --public-area-padding-right: 8px;
+  --public-area-padding-left: 8px;
+  --public-cards-gap: 10px;
+  --workplaces-layout-gap: 12px;
+  --workplace-card-w: calc(var(--pub-card-w) * 1.5);
+  --workplace-card-h: calc(var(--pub-card-h) * 1.5);
+  --deck-card-w: var(--workplace-card-w);
+  --deck-card-h: var(--workplace-card-h);
+  --sold-card-w: calc(var(--pub-card-w) * 1.5);
+  --sold-card-h: calc(var(--pub-card-h) * 1.5);
+  --field-card-scale: 1;
+}
+
+[data-theme="paper"] .game-layout:not(.mobile-touch-ui) .area-public,
+[data-theme="paper"] .game-layout:not(.mobile-touch-ui) .public-cards-area {
+  overflow: visible;
+}
+
+[data-theme="paper"] .game-layout:not(.mobile-touch-ui) .deck-column {
+  margin-left: calc(-1 * var(--public-area-padding-left));
+  padding-left: calc(var(--public-area-padding-left) + 4px);
+  z-index: 4;
+}
+
+[data-theme="paper"] .game-layout:not(.mobile-touch-ui) .deck-discard {
+  z-index: 5;
+}
+
+[data-theme="paper"] .game-layout:not(.mobile-touch-ui) .workplaces-area {
+  position: relative;
+  z-index: 1;
+}
+
+[data-theme="paper"] .game-layout:not(.mobile-touch-ui) .my-hand-section {
+  gap: 2px;
+}
+
+[data-theme="paper"] .paper-preview-card {
+  width: min(260px, 80vw);
+  background: rgba(19, 16, 12, 0.92);
+  padding: 10px;
+  overflow: hidden;
+}
+
+[data-theme="paper"] .paper-preview-card .card-preview-image {
+  min-height: 0;
+  max-height: min(70vh, 520px);
+  aspect-ratio: var(--card-ratio-w) / var(--card-ratio-h);
+  background: transparent;
+}
+
+[data-theme="paper"] .paper-preview-card .card-preview-image img {
+  object-fit: contain;
+}
+
+[data-theme="paper"] .discard-grid-card-paper .discard-card-image {
+  background: transparent;
+}
+
+[data-theme="paper"] .discard-grid-card-paper .discard-card-image img {
+  object-fit: contain;
+}
+
 /* セパレーター: ゴールドグラデーション横線 */
 .card-preview-separator {
   height: 1px;
@@ -2905,7 +3040,7 @@ body {
 }
 
 .discard-card-image {
-  aspect-ratio: 4 / 3;
+  aspect-ratio: var(--card-ratio-w) / var(--card-ratio-h);
   min-height: 100px;
   overflow: hidden;
   background: linear-gradient(135deg, rgba(30, 34, 53, 0.5), rgba(22, 25, 40, 0.8));
@@ -2958,15 +3093,45 @@ body {
 .game-layout.mobile-touch-ui .game-scaler,
 .game-scaler.mobile-touch-ui {
   --scaler-h: 100vh;
+  --main-area-opponents-track: 30fr;
+  --main-area-public-track: 70fr;
+  --main-area-gap: 4px;
+  --public-area-gap: 8px;
+  --public-area-padding-top: 0px;
+  --public-area-padding-right: 8px;
+  --public-area-padding-bottom: 4px;
+  --public-area-padding-left: 8px;
+  --public-top-bar-gap: 4px;
+  --public-cards-gap: 8px;
+  --workplaces-layout-gap: 8px;
+  --mobile-scaler-gap: 4px;
+  --mobile-scaler-pad-top: 4px;
+  --mobile-scaler-pad-right: 6px;
+  --mobile-scaler-pad-bottom: 6px;
+  --mobile-scaler-pad-left: 6px;
+  --mobile-area-opponents-gap: 4px;
+  --mobile-my-field-gap: 5px;
+  --mobile-my-field-padding-y: 3px;
+  --mobile-my-field-padding-x: 5px;
+  --mobile-hand-frame-inline-pad: 2px;
+  --mobile-my-buildings-gap: 3px;
+  --mobile-my-buildings-pad-bottom: 2px;
   --card-h: clamp(40px, min(14vw, 17vh), 68px);
-  --card-w: calc(var(--card-h) * 63 / 88);
+  --card-w: calc(var(--card-h) * var(--card-ratio-w) / var(--card-ratio-h));
   --pub-card-w: clamp(28px, calc((100vw - 340px) / 8), 54px);
-  --pub-card-h: calc(var(--pub-card-w) * 88 / 63);
+  --pub-card-h: calc(var(--pub-card-w) * var(--card-ratio-h) / var(--card-ratio-w));
+  --workplace-card-w: var(--pub-card-w);
+  --workplace-card-h: var(--pub-card-h);
+  --deck-card-w: var(--pub-card-w);
+  --deck-card-h: var(--pub-card-h);
+  --sold-card-w: var(--pub-card-w);
+  --sold-card-h: var(--pub-card-h);
   --worker-size: 13px;
   --opponent-hand-card-w: clamp(8px, calc(var(--pub-card-w) * 0.21), 11px);
-  --opponent-hand-fan-h: clamp(13px, calc(var(--opponent-hand-card-w) * 1.45), 17px);
+  --opponent-hand-fan-h: clamp(13px, calc(var(--opponent-hand-card-w) * var(--card-ratio-h) / var(--card-ratio-w)), 17px);
   --hand-card-scale: 0.88;
   --hand-card-height: calc(var(--hand-card-scale) * 100%);
+  --field-card-scale: 0.84;
   --worker-chip-icon-size: 7px;
   --worker-on-building-icon-size: 9px;
   --fs: clamp(7px, min(1.9vh, 1.9vw), 10px);
@@ -2977,12 +3142,42 @@ body {
   min-width: 0;
   min-height: 0;
   grid-template-rows: minmax(0, 75fr) minmax(0, 25fr);
-  gap: 4px;
-  padding: 4px 6px 6px;
-  padding-top: calc(env(safe-area-inset-top, 0px) + 4px);
-  padding-right: calc(env(safe-area-inset-right, 0px) + 6px);
-  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 6px);
-  padding-left: calc(env(safe-area-inset-left, 0px) + 6px);
+  gap: var(--mobile-scaler-gap);
+  padding-top: calc(env(safe-area-inset-top, 0px) + var(--mobile-scaler-pad-top));
+  padding-right: calc(env(safe-area-inset-right, 0px) + var(--mobile-scaler-pad-right));
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + var(--mobile-scaler-pad-bottom));
+  padding-left: calc(env(safe-area-inset-left, 0px) + var(--mobile-scaler-pad-left));
+}
+
+[data-theme="paper"] .game-scaler.mobile-touch-ui {
+  --main-area-opponents-track: 27.8fr;
+  --main-area-public-track: 72.2fr;
+  --main-area-gap: 1px;
+  --public-area-gap: 4px;
+  --public-area-padding-right: 4px;
+  --public-area-padding-bottom: 2px;
+  --public-area-padding-left: 4px;
+  --public-top-bar-gap: 3px;
+  --public-cards-gap: 4px;
+  --workplaces-layout-gap: 4px;
+  --mobile-scaler-gap: 1px;
+  --mobile-scaler-pad-top: 2px;
+  --mobile-scaler-pad-right: 3px;
+  --mobile-scaler-pad-bottom: 3px;
+  --mobile-scaler-pad-left: 3px;
+  --mobile-area-opponents-gap: 1px;
+  --mobile-my-field-gap: 1px;
+  --mobile-my-field-padding-y: 1px;
+  --mobile-my-field-padding-x: 2px;
+  --mobile-hand-frame-inline-pad: 0px;
+  --mobile-my-buildings-gap: 2px;
+  --mobile-my-buildings-pad-bottom: 1px;
+  --workplace-card-w: calc(var(--pub-card-w) * 1.2);
+  --workplace-card-h: calc(var(--pub-card-h) * 1.2);
+  --deck-card-w: var(--workplace-card-w);
+  --deck-card-h: var(--workplace-card-h);
+  --sold-card-w: calc(var(--pub-card-w) * 1.2);
+  --sold-card-h: calc(var(--pub-card-h) * 1.2);
 }
 
 .game-layout.mobile-touch-ui .game-header {
@@ -2990,8 +3185,8 @@ body {
 }
 
 .game-layout.mobile-touch-ui .game-main-area {
-  grid-template-columns: minmax(0, 30fr) minmax(0, 70fr);
-  gap: 4px;
+  grid-template-columns: minmax(0, var(--main-area-opponents-track)) minmax(0, var(--main-area-public-track));
+  gap: var(--main-area-gap);
 }
 
 .game-layout.mobile-touch-ui .stat-badge {
@@ -3001,7 +3196,7 @@ body {
 }
 
 .game-layout.mobile-touch-ui .area-opponents {
-  gap: 4px;
+  gap: var(--mobile-area-opponents-gap);
   padding-right: 0;
 }
 
@@ -3038,6 +3233,10 @@ body {
 
 .game-layout.mobile-touch-ui .opponent-card-body {
   gap: 4px;
+}
+
+[data-theme="paper"] .game-layout.mobile-touch-ui .opponent-card-body {
+  grid-template-columns: minmax(0, 35%) minmax(0, 1fr);
 }
 
 .game-layout.mobile-touch-ui .opponent-hand-zone {
@@ -3095,11 +3294,19 @@ body {
 }
 
 .game-layout.mobile-touch-ui .area-public {
-  gap: 8px;
-  padding: 0 8px 4px;
+  gap: var(--public-area-gap);
+  padding:
+    var(--public-area-padding-top)
+    var(--public-area-padding-right)
+    var(--public-area-padding-bottom)
+    var(--public-area-padding-left);
 }
 
 .game-layout.mobile-touch-ui .public-top-bar {
+  gap: var(--public-top-bar-gap);
+}
+
+.game-layout.mobile-touch-ui .public-top-actions {
   gap: 4px;
 }
 
@@ -3154,7 +3361,7 @@ body {
 }
 
 .game-layout.mobile-touch-ui .public-cards-area {
-  gap: 8px;
+  gap: var(--public-cards-gap);
   overflow: visible;
 }
 
@@ -3208,7 +3415,7 @@ body {
 }
 
 .game-layout.mobile-touch-ui .workplaces-layout {
-  gap: 8px;
+  gap: var(--workplaces-layout-gap);
 }
 
 .game-layout.mobile-touch-ui .initial-workplaces-grid,
@@ -3238,8 +3445,8 @@ body {
   --mobile-hand-area-width: 35%;
   --mobile-worker-column-width: calc(var(--worker-size) * 2 + 2px);
   grid-template-columns: minmax(0, var(--mobile-hand-area-width)) minmax(0, 1fr) auto;
-  gap: 5px;
-  padding: 3px 5px;
+  gap: var(--mobile-my-field-gap);
+  padding: var(--mobile-my-field-padding-y) var(--mobile-my-field-padding-x);
   align-items: stretch;
   overflow: visible;
 }
@@ -3297,7 +3504,7 @@ body {
   min-width: 0;
   height: 100%;
   box-sizing: border-box;
-  padding: 0 2px 0 0;
+  padding: 0 var(--mobile-hand-frame-inline-pad) 0 0;
   align-items: center;
   clip-path: inset(-8px 0 0 0);
 }
@@ -3341,8 +3548,8 @@ body {
 }
 
 .game-layout.mobile-touch-ui .my-buildings-scroll {
-  gap: 3px;
-  padding-bottom: 2px;
+  gap: var(--mobile-my-buildings-gap);
+  padding-bottom: var(--mobile-my-buildings-pad-bottom);
   min-height: var(--mobile-self-card-height);
   align-items: flex-end;
   touch-action: pan-x;
@@ -3480,4 +3687,22 @@ body {
     height: 16px;
     opacity: 1;
   }
+}
+
+[data-theme="paper"] .hand-card,
+[data-theme="paper"] .workplace-card,
+[data-theme="paper"] .opponent-building-sprite,
+[data-theme="paper"] .sold-buildings-grid .hand-card,
+[data-theme="paper"] .deck-top-face,
+[data-theme="paper"] .discard-scatter-card,
+[data-theme="paper"] .deck-card.has-depth::before,
+[data-theme="paper"] .deck-card.has-depth::after {
+  border-radius: var(--paper-card-radius);
+}
+
+[data-theme="paper"] .game-layout.mobile-touch-ui .hand-card,
+[data-theme="paper"] .game-layout.mobile-touch-ui .workplace-card,
+[data-theme="paper"] .game-layout.mobile-touch-ui .opponent-building-sprite,
+[data-theme="paper"] .game-layout.mobile-touch-ui .sold-buildings-grid .hand-card {
+  border-radius: var(--paper-card-radius);
 }
