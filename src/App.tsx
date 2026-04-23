@@ -36,7 +36,7 @@ export type CPUConfig = {
     moveDelay: number;
 };
 
-type Screen = 'menu' | 'local_setup' | 'online_menu' | 'host' | 'join' | 'playing' | 'dev_gallery';
+type Screen = 'menu' | 'local_setup' | 'online_menu' | 'host' | 'join' | 'playing' | 'dev_gallery' | 'rules';
 
 type LobbyPlayerInfo = {
     pid: string;
@@ -379,9 +379,10 @@ const THEME_INFO: Record<ThemeName, { label: string; icon: string }> = {
 };
 const THEME_ORDER: ThemeName[] = ['paper', 'default', 'steampunk', 'japanese', 'watercolor'];
 
-function MainMenuScreen({ onLocal, onOnline, onDevGallery, theme, onCycleTheme }: {
+function MainMenuScreen({ onLocal, onOnline, onRules, onDevGallery, theme, onCycleTheme }: {
     onLocal: () => void;
     onOnline: () => void;
+    onRules: () => void;
     onDevGallery: () => void;
     theme: ThemeName;
     onCycleTheme: () => void;
@@ -437,6 +438,11 @@ function MainMenuScreen({ onLocal, onOnline, onDevGallery, theme, onCycleTheme }
                     <span className="menu-label">オンライン対戦</span>
                 </button>
 
+                <button onClick={() => { soundManager.playSFX('click'); onRules(); }} className="menu-item menu-item-secondary">
+                    <span className="menu-icon"><IconClipboard size={'1.2em'} /></span>
+                    <span className="menu-label">ゲーム説明</span>
+                </button>
+
                 <button onClick={() => { soundManager.playSFX('click'); onDevGallery(); }} className="menu-item menu-item-dev">
                     <span className="menu-icon"><IconWrench size={'1.2em'} /></span>
                     <span className="menu-label">カードギャラリー</span>
@@ -464,6 +470,128 @@ function MainMenuScreen({ onLocal, onOnline, onDevGallery, theme, onCycleTheme }
 // ============================================================
 // ローカル対戦設定画面（人数 + バージョン + CPU設定）
 // ============================================================
+type RulePage = {
+    label: string;
+    src: string;
+    alt: string;
+};
+
+const RULE_PAGES: RulePage[] = [
+    { label: '③', src: 'rules/manual_03.jpg', alt: '説明書③ ゲームの流れと基本ルール' },
+    { label: '④', src: 'rules/manual_04.jpg', alt: '説明書④ 給料日と得点計算' },
+];
+
+function RulesScreen({ onBack }: { onBack: () => void }) {
+    const [pageIndex, setPageIndex] = useState(0);
+    const [turnDirection, setTurnDirection] = useState<'next' | 'prev'>('next');
+    const touchStartXRef = useRef<number | null>(null);
+    const currentPage = RULE_PAGES[pageIndex];
+
+    const goToPage = useCallback((nextIndex: number, direction: 'next' | 'prev') => {
+        const clamped = Math.max(0, Math.min(RULE_PAGES.length - 1, nextIndex));
+        if (clamped === pageIndex) return;
+        soundManager.playSFX('click');
+        setTurnDirection(direction);
+        setPageIndex(clamped);
+    }, [pageIndex]);
+
+    useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'ArrowRight') goToPage(pageIndex + 1, 'next');
+            if (event.key === 'ArrowLeft') goToPage(pageIndex - 1, 'prev');
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [goToPage, pageIndex]);
+
+    const handleTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
+        touchStartXRef.current = event.touches[0]?.clientX ?? null;
+    };
+
+    const handleTouchEnd = (event: React.TouchEvent<HTMLDivElement>) => {
+        const startX = touchStartXRef.current;
+        touchStartXRef.current = null;
+        if (startX === null) return;
+        const endX = event.changedTouches[0]?.clientX ?? startX;
+        const diff = endX - startX;
+        if (Math.abs(diff) < 48) return;
+        if (diff < 0) goToPage(pageIndex + 1, 'next');
+        else goToPage(pageIndex - 1, 'prev');
+    };
+
+    return (
+        <div className="game-bg rules-screen" style={{ minHeight: '100vh', overflowY: 'auto', padding: '20px 16px 32px' }}>
+            <FullscreenToggleButton className="menu-fullscreen-toggle" />
+            <div className="animate-slide-up" style={{ margin: '0 auto', width: '100%' }}>
+                <div className="rules-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 16 }}>
+                    <button onClick={() => { soundManager.playSFX('click'); onBack(); }} style={{
+                        background: 'none',
+                        border: '1px solid var(--glass-border)',
+                        borderRadius: 999,
+                        color: 'var(--text-secondary)',
+                        cursor: 'pointer',
+                        padding: '8px 14px',
+                        fontSize: 'var(--fs-xl)',
+                    }}>
+                        ← 戻る
+                    </button>
+                    <h1 style={{ margin: 0, color: 'var(--text-primary)', fontSize: 'var(--fs-4xl)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <IconClipboard size={'1em'} /> ゲーム説明
+                    </h1>
+                    <div style={{ width: 76, textAlign: 'right', color: 'var(--gold-light)', fontSize: 'var(--fs-2xl)', fontWeight: 800 }}>
+                        {pageIndex + 1}/{RULE_PAGES.length}
+                    </div>
+                </div>
+
+                <div
+                    className="rules-manual-shell"
+                    onTouchStart={handleTouchStart}
+                    onTouchEnd={handleTouchEnd}
+                >
+                    <button
+                        className="rules-page-nav rules-page-nav-left"
+                        onClick={() => goToPage(pageIndex - 1, 'prev')}
+                        disabled={pageIndex === 0}
+                        aria-label="前のページ"
+                    >
+                        ‹
+                    </button>
+                    <div className="rules-manual-frame">
+                        <img
+                            key={currentPage.src}
+                            className={`rules-manual-image rules-manual-image-${turnDirection}`}
+                            src={`${import.meta.env.BASE_URL}${currentPage.src}`}
+                            alt={currentPage.alt}
+                            loading="eager"
+                            decoding="async"
+                        />
+                    </div>
+                    <button
+                        className="rules-page-nav rules-page-nav-right"
+                        onClick={() => goToPage(pageIndex + 1, 'next')}
+                        disabled={pageIndex === RULE_PAGES.length - 1}
+                        aria-label="次のページ"
+                    >
+                        ›
+                    </button>
+                </div>
+
+                <div className="rules-page-controls" aria-label="説明ページ選択">
+                    {RULE_PAGES.map((page, index) => (
+                        <button
+                            key={page.src}
+                            className={`rules-page-dot ${index === pageIndex ? 'active' : ''}`}
+                            onClick={() => goToPage(index, index > pageIndex ? 'next' : 'prev')}
+                            aria-label={`${page.label}ページを表示`}
+                            aria-current={index === pageIndex ? 'page' : undefined}
+                        />
+                    ))}
+                </div>
+            </div>
+        </div>
+    );
+}
+
 function LocalSetupScreen({ onStart, onBack }: {
     onStart: (n: number, version: GameVersion, cpuConfig: CPUConfig) => void;
     onBack: () => void;
@@ -1252,7 +1380,9 @@ export default function App() {
     // 画面ルーティング
     switch (screen) {
         case 'menu':
-            return <MainMenuScreen onLocal={() => setScreen('local_setup')} onOnline={() => setScreen('online_menu')} onDevGallery={() => setScreen('dev_gallery')} theme={theme} onCycleTheme={cycleTheme} />;
+            return <MainMenuScreen onLocal={() => setScreen('local_setup')} onOnline={() => setScreen('online_menu')} onRules={() => setScreen('rules')} onDevGallery={() => setScreen('dev_gallery')} theme={theme} onCycleTheme={cycleTheme} />;
+        case 'rules':
+            return <RulesScreen onBack={() => setScreen('menu')} />;
         case 'dev_gallery':
             return <DevCardGallery onBack={() => setScreen('menu')} />;
         case 'local_setup':

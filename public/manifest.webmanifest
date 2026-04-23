@@ -1,0 +1,21 @@
+{
+  "id": "/national-economy/",
+  "name": "ナショナルエコノミー",
+  "short_name": "ナショナルエコノミー",
+  "description": "National Economy digital board game",
+  "start_url": "/national-economy/",
+  "scope": "/national-economy/",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "landscape",
+  "background_color": "#050911",
+  "theme_color": "#050911",
+  "icons": [
+    {
+      "src": "logo.png",
+      "sizes": "640x640",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { soundManager } from '../SoundManager';
 import { IconFullscreen, IconFullscreenExit } from './Icons';
-import { getFullscreenFallbackMessage, isLikelyIOSBrowser } from '../browserPlatform';
+import { getFullscreenFallbackMessage, isLikelyIPhoneBrowser, isStandaloneDisplayMode } from '../browserPlatform';
 
 type FullscreenCapableDocument = Document & {
     webkitFullscreenElement?: Element | null;
@@ -30,14 +30,17 @@ export function FullscreenToggleButton({
         if (typeof document === 'undefined') return;
         const doc = document as FullscreenCapableDocument;
         const target = (targetRef?.current ?? document.documentElement) as FullscreenCapableElement | null;
+        const shouldUseIPhoneFallback = isLikelyIPhoneBrowser() && !isStandaloneDisplayMode();
         setIsFullscreen(Boolean(doc.fullscreenElement ?? doc.webkitFullscreenElement));
         setIsFullscreenSupported(Boolean(
-            doc.fullscreenEnabled ||
-            doc.webkitFullscreenEnabled ||
-            target?.requestFullscreen ||
-            target?.webkitRequestFullscreen
+            !shouldUseIPhoneFallback && (
+                doc.fullscreenEnabled ||
+                doc.webkitFullscreenEnabled ||
+                target?.requestFullscreen ||
+                target?.webkitRequestFullscreen
+            )
         ));
-        setShowFallbackButton(isLikelyIOSBrowser());
+        setShowFallbackButton(shouldUseIPhoneFallback);
     }, [targetRef]);
 
     useEffect(() => {
@@ -59,6 +62,10 @@ export function FullscreenToggleButton({
         if (!target) return;
         soundManager.playSFX('click');
         try {
+            if (showFallbackButton && typeof window !== 'undefined') {
+                window.alert(getFullscreenFallbackMessage());
+                return;
+            }
             if (doc.fullscreenElement ?? doc.webkitFullscreenElement) {
                 if (doc.exitFullscreen) {
                     await doc.exitFullscreen();

@@ -35,6 +35,23 @@ export function isLikelyIOSBrowser(): boolean {
     return /iPad|iPhone|iPod/i.test(ua) || (platform === 'MacIntel' && maxTouchPoints > 1);
 }
 
+export function isLikelyIPhoneBrowser(): boolean {
+    if (typeof navigator === 'undefined') return false;
+    const ua = navigator.userAgent || '';
+    const platform = navigator.platform || '';
+    return /iPhone|iPod/i.test(ua) || /iPhone|iPod/i.test(platform);
+}
+
+export function isStandaloneDisplayMode(): boolean {
+    if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
+    const standaloneNavigator = navigator as Navigator & { standalone?: boolean };
+    return Boolean(
+        standaloneNavigator.standalone ||
+        matchesMediaQuery('(display-mode: standalone)') ||
+        matchesMediaQuery('(display-mode: fullscreen)')
+    );
+}
+
 export function canUseHoverInteractions(): boolean {
     const hasHover = matchesMediaQuery('(hover: hover)') || matchesMediaQuery('(any-hover: hover)');
     const hasFinePointer = matchesMediaQuery('(pointer: fine)') || matchesMediaQuery('(any-pointer: fine)');
@@ -85,5 +102,5 @@ export function watchInteractionModeChanges(onChange: () => void): () => void {
 }
 
 export function getFullscreenFallbackMessage(): string {
-    return 'このブラウザではフルスクリーン API が使えません。iPhone では「ホーム画面に追加」で全画面に近い表示にできます。';
+    return 'iPhoneではSafariタブ内の全画面表示に対応していません。共有ボタンから「ホーム画面に追加」し、ホーム画面のアイコンから起動すると全画面に近い表示で遊べます。';
 }

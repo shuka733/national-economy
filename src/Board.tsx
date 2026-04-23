@@ -31,7 +31,9 @@ import type { ThemedCardImageRef } from './themeUtils';
 import {
     canUseHoverInteractions,
     getFullscreenFallbackMessage,
+    isLikelyIPhoneBrowser,
     isLikelyIOSBrowser,
+    isStandaloneDisplayMode,
     matchesTouchOptimizedUi,
     watchInteractionModeChanges,
 } from './browserPlatform';
@@ -110,6 +112,8 @@ const OPPONENT_BUILDING_COMPACT_MAX_HEIGHT = 36;
 const OPPONENT_BUILDING_MOBILE_FALLBACK_SCALE = 0.72;
 const OPPONENT_BUILDING_VERTICAL_GUTTER_DESKTOP = 4;
 const OPPONENT_BUILDING_VERTICAL_GUTTER_MOBILE = 2;
+const MOBILE_PUBLIC_FIT_MIN_SCALE = 0.58;
+const MOBILE_PUBLIC_FIT_MARGIN_PX = 1;
 type FullscreenCapableDocument = Document & {
     webkitFullscreenElement?: Element | null;
     webkitFullscreenEnabled?: boolean;
@@ -123,6 +127,128 @@ type FullscreenCapableElement = HTMLElement & {
 /** ラウンドごとの追加職場名マッピング (game.ts getRoundWorkplaceInfoから取得) */
 function getRoundWorkplaceName(round: number): string {
     return getRoundWorkplaceInfo(round)?.name ?? '';
+}
+
+type RoundWorkplaceReferenceRow = {
+    round: number;
+    wage: number;
+    name: string;
+    effect: string;
+};
+
+function getRoundWorkplaceReferenceRows(version: GameState['version']): RoundWorkplaceReferenceRow[] {
+    const initialEffect = version === 'glory'
+        ? '採石場、鉱山、学校、大工、遺跡'
+        : '採石場、鉱山、学校、大工';
+    return [
+        { round: 1, wage: getWagePerWorker(1), name: '初期一般職場カード', effect: initialEffect },
+        { round: 2, wage: getWagePerWorker(2), name: '露店', effect: '手札を1枚捨てて家計から$6を得る' },
+        { round: 3, wage: getWagePerWorker(3), name: '市場', effect: '手札を2枚捨てて家計から$12を得る' },
+        { round: 4, wage: getWagePerWorker(4), name: '高等学校', effect: '労働者を4人になるよう雇用する' },
+        { round: 5, wage: getWagePerWorker(5), name: 'スーパーマーケット', effect: '手札を3枚捨てて家計から$18を得る' },
+        { round: 6, wage: getWagePerWorker(6), name: '大学', effect: '労働者を5人になるよう雇用する' },
+        { round: 7, wage: getWagePerWorker(7), name: '百貨店', effect: '手札を4枚捨てて家計から$24を得る' },
+        { round: 8, wage: getWagePerWorker(8), name: '専門学校', effect: '労働者を1人雇用する（このラウンドから配置できる）' },
+        { round: 9, wage: getWagePerWorker(9), name: '万博', effect: '手札を5枚捨てて家計から$30を得る' },
+    ];
+}
+
+function RoundWorkplaceReferenceCard({
+    currentRound,
+    version,
+}: {
+    currentRound: number;
+    version: GameState['version'];
+}) {
+    const rows = getRoundWorkplaceReferenceRows(version);
+    return (
+        <div className="round-reference-card">
+            <div className="round-reference-head">
+                <span>R</span>
+                <span className="round-reference-worker-head"><IconWorker size="1em" /></span>
+                <span>追加される職場 / 効果</span>
+            </div>
+            <div className="round-reference-body">
+                {rows.map(row => (
+                    <div
+                        key={row.round}
+                        className={`round-reference-row${row.round === currentRound ? ' current' : ''}`}
+                    >
+                        <div className="round-reference-round">{row.round}</div>
+                        <div className="round-reference-wage">${row.wage}</div>
+                        <div className="round-reference-text">
+                            <div className="round-reference-name">{row.name}</div>
+                            <div className="round-reference-effect">{row.effect}</div>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+}
+
+function RoundWorkplaceReference({
+    currentRound,
+    version,
+    width,
+    height,
+}: {
+    currentRound: number;
+    version: GameState['version'];
+    width?: number;
+    height?: number;
+}) {
+    const [isLongPressActive, setIsLongPressActive] = useState(false);
+    const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    const cancelLongPress = useCallback(() => {
+        if (longPressTimerRef.current) {
+            clearTimeout(longPressTimerRef.current);
+            longPressTimerRef.current = null;
+        }
+        setIsLongPressActive(false);
+    }, []);
+
+    useEffect(() => {
+        return () => {
+            if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+        };
+    }, []);
+
+    const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+        if (event.pointerType === 'mouse') return;
+        if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+        longPressTimerRef.current = setTimeout(() => {
+            setIsLongPressActive(true);
+            longPressTimerRef.current = null;
+        }, 420);
+    };
+
+    return (
+        <div
+            className={`round-reference-widget${isLongPressActive ? ' long-press-active' : ''}`}
+            tabIndex={0}
+            aria-label="ラウンド職場早見表"
+            style={width && height ? { width, height } : undefined}
+            onPointerDown={handlePointerDown}
+            onPointerUp={cancelLongPress}
+            onPointerCancel={cancelLongPress}
+            onPointerLeave={cancelLongPress}
+            onContextMenu={(event) => {
+                if (isLongPressActive) event.preventDefault();
+            }}
+        >
+            <div className="round-reference-mini round-reference-mini-desktop" aria-hidden="true">
+                <RoundWorkplaceReferenceCard currentRound={currentRound} version={version} />
+            </div>
+            <div className="round-reference-mini-mobile" aria-hidden="true">
+                <span className="round-reference-mini-mobile-icon">📋</span>
+            </div>
+            <div className="round-reference-popover" role="tooltip">
+                <RoundWorkplaceReferenceCard currentRound={currentRound} version={version} />
+            </div>
+        </div>
+    );
 }
 
 /** タグバッジ JSX */
@@ -349,6 +475,9 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     const [showFullscreenFallback, setShowFullscreenFallback] = useState(false);
     const [showReloadWarningHint, setShowReloadWarningHint] = useState(() => isLikelyIOSBrowser());
     const boardLayoutRef = useRef<HTMLDivElement | null>(null);
+    const myStatusPanelRef = useRef<HTMLDivElement | null>(null);
+    const myStatusBadgesRef = useRef<HTMLDivElement | null>(null);
+    const [roundReferenceSize, setRoundReferenceSize] = useState({ width: 74, height: 108 });
     // 手札長押し/ホバープレビュー用
     // プレビューデータ型: カード or 公共職場
     type PreviewData =
@@ -399,14 +528,17 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
         if (typeof document === 'undefined') return;
         const doc = document as FullscreenCapableDocument;
         const target = boardLayoutRef.current as FullscreenCapableElement | null;
+        const shouldUseIPhoneFallback = isLikelyIPhoneBrowser() && !isStandaloneDisplayMode();
         setIsFullscreen(Boolean(doc.fullscreenElement ?? doc.webkitFullscreenElement));
         setIsFullscreenSupported(Boolean(
-            doc.fullscreenEnabled ||
-            doc.webkitFullscreenEnabled ||
-            target?.requestFullscreen ||
-            target?.webkitRequestFullscreen
+            !shouldUseIPhoneFallback && (
+                doc.fullscreenEnabled ||
+                doc.webkitFullscreenEnabled ||
+                target?.requestFullscreen ||
+                target?.webkitRequestFullscreen
+            )
         ));
-        setShowFullscreenFallback(isLikelyIOSBrowser());
+        setShowFullscreenFallback(shouldUseIPhoneFallback);
     }, []);
     useEffect(() => {
         if (typeof document === 'undefined') return;
@@ -426,6 +558,10 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
         if (!target) return;
         soundManager.playSFX('click');
         try {
+            if (showFullscreenFallback && typeof window !== 'undefined') {
+                window.alert(getFullscreenFallbackMessage());
+                return;
+            }
             if (doc.fullscreenElement ?? doc.webkitFullscreenElement) {
                 if (doc.exitFullscreen) {
                     await doc.exitFullscreen();
@@ -734,6 +870,39 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     const isOnline = playerID !== null && playerID !== undefined;
     const isModalPhase = false;
 
+    useLayoutEffect(() => {
+        const recalculateRoundReferenceSize = () => {
+            const panel = myStatusPanelRef.current;
+            const badges = myStatusBadgesRef.current;
+            if (!panel || !badges) return;
+            const panelRect = panel.getBoundingClientRect();
+            const badgesRect = badges.getBoundingClientRect();
+            const referenceGap = isMobileTouchUi ? 1 : 8;
+            const minHeight = isMobileTouchUi ? 34 : 44;
+            const availableHeight = Math.max(minHeight, panelRect.bottom - badgesRect.bottom - referenceGap);
+            const height = Math.round(Math.min(108, availableHeight));
+            const width = Math.round(height * 74 / 108);
+            setRoundReferenceSize(prev => (
+                prev.width === width && prev.height === height ? prev : { width, height }
+            ));
+        };
+
+        recalculateRoundReferenceSize();
+        window.addEventListener('resize', recalculateRoundReferenceSize);
+
+        let observer: ResizeObserver | null = null;
+        if (typeof ResizeObserver !== 'undefined') {
+            observer = new ResizeObserver(recalculateRoundReferenceSize);
+            if (myStatusPanelRef.current) observer.observe(myStatusPanelRef.current);
+            if (myStatusBadgesRef.current) observer.observe(myStatusBadgesRef.current);
+        }
+
+        return () => {
+            window.removeEventListener('resize', recalculateRoundReferenceSize);
+            observer?.disconnect();
+        };
+    }, [isMobileTouchUi]);
+
     // モーダルフェーズ中の操作者判定
     // payday/cleanup は同時処理対応: P2Pでは全員が自分の操作をする
     // build/discard/designOffice/dualConstruction は手番プレイヤーの操作なので ctx.currentPlayer を使用
@@ -926,8 +1095,91 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
     const buildingDeckRef = useRef<HTMLDivElement>(null);
     const consumableDeckRef = useRef<HTMLDivElement>(null);
     const roundDeckRef = useRef<HTMLDivElement>(null);
+    const areaPublicRef = useRef<HTMLDivElement>(null);
+    const publicCardsAreaRef = useRef<HTMLDivElement>(null);
+    const publicFullscreenButtonRef = useRef<HTMLButtonElement>(null);
+    const [mobilePublicFitScale, setMobilePublicFitScale] = useState(1);
     // ドロー検知用: move前にデッキ座標を事前保存（move後にDOMが消失する可能性対策）
     const deckRectCacheRef = useRef<{ buildingRect: DOMRect | null; consumableRect: DOMRect | null } | null>(null);
+
+    useLayoutEffect(() => {
+        const el = publicCardsAreaRef.current;
+        if (!paperTheme || !isMobileTouchUi || !el || typeof window === 'undefined') {
+            setMobilePublicFitScale(prev => (prev === 1 ? prev : 1));
+            return;
+        }
+
+        let rafId = 0;
+        const measureAtScale = (scale: number) => {
+            el.style.setProperty('--mobile-public-fit-scale', String(scale));
+            const areaRect = areaPublicRef.current?.getBoundingClientRect();
+            const buttonRect = publicFullscreenButtonRef.current?.getBoundingClientRect();
+            const cardsRect = el.getBoundingClientRect();
+            const cardElements = Array.from(el.querySelectorAll<HTMLElement>(
+                '.deck-card, .workplace-card, .workplace-empty, .sold-buildings-grid .hand-card'
+            ));
+            const contentRight = cardElements.reduce((right, node) => {
+                const rect = node.getBoundingClientRect();
+                return Math.max(right, rect.right);
+            }, cardsRect.left);
+            const limitRight = buttonRect?.right ?? areaRect?.right ?? cardsRect.right;
+            return {
+                available: Math.max(0, limitRight - cardsRect.left),
+                required: Math.max(0, contentRight - cardsRect.left),
+            };
+        };
+        const restoreInlineScale = (value: string, priority: string) => {
+            if (value) {
+                el.style.setProperty('--mobile-public-fit-scale', value, priority);
+            } else {
+                el.style.removeProperty('--mobile-public-fit-scale');
+            }
+        };
+        const calculate = () => {
+            const previousInlineScale = el.style.getPropertyValue('--mobile-public-fit-scale');
+            const previousInlinePriority = el.style.getPropertyPriority('--mobile-public-fit-scale');
+            const base = measureAtScale(1);
+            let nextScale = 1;
+
+            if (base.available > 0 && base.required > base.available + MOBILE_PUBLIC_FIT_MARGIN_PX) {
+                nextScale = Math.max(
+                    MOBILE_PUBLIC_FIT_MIN_SCALE,
+                    Math.min(1, (base.available - MOBILE_PUBLIC_FIT_MARGIN_PX) / base.required)
+                );
+                const adjusted = measureAtScale(nextScale);
+                if (adjusted.available > 0 && adjusted.required > adjusted.available + MOBILE_PUBLIC_FIT_MARGIN_PX) {
+                    nextScale = Math.max(
+                        MOBILE_PUBLIC_FIT_MIN_SCALE,
+                        nextScale * ((adjusted.available - MOBILE_PUBLIC_FIT_MARGIN_PX) / adjusted.required)
+                    );
+                }
+            }
+
+            restoreInlineScale(previousInlineScale, previousInlinePriority);
+            const roundedScale = Number(nextScale.toFixed(3));
+            setMobilePublicFitScale(prev => (Math.abs(prev - roundedScale) < 0.003 ? prev : roundedScale));
+        };
+        const schedule = () => {
+            if (rafId) window.cancelAnimationFrame(rafId);
+            rafId = window.requestAnimationFrame(calculate);
+        };
+
+        schedule();
+        const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(schedule) : null;
+        observer?.observe(el);
+        if (areaPublicRef.current) observer?.observe(areaPublicRef.current);
+        if (publicFullscreenButtonRef.current) observer?.observe(publicFullscreenButtonRef.current);
+        if (el.parentElement) observer?.observe(el.parentElement);
+        window.addEventListener('resize', schedule, { passive: true });
+        window.visualViewport?.addEventListener('resize', schedule);
+
+        return () => {
+            if (rafId) window.cancelAnimationFrame(rafId);
+            observer?.disconnect();
+            window.removeEventListener('resize', schedule);
+            window.visualViewport?.removeEventListener('resize', schedule);
+        };
+    }, [G.publicWorkplaces.length, G.round, isMobileTouchUi, paperTheme]);
 
     // hand-fan-containerのサイズをResizeObserverで追跡（レンダリング中のDOM読み取り排除）
     // コールバックrefパターン: DOMノードの再マウント（例: 設計事務所モーダル→閉じ）時にResizeObserverを再設定
@@ -1983,6 +2235,9 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
 
     const boardLayoutClassName = `game-bg game-layout${isMobileTouchUi ? ' mobile-touch-ui' : ''}`;
     const gameScalerClassName = `game-scaler${isMobileTouchUi ? ' mobile-touch-ui' : ''}`;
+    const gameScalerStyle = isMobileTouchUi && paperTheme
+        ? ({ '--mobile-public-fit-scale': mobilePublicFitScale.toFixed(3) } as React.CSSProperties)
+        : undefined;
     const handCardScale = isMobileTouchUi ? 0.9 : (paperTheme ? 1.0 : 0.84);
     const myHandSource = drawAnimRef.current ? (rawG.players[myPid]?.hand ?? myPlayer.hand) : myPlayer.hand;
     const myHandLayout = getMyHandLayout(myHandSource.length);
@@ -2176,7 +2431,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                 }
             })()}
             {showDiscard && <DiscardPileModal discard={G.discard} onClose={() => setShowDiscard(false)} />}
-            <div className={gameScalerClassName}>
+            <div className={gameScalerClassName} style={gameScalerStyle}>
                 {/* ラウンドアナウンスオーバーレイ */}
                 {roundAnnounce !== null && (
                     <div className="round-announce-overlay" key={`round-${roundAnnounce}`}>
@@ -2205,6 +2460,19 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                         <button onClick={() => { soundManager.playSFX('click'); setShowDebugPanel(!showDebugPanel); }} className="stat-badge" style={{ cursor: 'pointer', padding: '3px 6px', border: showDebugPanel ? '1px solid rgba(212,168,83,0.4)' : undefined }} title="デバッグパネル">
                             <span style={{ fontSize: 'var(--fs-xl2)' }}>🔧</span>
                         </button>
+                        {!isMobileTouchUi && (isFullscreenSupported || showFullscreenFallback) && (
+                            <button
+                                type="button"
+                                onClick={toggleFullscreen}
+                                className="stat-badge header-fullscreen-button"
+                                title={isFullscreen ? '全画面表示を終了' : '全画面表示'}
+                                aria-label={isFullscreen ? '全画面表示を終了' : '全画面表示'}
+                            >
+                                {isFullscreen
+                                    ? <IconFullscreenExit size={"calc(var(--fs) * 1.33)"} />
+                                    : <IconFullscreen size={"calc(var(--fs) * 1.33)"} />}
+                            </button>
+                        )}
                     </div>
                 </div>
 
@@ -2392,7 +2660,7 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                     </div>
 
                     {/* ==== 右列: 公共の場 ==== */}
-                    <div className="area-public" style={{ border: '1px solid var(--glass-border)', borderRadius: 4 }}>
+                    <div className="area-public" ref={areaPublicRef} style={{ border: '1px solid var(--glass-border)', borderRadius: 4 }}>
                         <div className="public-top-bar">
                             <div className={`household-box ${wagePressure ? 'wage-pressure' : ''}`}>
                                 <div className="household-main" style={{ display: 'flex', alignItems: 'center', gap: 8, zIndex: 1 }}>
@@ -2438,11 +2706,25 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                                     <IconLog size={"calc(var(--fs) * 1.11)"} />
                                     <span className="log-toggle-button-label">LOG</span>
                                 </button>
+                                {isMobileTouchUi && (isFullscreenSupported || showFullscreenFallback) && (
+                                    <button
+                                        ref={publicFullscreenButtonRef}
+                                        type="button"
+                                        onClick={toggleFullscreen}
+                                        className="log-toggle-button public-fullscreen-button"
+                                        title={isFullscreen ? '全画面表示を終了' : '全画面表示'}
+                                        aria-label={isFullscreen ? '全画面表示を終了' : '全画面表示'}
+                                    >
+                                        {isFullscreen
+                                            ? <IconFullscreenExit size={"calc(var(--fs) * 1.5)"} />
+                                            : <IconFullscreen size={"calc(var(--fs) * 1.5)"} />}
+                                    </button>
+                                )}
                             </div>
                         </div>
 
                         {/* デッキ + 職場の横並びエリア */}
-                        <div className="public-cards-area">
+                        <div className="public-cards-area" ref={publicCardsAreaRef}>
                             {/* デッキ列（左縦列） */}
                             <div className="deck-column">
                                 {/* ラウンドカード: 9枚物理重ね（R1~R9） */}
@@ -3205,40 +3487,35 @@ export function Board({ G: rawG, ctx, moves, playerID, cpuConfig }: BoardProps<G
                     </div >
 
                     {/* 右: ステータス */}
-                    < div className="my-status-panel" >
-                        <span className="stat-badge" style={{ fontSize: 'var(--fs-base)', padding: '2px 6px' }}>
-                            <IconMoney size={"var(--fs)"} color="var(--gold-light)" /><b style={{ color: 'var(--gold-light)' }}>${myPlayer.money}</b>
-                        </span>
-                        <span className="stat-badge" style={{ fontSize: 'var(--fs-base)', padding: '2px 6px' }}>
-                            <IconDeck size={"var(--fs)"} color="var(--text-secondary)" /><b style={{ color: 'var(--text-secondary)' }}>{myPlayer.hand.length}/{myPlayer.maxHandSize}</b>
-                        </span>
-                        {
-                            myPlayer.vpTokens > 0 && (
-                                <span className="stat-badge" style={{ fontSize: 'var(--fs-base)', padding: '2px 6px' }}>
-                                    <IconTrophy size={"var(--fs)"} color="var(--gold)" /><b style={{ color: 'var(--gold)' }}>{myPlayer.vpTokens}</b>
-                                </span>
-                            )
-                        }
-                        {
-                            myPlayer.unpaidDebts > 0 && (
-                                <span className="stat-badge" style={{ fontSize: 'var(--fs-base)', padding: '2px 6px', borderColor: 'var(--red-30)' }}>
-                                    <b style={{ color: 'var(--red)' }}>Debt {myPlayer.unpaidDebts}</b>
-                                </span>
-                            )
-                        }
-                        {(isFullscreenSupported || showFullscreenFallback) && (
-                            <button
-                                type="button"
-                                onClick={toggleFullscreen}
-                                className="fullscreen-toggle-button"
-                                title={isFullscreen ? '全画面表示を終了' : '全画面表示'}
-                                aria-label={isFullscreen ? '全画面表示を終了' : '全画面表示'}
-                            >
-                                {isFullscreen
-                                    ? <IconFullscreenExit size={"calc(var(--fs) * 1.44)"} />
-                                    : <IconFullscreen size={"calc(var(--fs) * 1.44)"} />}
-                            </button>
-                        )}
+                    < div className="my-status-panel" ref={myStatusPanelRef} >
+                        <div className="my-status-badges" ref={myStatusBadgesRef}>
+                            <span className="stat-badge" style={{ fontSize: 'var(--fs-base)', padding: '2px 6px' }}>
+                                <IconMoney size={"var(--fs)"} color="var(--gold-light)" /><b style={{ color: 'var(--gold-light)' }}>${myPlayer.money}</b>
+                            </span>
+                            <span className="stat-badge" style={{ fontSize: 'var(--fs-base)', padding: '2px 6px' }}>
+                                <IconDeck size={"var(--fs)"} color="var(--text-secondary)" /><b style={{ color: 'var(--text-secondary)' }}>{myPlayer.hand.length}/{myPlayer.maxHandSize}</b>
+                            </span>
+                            {
+                                myPlayer.vpTokens > 0 && (
+                                    <span className="stat-badge" style={{ fontSize: 'var(--fs-base)', padding: '2px 6px' }}>
+                                        <IconTrophy size={"var(--fs)"} color="var(--gold)" /><b style={{ color: 'var(--gold)' }}>{myPlayer.vpTokens}</b>
+                                    </span>
+                                )
+                            }
+                            {
+                                myPlayer.unpaidDebts > 0 && (
+                                    <span className="stat-badge" style={{ fontSize: 'var(--fs-base)', padding: '2px 6px', borderColor: 'var(--red-30)' }}>
+                                        <b style={{ color: 'var(--red)' }}>Debt {myPlayer.unpaidDebts}</b>
+                                    </span>
+                                )
+                            }
+                        </div>
+                        <RoundWorkplaceReference
+                            currentRound={G.round}
+                            version={G.version}
+                            width={roundReferenceSize.width}
+                            height={roundReferenceSize.height}
+                        />
                     </div >
                 </div >
             </div >
